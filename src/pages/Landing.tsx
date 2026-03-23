@@ -16,6 +16,7 @@ import {
   CheckCircle2,
   Zap,
   Sparkles,
+  PencilLine,
 } from 'lucide-react';
 
 const executives = [
@@ -96,7 +97,7 @@ const heroStickyNotes = [
     title: 'Eliza note',
     text: 'Syncing strategy with the council',
     position: 'left',
-    rotationClassName: '-rotate-[9deg]',
+    rotation: '-9deg',
     accentClassName: 'from-yellow-200 via-amber-100 to-yellow-50',
     style: { top: '6%', left: '4%' },
   },
@@ -105,7 +106,7 @@ const heroStickyNotes = [
     title: 'Processing',
     text: 'Routing ops tasks + live updates',
     position: 'right',
-    rotationClassName: 'rotate-[8deg]',
+    rotation: '8deg',
     accentClassName: 'from-yellow-100 via-amber-50 to-yellow-50',
     style: { top: '18%', right: '2%' },
   },
@@ -114,7 +115,7 @@ const heroStickyNotes = [
     title: 'Drafting',
     text: 'Preparing answers before you log in',
     position: 'right',
-    rotationClassName: '-rotate-[4deg]',
+    rotation: '-4deg',
     accentClassName: 'from-amber-200 via-yellow-100 to-yellow-50',
     style: { top: '54%', right: '8%' },
   },
@@ -163,25 +164,36 @@ export default function Landing() {
           {heroStickyNotes.map((note, index) => (
             <div
               key={note.id}
-              className={`absolute hidden w-[190px] rounded-[3px] border border-amber-300/80 bg-gradient-to-br ${note.accentClassName} p-4 shadow-[0_28px_60px_rgba(120,93,10,0.22)] xl:block ${note.rotationClassName} ${note.position === 'left' ? '2xl:left-[8%]' : '2xl:right-[7%]'}`}
+              className={`sticky-note-hero absolute hidden w-[198px] xl:block ${note.position === 'left' ? '2xl:left-[8%]' : '2xl:right-[7%]'}`}
               style={{
                 ...note.style,
-                animation: `sticky-note-float ${3.1 + index * 0.35}s ease-in-out ${index * 220}ms infinite`,
+                ['--sticky-rotate' as string]: note.rotation,
+                ['--sticky-duration' as string]: `${3.1 + index * 0.35}s`,
+                ['--sticky-delay' as string]: `${index * 220}ms`,
               }}
             >
-              <div className="absolute left-1/2 top-3 h-5 w-5 -translate-x-1/2 rounded-full bg-amber-50/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.85),0_1px_4px_rgba(120,93,10,0.2)]" />
-              <div className="mt-5 border-t border-amber-500/20 pt-3 text-left">
-                <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-amber-900/75">
-                  <Sparkles className="h-3.5 w-3.5" />
-                  {note.title}
-                </div>
-                <p className="mt-2 text-base font-semibold leading-snug text-amber-950/90">
-                  {note.text}
-                </p>
-                <div className="mt-3 space-y-2">
-                  <div className="h-[2px] w-4/5 bg-amber-900/12" />
-                  <div className="h-[2px] w-2/3 bg-amber-900/12" />
-                  <div className="h-[2px] w-3/5 bg-amber-900/12" />
+              <div className="sticky-note-hero__shadow" />
+              <div className={`sticky-note-hero__paper bg-gradient-to-br ${note.accentClassName}`}>
+                <div className="sticky-note-hero__tape" />
+                <div className="sticky-note-hero__pin" />
+                <div className="sticky-note-hero__fold" />
+                <div className="mt-8 text-left">
+                  <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-amber-950/55">
+                    <Sparkles className="h-3.5 w-3.5 text-amber-900/55" />
+                    {note.title}
+                  </div>
+                  <p className="sticky-note-handwriting mt-3 text-[26px] leading-[1.05] text-black/88">
+                    {note.text}
+                  </p>
+                  <div className="mt-4 space-y-2.5">
+                    <div className="h-px w-[84%] bg-black/10" />
+                    <div className="h-px w-[68%] bg-black/10" />
+                    <div className="h-px w-[74%] bg-black/10" />
+                  </div>
+                  <div className="mt-4 flex items-center gap-2 text-[11px] text-black/55">
+                    <PencilLine className="h-3.5 w-3.5" />
+                    <span className="sticky-note-handwriting text-sm tracking-[0.02em] text-black/70">handwritten update</span>
+                  </div>
                 </div>
               </div>
             </div>
