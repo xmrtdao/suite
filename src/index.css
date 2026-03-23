@@ -253,6 +253,15 @@ input[type="number"] {
   }
 }
 
+@keyframes sticky-note-float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
 .animate-ticker {
   animation: ticker 20s linear infinite;
 }

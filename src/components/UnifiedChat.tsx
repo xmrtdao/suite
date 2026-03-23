@@ -100,6 +100,96 @@ interface UnifiedChatProps {
   onBack?: () => void; // Callback to return to directory view
 }
 
+
+interface ProcessingStickyNote {
+  id: string;
+  text: string;
+  accentClassName: string;
+  rotationClassName: string;
+}
+
+const PROCESSING_STICKY_NOTES: ProcessingStickyNote[] = [
+  {
+    id: 'tool-routing',
+    text: 'Routing tools',
+    accentClassName: 'from-amber-200/90 via-yellow-200 to-yellow-100',
+    rotationClassName: '-rotate-3',
+  },
+  {
+    id: 'researching',
+    text: 'Checking context',
+    accentClassName: 'from-yellow-200/95 via-amber-100 to-yellow-50',
+    rotationClassName: 'rotate-2',
+  },
+  {
+    id: 'drafting',
+    text: 'Drafting answer',
+    accentClassName: 'from-yellow-100 via-amber-50 to-yellow-50',
+    rotationClassName: '-rotate-1',
+  },
+];
+
+const ProcessingStickyNotes = React.memo(({ isProcessing }: { isProcessing: boolean }) => {
+  const [isVisible, setIsVisible] = useState(isProcessing);
+  const [isFallingAway, setIsFallingAway] = useState(false);
+
+  useEffect(() => {
+    if (isProcessing) {
+      setIsVisible(true);
+      setIsFallingAway(false);
+      return;
+    }
+
+    if (!isVisible) return;
+
+    setIsFallingAway(true);
+    const timeout = window.setTimeout(() => {
+      setIsVisible(false);
+      setIsFallingAway(false);
+    }, 900);
+
+    return () => window.clearTimeout(timeout);
+  }, [isProcessing, isVisible]);
+
+  if (!isVisible) return null;
+
+  return (
+    <div className="pointer-events-none fixed inset-y-24 right-4 z-30 hidden min-[1700px]:block">
+      <div className="relative h-full w-[108px]">
+        {PROCESSING_STICKY_NOTES.map((note, index) => (
+          <div
+            key={note.id}
+            className={`absolute right-0 w-[104px] rounded-[2px] border border-amber-300/70 bg-gradient-to-br ${note.accentClassName} p-3 shadow-[0_18px_45px_rgba(120,93,10,0.18)] transition-all duration-700 ${note.rotationClassName} ${
+              isFallingAway
+                ? 'translate-y-[42vh] rotate-[16deg] opacity-0'
+                : 'opacity-100'
+            }`}
+            style={{
+              top: `${index * 132}px`,
+              animation: isFallingAway
+                ? undefined
+                : `sticky-note-float 3.2s ease-in-out ${index * 180}ms infinite`,
+              transitionDelay: `${index * 70}ms`,
+              transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
+            }}
+            aria-hidden="true"
+          >
+            <div className="absolute left-1/2 top-2 h-4 w-4 -translate-x-1/2 rounded-full bg-amber-50/80 shadow-[inset_0_1px_0_rgba(255,255,255,0.8),0_1px_3px_rgba(120,93,10,0.18)]" />
+            <div className="mt-4 border-t border-amber-500/15 pt-3">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-900/70">
+                Eliza note
+              </p>
+              <p className="mt-2 text-sm font-medium leading-snug text-amber-950/90">
+                {note.text}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+});
+
 const MessageCopyButton = React.memo(({ content }: { content: string }) => {
   const [copied, setCopied] = useState(false);
 
@@ -1854,7 +1944,9 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   };
 
   return (
-    <Card className={`bg-card border-border/60 flex flex-col h-[500px] sm:h-[600px] ${className}`}>
+    <div className="relative overflow-visible">
+      <ProcessingStickyNotes isProcessing={isProcessing} />
+      <Card className={`bg-card border-border/60 flex flex-col h-[500px] sm:h-[600px] ${className}`}>
       {/* Voice Intelligence Toggle */}
       {/* Voice Intelligence Toggle Removed */}
 
@@ -2279,6 +2371,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
         </div>
       </div>
     </Card>
+    </div>
   );
 };
 
