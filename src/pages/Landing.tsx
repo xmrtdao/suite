@@ -15,6 +15,7 @@ import {
   Play,
   CheckCircle2,
   Zap,
+  Sparkles,
 } from 'lucide-react';
 
 const executives = [
@@ -89,6 +90,36 @@ const steps = [
   },
 ];
 
+const heroStickyNotes = [
+  {
+    id: 'left-strategy',
+    title: 'Eliza note',
+    text: 'Syncing strategy with the council',
+    position: 'left',
+    rotationClassName: '-rotate-[9deg]',
+    accentClassName: 'from-yellow-200 via-amber-100 to-yellow-50',
+    style: { top: '6%', left: '4%' },
+  },
+  {
+    id: 'right-ops',
+    title: 'Processing',
+    text: 'Routing ops tasks + live updates',
+    position: 'right',
+    rotationClassName: 'rotate-[8deg]',
+    accentClassName: 'from-yellow-100 via-amber-50 to-yellow-50',
+    style: { top: '18%', right: '2%' },
+  },
+  {
+    id: 'right-draft',
+    title: 'Drafting',
+    text: 'Preparing answers before you log in',
+    position: 'right',
+    rotationClassName: '-rotate-[4deg]',
+    accentClassName: 'from-amber-200 via-yellow-100 to-yellow-50',
+    style: { top: '54%', right: '8%' },
+  },
+] as const;
+
 export default function Landing() {
   const navigate = useNavigate();
   const { isAuthenticated, isLoading } = useAuth();
@@ -127,7 +158,36 @@ export default function Landing() {
       <LandingNav />
 
       {/* Hero Section */}
-      <section className="pt-24 pb-10 px-4">
+      <section className="relative overflow-hidden pt-24 pb-10 px-4">
+        <div className="pointer-events-none absolute inset-0 hidden xl:block" aria-hidden="true">
+          {heroStickyNotes.map((note, index) => (
+            <div
+              key={note.id}
+              className={`absolute hidden w-[190px] rounded-[3px] border border-amber-300/80 bg-gradient-to-br ${note.accentClassName} p-4 shadow-[0_28px_60px_rgba(120,93,10,0.22)] xl:block ${note.rotationClassName} ${note.position === 'left' ? '2xl:left-[8%]' : '2xl:right-[7%]'}`}
+              style={{
+                ...note.style,
+                animation: `sticky-note-float ${3.1 + index * 0.35}s ease-in-out ${index * 220}ms infinite`,
+              }}
+            >
+              <div className="absolute left-1/2 top-3 h-5 w-5 -translate-x-1/2 rounded-full bg-amber-50/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.85),0_1px_4px_rgba(120,93,10,0.2)]" />
+              <div className="mt-5 border-t border-amber-500/20 pt-3 text-left">
+                <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-amber-900/75">
+                  <Sparkles className="h-3.5 w-3.5" />
+                  {note.title}
+                </div>
+                <p className="mt-2 text-base font-semibold leading-snug text-amber-950/90">
+                  {note.text}
+                </p>
+                <div className="mt-3 space-y-2">
+                  <div className="h-[2px] w-4/5 bg-amber-900/12" />
+                  <div className="h-[2px] w-2/3 bg-amber-900/12" />
+                  <div className="h-[2px] w-3/5 bg-amber-900/12" />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
         <div className="container mx-auto text-center max-w-5xl">
           <h1 className="text-4xl md:text-6xl lg:text-7xl font-bold mb-6 leading-tight">
             {t('landing.hero.title.part1')}{' '}
