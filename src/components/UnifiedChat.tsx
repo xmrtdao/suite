@@ -154,8 +154,8 @@ const ProcessingStickyNotes = React.memo(({ isProcessing }: { isProcessing: bool
   if (!isVisible) return null;
 
   return (
-    <div className="pointer-events-none fixed inset-y-24 right-4 z-30 hidden min-[1700px]:block">
-      <div className="relative h-full w-[108px]">
+    <div className="pointer-events-none absolute right-0 top-24 z-30 hidden xl:block">
+      <div className="relative w-[108px] translate-x-[calc(100%+16px)]">
         {PROCESSING_STICKY_NOTES.map((note, index) => (
           <div
             key={note.id}
@@ -189,6 +189,29 @@ const ProcessingStickyNotes = React.memo(({ isProcessing }: { isProcessing: bool
     </div>
   );
 });
+
+const ProcessingStickyNotesInline = React.memo(() => (
+  <div className="relative flex h-12 w-[92px] items-start justify-end xl:hidden" aria-hidden="true">
+    {PROCESSING_STICKY_NOTES.map((note, index) => (
+      <div
+        key={note.id}
+        className={`absolute right-0 top-0 w-16 rounded-[2px] border border-amber-300/70 bg-gradient-to-br ${note.accentClassName} px-2 py-1.5 shadow-[0_10px_24px_rgba(120,93,10,0.18)] ${note.rotationClassName}`}
+        style={{
+          transform: `translateY(${index * 8}px) rotate(${index % 2 === 0 ? -6 : 5}deg)`,
+          animation: `sticky-note-float 2.6s ease-in-out ${index * 180}ms infinite`,
+          zIndex: PROCESSING_STICKY_NOTES.length - index,
+        }}
+      >
+        <p className="truncate text-[8px] font-semibold uppercase tracking-[0.14em] text-amber-900/70">
+          Eliza
+        </p>
+        <p className="mt-0.5 truncate text-[9px] font-medium text-amber-950/90">
+          {note.text}
+        </p>
+      </div>
+    ))}
+  </div>
+));
 
 const MessageCopyButton = React.memo(({ content }: { content: string }) => {
   const [copied, setCopied] = useState(false);
@@ -2246,13 +2269,19 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
             {isProcessing && (
               <div className="flex justify-start animate-fade-in">
                 <div className="bg-muted/50 text-foreground p-3 rounded-xl rounded-bl-sm border border-border/40">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-3">
                     <div className="flex space-x-1">
                       <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce"></div>
                       <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
                       <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
                     </div>
-                    <span className="text-xs text-muted-foreground">Processing...</span>
+                    <div>
+                      <span className="text-xs text-muted-foreground">Processing...</span>
+                      <p className="mt-1 hidden text-[11px] text-muted-foreground/80 xl:block">
+                        Check the sticky notes on the right for Eliza's progress.
+                      </p>
+                    </div>
+                    <ProcessingStickyNotesInline />
                   </div>
                 </div>
               </div>
