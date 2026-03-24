@@ -139,11 +139,23 @@ const ProcessingStickyNotes = React.memo(({ notes }: { notes: ProcessingStickyNo
   if (notes.length === 0) return null;
 
   const visibleNotes = notes.slice(-2).reverse();
+  const stackOffsets = [
+    { top: 0, right: 0, floatDelay: 0, zIndex: 20 },
+    { top: 56, right: 24, floatDelay: 180, zIndex: 10 },
+  ];
 
   return (
     <div className="pointer-events-none absolute right-3 top-36 z-30 hidden md:block">
-      <div className="relative h-[190px] w-[92px]">
-        {visibleNotes.map((note, index) => (
+      <div className="relative h-[220px] w-[128px]">
+        {visibleNotes.map((note, index) => {
+          const offset = stackOffsets[index] ?? {
+            top: index * 56,
+            right: Math.min(index * 24, 36),
+            floatDelay: index * 180,
+            zIndex: Math.max(20 - index * 10, 1),
+          };
+
+          return (
           <div
             key={note.id}
             className={`absolute right-0 w-[88px] rounded-[2px] border bg-gradient-to-br p-2.5 shadow-[0_14px_32px_rgba(120,93,10,0.18)] transition-all duration-700 ${note.rotationClassName} ${
@@ -156,10 +168,12 @@ const ProcessingStickyNotes = React.memo(({ notes }: { notes: ProcessingStickyNo
                 : 'opacity-100'
             }`}
             style={{
-              top: `${index * 96}px`,
+              top: `${offset.top}px`,
+              right: `${offset.right}px`,
+              zIndex: offset.zIndex,
               animation: note.isFallingAway
                 ? undefined
-                : `sticky-note-float 3.2s ease-in-out ${index * 180}ms infinite`,
+                : `sticky-note-float 3.2s ease-in-out ${offset.floatDelay}ms infinite`,
               transitionDelay: `${index * 70}ms`,
               transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
             }}
@@ -175,7 +189,8 @@ const ProcessingStickyNotes = React.memo(({ notes }: { notes: ProcessingStickyNo
               </p>
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
