@@ -185,7 +185,13 @@ async function getUserRefreshTokenStrict(opts: {
       .eq('provider', 'google_cloud')
       .eq('is_active', true);
 
-    if (opts.userId) {
+    if (opts.userId && opts.userEmail) {
+      // Require both identifiers to match when both are present.
+      // This prevents cross-user token selection when a shared/system user_id is used upstream.
+      q = q
+        .eq('user_id', opts.userId)
+        .eq('account_email', opts.userEmail.toLowerCase());
+    } else if (opts.userId) {
       q = q.eq('user_id', opts.userId);
     } else if (opts.userEmail) {
       q = q.eq('account_email', opts.userEmail.toLowerCase());

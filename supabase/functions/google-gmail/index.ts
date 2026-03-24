@@ -174,6 +174,14 @@ class UsageTracker {
     this.executionSource = source;
   }
 
+  setUserInfo(userEmail?: string, userId?: string): void {
+    this.parameters = {
+      ...(this.parameters || {}),
+      authenticated_user_email: userEmail || null,
+      authenticated_user_id: userId || null
+    };
+  }
+
   async success(details?: {
     result_summary?: string;
     provider?: string;
@@ -475,45 +483,79 @@ async function getEmail(accessToken: string, messageId: string) {
   }
   
   try {
-    const url = `${GMAIL_API_URL}/users/me/messages/${encodeURIComponent(cleanMessageId)}?format=full`;
-    console.log(`📡 Gmail API URL: ${url}`);
-    
-    const response = await fetch(url, {
-      headers: { 
-        Authorization: `Bearer ${accessToken}`,
-        'Accept': 'application/json'
-      }
-    });
+    const authHeaders = {
+      Authorization: `Bearer ${accessToken}`,
+      'Accept': 'application/json'
+    };
 
-    const responseText = await response.text();
-    console.log(`📥 Gmail API response status: ${response.status}`);
-    
-    let data;
-    try {
-      data = JSON.parse(responseText);
-    } catch (e) {
-      console.error(`❌ Failed to parse Gmail API response as JSON:`, responseText.substring(0, 200));
-      throw new Error(`Invalid JSON response from Gmail API: ${response.status}`);
+    const readJson = async (url: string) => {
+      const response = await fetch(url, { headers: authHeaders });
+      const responseText = await response.text();
+      let data: any = null;
+
+      try {
+        data = JSON.parse(responseText);
+      } catch (_) {
+        console.error(`❌ Failed to parse Gmail API response as JSON:`, responseText.substring(0, 200));
+        throw new Error(`Invalid JSON response from Gmail API: ${response.status}`);
+      }
+
+      return { response, data };
+    };
+
+    const messageUrl = `${GMAIL_API_URL}/users/me/messages/${encodeURIComponent(cleanMessageId)}?format=full`;
+    console.log(`📡 Gmail API URL: ${messageUrl}`);
+
+    const { response: messageResponse, data: messageData } = await readJson(messageUrl);
+    console.log(`📥 Gmail message response status: ${messageResponse.status}`);
+
+    if (messageResponse.ok) {
+      console.log(`✅ Successfully retrieved email ${cleanMessageId}`);
+      return messageData;
     }
 
-    if (!response.ok) {
-      console.error(`❌ Gmail API error:`, data);
-      
-      const errorMessage = data.error?.message || data.error || `HTTP ${response.status}`;
-      
-      if (response.status === 404) {
-        throw new Error(`Message not found with ID: ${cleanMessageId}. It may have been deleted or moved.`);
-      } else if (response.status === 400 && errorMessage.includes('Invalid id')) {
-        throw new Error(`Invalid message ID format: "${cleanMessageId}". Gmail API expects a valid message ID.`);
-      } else if (response.status === 401 || response.status === 403) {
-        throw new Error(`Authentication failed. Token may be expired or lacks required permissions for 'format=full'.`);
+    const messageError = messageData?.error?.message || messageData?.error || `HTTP ${messageResponse.status}`;
+    console.error(`❌ Gmail message API error:`, messageData);
+
+    // Some tool callers accidentally pass threadId instead of message id.
+    // Try thread lookup so get_email is resilient to that common mismatch.
+    if (messageResponse.status === 400 || messageResponse.status === 404) {
+      const threadUrl = `${GMAIL_API_URL}/users/me/threads/${encodeURIComponent(cleanMessageId)}?format=full`;
+      console.log(`🔁 Retrying as thread lookup: ${threadUrl}`);
+
+      const { response: threadResponse, data: threadData } = await readJson(threadUrl);
+      console.log(`📥 Gmail thread response status: ${threadResponse.status}`);
+
+      if (threadResponse.ok && Array.isArray(threadData?.messages) && threadData.messages.length > 0) {
+        const newestMessage = threadData.messages[threadData.messages.length - 1];
+        console.log(`✅ Resolved thread ${cleanMessageId} to message ${newestMessage?.id}`);
+        return {
+          ...newestMessage,
+          _resolved_from_thread_id: cleanMessageId,
+          _thread_message_count: threadData.messages.length
+        };
       }
-      
-      throw new Error(`Gmail API error: ${errorMessage}`);
     }
 
-    console.log(`✅ Successfully retrieved email ${cleanMessageId}`);
-    return data;
+    if (messageResponse.status === 404) {
+      const err = new Error(`Message not found with ID: ${cleanMessageId}. It may have been deleted or moved.`);
+      (err as any).status = 404;
+      throw err;
+    }
+    if (messageResponse.status === 400 && `${messageError}`.includes('Invalid id')) {
+      const err = new Error(`Invalid message_id "${cleanMessageId}". Use the "id" field from list_emails (not threadId).`);
+      (err as any).status = 400;
+      throw err;
+    }
+    if (messageResponse.status === 401 || messageResponse.status === 403) {
+      const err = new Error(`Authentication failed. Token may be expired or missing gmail.readonly scope required for full message content.`);
+      (err as any).status = messageResponse.status;
+      throw err;
+    }
+
+    const err = new Error(`Gmail API error: ${messageError}`);
+    (err as any).status = messageResponse.status;
+    throw err;
   } catch (error) {
     console.error(`❌ Error in get_email for ID ${messageId}:`, error);
     throw error;
