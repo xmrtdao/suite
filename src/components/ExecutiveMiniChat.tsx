@@ -402,6 +402,7 @@ export const ExecutiveMiniChat = ({ executive, className = '' }: ExecutiveMiniCh
             onQuickResponse={(message) => handleSend(message)}
             disabled={isLoading}
             lastMessageRole={messages.length === 0 ? null : messages[messages.length - 1].role}
+            turnCount={messages.length}
           />
         </div>
       </CardContent>

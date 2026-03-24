@@ -2559,6 +2559,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
             hasPastConversations={conversationSummaries.length > 0 || totalMessageCount > 0}
             lastMessageContent={messages.length > 0 ? messages[messages.length - 1].content : undefined}
             lastExecutive={messages.length > 0 ? (messages[messages.length - 1] as any).executive : undefined}
+            turnCount={messages.length}
           />
         </div>
       </div>
