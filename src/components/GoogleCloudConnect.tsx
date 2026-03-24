@@ -20,27 +20,6 @@ export const GoogleCloudConnect: React.FC<GoogleCloudConnectProps> = ({ classNam
   const [connectedEmail, setConnectedEmail] = useState<string | null>(null);
   const { user } = useAuth();
 
-  useEffect(() => {
-    const handleOAuthMessage = (event: MessageEvent) => {
-      if (event.data?.type !== 'google-cloud-oauth-complete') return;
-      if (event.data?.success) {
-        toast.success('Google Cloud connected!');
-        setAuthUrl(null);
-        void checkStatus(false);
-      } else {
-        toast.error(event.data?.error || 'Google Cloud authorization failed');
-      }
-    };
-
-    window.addEventListener('message', handleOAuthMessage);
-    return () => window.removeEventListener('message', handleOAuthMessage);
-  }, [checkStatus]);
-
-  // Check connection status on mount and when user changes
-  useEffect(() => {
-    checkStatus();
-  }, [checkStatus]);
-
   const checkStatus = useCallback(async (showChecking = true) => {
     if (showChecking) {
       setStatus('checking');
@@ -81,6 +60,27 @@ export const GoogleCloudConnect: React.FC<GoogleCloudConnectProps> = ({ classNam
       setStatus('disconnected');
     }
   }, [user]);
+
+  useEffect(() => {
+    const handleOAuthMessage = (event: MessageEvent) => {
+      if (event.data?.type !== 'google-cloud-oauth-complete') return;
+      if (event.data?.success) {
+        toast.success('Google Cloud connected!');
+        setAuthUrl(null);
+        void checkStatus(false);
+      } else {
+        toast.error(event.data?.error || 'Google Cloud authorization failed');
+      }
+    };
+
+    window.addEventListener('message', handleOAuthMessage);
+    return () => window.removeEventListener('message', handleOAuthMessage);
+  }, [checkStatus]);
+
+  // Check connection status on mount and when user changes
+  useEffect(() => {
+    checkStatus();
+  }, [checkStatus]);
 
   const handleConnect = async () => {
     setLoading(true);
