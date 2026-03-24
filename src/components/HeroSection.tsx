@@ -104,7 +104,7 @@ export const HeroSection = ({ stats }: HeroSectionProps) => {
   const registeredEdgeFunctions = stats.registeredEdgeFunctions;
 
   return (
-    <section className="relative w-full overflow-hidden rounded-3xl border border-border/60 bg-card/70 shadow-sm">
+    <section className="relative w-full overflow-hidden rounded-2xl border border-border/60 bg-card/70 shadow-sm">
       <div
         className={cn(
           'absolute inset-0 bg-gradient-to-br transition-all duration-1000',
@@ -113,9 +113,9 @@ export const HeroSection = ({ stats }: HeroSectionProps) => {
       />
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,hsl(var(--primary)/0.12),transparent_35%),linear-gradient(hsl(var(--background)/0.45),hsl(var(--background)/0.7))]" />
 
-      <div className="relative p-4 md:p-5 space-y-4">
+      <div className="relative space-y-2 p-2 md:p-2.5">
         <div
-          className="flex items-center gap-3 rounded-2xl border border-border/50 bg-background/55 px-3 py-2 backdrop-blur"
+          className="flex items-center gap-2 rounded-xl border border-border/50 bg-background/55 px-2 py-1.5 backdrop-blur"
           onMouseEnter={() => setIsPaused(true)}
           onMouseLeave={() => setIsPaused(false)}
         >
@@ -126,15 +126,15 @@ export const HeroSection = ({ stats }: HeroSectionProps) => {
                   (prev - 1 + marketingBanners.length) % marketingBanners.length
               )
             }
-            className="rounded-full bg-background/70 p-1.5 transition-colors hover:bg-background"
+            className="rounded-full bg-background/70 p-1 transition-colors hover:bg-background"
             aria-label="Previous banner"
           >
-            <ChevronLeft className="h-4 w-4" />
+            <ChevronLeft className="h-3.5 w-3.5" />
           </button>
 
           <div className="min-w-0 flex-1 text-center">
             <p
-              className="truncate text-sm md:text-base font-medium text-foreground"
+              className="truncate text-xs font-medium text-foreground md:text-sm"
               key={currentBanner}
             >
               <span className="font-semibold">{banner.title}</span>
@@ -149,9 +149,9 @@ export const HeroSection = ({ stats }: HeroSectionProps) => {
                 key={i}
                 onClick={() => setCurrentBanner(i)}
                 className={cn(
-                  'h-1.5 w-1.5 rounded-full transition-all duration-300',
+                  'h-1 w-1 rounded-full transition-all duration-300',
                   i === currentBanner
-                    ? 'w-4 bg-primary'
+                    ? 'w-3 bg-primary'
                     : 'bg-muted-foreground/30 hover:bg-muted-foreground/50'
                 )}
                 aria-label={`Go to banner ${i + 1}`}
@@ -163,23 +163,23 @@ export const HeroSection = ({ stats }: HeroSectionProps) => {
             onClick={() =>
               setCurrentBanner((prev) => (prev + 1) % marketingBanners.length)
             }
-            className="rounded-full bg-background/70 p-1.5 transition-colors hover:bg-background"
+            className="rounded-full bg-background/70 p-1 transition-colors hover:bg-background"
             aria-label="Next banner"
           >
-            <ChevronRight className="h-4 w-4" />
+            <ChevronRight className="h-3.5 w-3.5" />
           </button>
         </div>
 
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.9fr)]">
-          <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+        <div className="grid gap-2 xl:grid-cols-[minmax(0,1.8fr)_minmax(240px,0.9fr)]">
+          <div className="grid grid-cols-3 gap-2 md:grid-cols-6">
             <StatCard
-              icon={<Zap className="h-4 w-4 text-primary" />}
+              icon={<Zap className="h-3 w-3 text-primary" />}
               label={t('hero.stats.executions')}
               value={stats.totalExecutions}
               suffix="+"
             />
             <StatCard
-              icon={<Bot className="h-4 w-4 text-emerald-500" />}
+              icon={<Bot className="h-3 w-3 text-emerald-500" />}
               label={t('hero.stats.agents')}
               value={stats.activeAgents}
             />
@@ -190,55 +190,55 @@ export const HeroSection = ({ stats }: HeroSectionProps) => {
               label={t('hero.stats.health')}
             />
             <StatCard
-              icon={<Activity className="h-4 w-4 text-amber-500" />}
+              icon={<Activity className="h-3 w-3 text-amber-500" />}
               label={t('hero.stats.tasks')}
               value={stats.activeTasks}
             />
             <StatCard
-              icon={<Workflow className="h-4 w-4 text-sky-500" />}
+              icon={<Workflow className="h-3 w-3 text-sky-500" />}
               label="Edge functions (system)"
               value={registeredEdgeFunctions}
             />
             <StatCard
-              icon={<BrainCircuit className="h-4 w-4 text-violet-500" />}
+              icon={<BrainCircuit className="h-3 w-3 text-violet-500" />}
               label="Knowledge entities"
               value={stats.knowledgeEntities}
             />
           </div>
 
-          <div className="glass-card flex min-h-[260px] flex-col rounded-2xl border border-primary/15 bg-background/65 p-3 shadow-lg shadow-primary/5">
-            <div className="mb-3 flex items-start justify-between gap-3">
+          <div className="glass-card flex h-[112px] flex-col rounded-xl border border-primary/15 bg-background/65 p-2 shadow-lg shadow-primary/5">
+            <div className="mb-1.5 flex items-start justify-between gap-2">
               <div>
-                <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                  <span className="relative flex h-2.5 w-2.5">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+                  <span className="relative flex h-2 w-2">
                     <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
-                    <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-primary" />
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
                   </span>
                   Agent activity
                 </div>
-                <p className="mt-1 text-xs text-muted-foreground">
+                <p className="mt-0.5 text-[10px] text-muted-foreground">
                   Live operations, health checks, function calls, and agent events.
                 </p>
               </div>
-              <div className="flex flex-wrap justify-end gap-2 text-[10px]">
+              <div className="flex flex-wrap justify-end gap-1 text-[9px]">
                 <MetricPill
-                  icon={<Radio className="h-3 w-3" />}
+                  icon={<Radio className="h-2.5 w-2.5" />}
                   label="Live 24h"
                   value={recentActivityCount}
                 />
                 <MetricPill
-                  icon={<Workflow className="h-3 w-3" />}
+                  icon={<Workflow className="h-2.5 w-2.5" />}
                   label="System count"
                   value={registeredEdgeFunctions}
                 />
               </div>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-border/50 bg-background/40 p-1">
+            <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-border/50 bg-background/40 p-0.5">
               <ActivityPulse
                 healthScore={stats.healthScore}
                 compact
-                maxItems={5}
+                maxItems={4}
               />
             </div>
           </div>
@@ -256,12 +256,12 @@ interface StatCardProps {
 }
 
 const StatCard = ({ icon, label, value, suffix = '' }: StatCardProps) => (
-  <div className="glass-card rounded-2xl border border-border/50 bg-background/60 p-3 text-center backdrop-blur-sm transition-transform hover:-translate-y-0.5">
-    <div className="mb-2 flex justify-center">{icon}</div>
-    <div className="text-xl font-bold text-foreground md:text-2xl">
+  <div className="glass-card rounded-xl border border-border/50 bg-background/60 p-1.5 text-center backdrop-blur-sm transition-transform hover:-translate-y-0.5">
+    <div className="mb-1 flex justify-center">{icon}</div>
+    <div className="text-sm font-bold text-foreground md:text-base">
       <AnimatedCounter end={value} suffix={suffix} />
     </div>
-    <p className="mt-1 text-[11px] text-muted-foreground md:text-xs">{label}</p>
+    <p className="mt-0.5 text-[9px] leading-tight text-muted-foreground">{label}</p>
   </div>
 );
 
@@ -274,7 +274,7 @@ const MetricPill = ({
   label: string;
   value: number;
 }) => (
-  <div className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-background/75 px-2 py-1 text-muted-foreground">
+  <div className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-background/75 px-1.5 py-0.5 text-muted-foreground">
     {icon}
     <span>{label}</span>
     <span className="font-semibold text-foreground">{value}</span>
@@ -316,19 +316,19 @@ const HealthStatCard = ({
   return (
     <div
       className={cn(
-        'glass-card rounded-2xl border border-border/50 bg-background/60 p-3 text-center backdrop-blur-sm transition-transform hover:-translate-y-0.5',
+        'glass-card rounded-xl border border-border/50 bg-background/60 p-1.5 text-center backdrop-blur-sm transition-transform hover:-translate-y-0.5',
         getBorderClass()
       )}
     >
-      <div className="mb-2 flex justify-center">{getHealthIcon()}</div>
-      <div className={cn('text-xl font-bold md:text-2xl', getHealthColor())}>
+      <div className="mb-1 flex justify-center">{getHealthIcon()}</div>
+      <div className={cn('text-sm font-bold md:text-base', getHealthColor())}>
         <AnimatedCounter end={healthScore} suffix="%" />
       </div>
-      <p className="mt-1 text-[11px] text-muted-foreground md:text-xs">
+      <p className="mt-0.5 text-[9px] leading-tight text-muted-foreground">
         {label}
       </p>
       {healthIssues.length > 0 && (
-        <p className="mt-1 truncate text-[10px] text-amber-500">
+        <p className="mt-0.5 truncate text-[9px] text-amber-500">
           {healthIssues[0]}
         </p>
       )}
