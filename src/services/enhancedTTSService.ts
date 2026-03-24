@@ -18,9 +18,45 @@ export class EnhancedTTSService {
     return this.instance;
   }
 
+  private toSpeechFriendlyText(text: string): string {
+    return text
+      // Fenced code blocks: preserve content but drop markdown fences
+      .replace(/```[\w-]*\n([\s\S]*?)```/g, '$1')
+      // Inline code
+      .replace(/`([^`]+)`/g, '$1')
+      // Headings
+      .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+      // Blockquotes
+      .replace(/^\s{0,3}>\s?/gm, '')
+      // Bold / italic / strikethrough
+      .replace(/(\*\*|__)(.*?)\1/g, '$2')
+      .replace(/(\*|_)(.*?)\1/g, '$2')
+      .replace(/~~(.*?)~~/g, '$1')
+      // Markdown links/images: keep the human-readable label
+      .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '$1')
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1')
+      // Bullets and task lists
+      .replace(/^\s*[-*+]\s+\[.\]\s+/gm, '')
+      .replace(/^\s*[-*+]\s+/gm, '')
+      // Ordered lists
+      .replace(/^\s*\d+\.\s+/gm, '')
+      // Horizontal rules
+      .replace(/^\s*([-*_]\s*){3,}\s*$/gm, '')
+      // Collapse repeated whitespace while preserving sentence flow
+      .replace(/[ \t]+\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .replace(/[ \t]{2,}/g, ' ')
+      .trim();
+  }
+
   async speak(text: string, options?: Partial<UnifiedTTSOptions>): Promise<void> {
+    const speechText = this.toSpeechFriendlyText(text);
+    if (!speechText) {
+      return;
+    }
+
     const fullOptions: UnifiedTTSOptions = {
-      text,
+      text: speechText,
       voice: options?.voice || 'nova',
       speed: options?.speed || 1.0,
       language: options?.language || 'en'
