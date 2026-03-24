@@ -1034,10 +1034,14 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
 
     setLoadingMoreMessages(true);
     try {
-      // Load recent messages from the database (this replaces the current empty state)
-      const recentMessages = await conversationPersistence.getRecentConversationHistory(20);
-      if (recentMessages.length > 0) {
-        const convertedMessages: UnifiedMessage[] = recentMessages.map(msg => ({
+      // Calculate how many messages we already have (excluding greeting)
+      const currentMessageCount = messages.filter(m => m.id !== 'greeting').length;
+      
+      // Load next batch of messages from the database
+      const olderMessages = await conversationPersistence.getConversationHistory(20, currentMessageCount);
+      
+      if (olderMessages.length > 0) {
+        const convertedMessages: UnifiedMessage[] = olderMessages.map(msg => ({
           id: msg.id,
           content: msg.content,
           sender: msg.sender,
@@ -1045,16 +1049,25 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
           ...msg.metadata
         }));
 
-        // Replace the greeting with actual conversation history
+        // Prepend the older messages to the current message list
         setMessages(prev => {
-          // Keep the greeting if it exists, then add the history
           const greeting = prev.find(msg => msg.id === 'greeting');
-          return greeting ? [greeting, ...convertedMessages] : convertedMessages;
+          const existingMessages = prev.filter(msg => msg.id !== 'greeting');
+          
+          // Avoid duplicates by checking IDs
+          const existingIds = new Set(existingMessages.map(m => m.id));
+          const uniqueNewMessages = convertedMessages.filter(m => !existingIds.has(m.id));
+          
+          const combined = [...uniqueNewMessages, ...existingMessages];
+          return greeting ? [greeting, ...combined] : combined;
         });
-      }
 
-      // After loading first batch, enable normal pagination
-      setHasMoreMessages(recentMessages.length >= 20 && recentMessages.length < totalMessageCount);
+        // Update pagination state
+        const newMessageCount = currentMessageCount + uniqueNewMessages.length;
+        setHasMoreMessages(newMessageCount < totalMessageCount);
+      } else {
+        setHasMoreMessages(false);
+      }
     } catch (error) {
       console.error('Failed to load more messages:', error);
     } finally {
