@@ -164,9 +164,39 @@ const corsHeaders = {
 const AMBIGUOUS_RESPONSES = ['yes', 'yeah', 'yep', 'sure', 'ok', 'okay', 'alright', 'fine', 'go ahead', 'proceed', 'no', 'nope', 'nah'];
 const POSITIVE_AMBIGUOUS = ['yes', 'yeah', 'yep', 'sure', 'ok', 'okay', 'alright', 'fine', 'go ahead', 'proceed'];
 
+function isSimpleDirectAnswerQuery(query: string): boolean {
+  const normalized = (query || '').trim().toLowerCase();
+  if (!normalized) return true;
+
+  const simplePatterns = [
+    /^(hi|hello|hey|yo|good morning|good afternoon|good evening)[!. ]*$/,
+    /^how are you[?.! ]*$/,
+    /^who are you[?.! ]*$/,
+    /^what can you do[?.! ]*$/,
+    /^help[?.! ]*$/,
+    /^thanks?[!. ]*$/,
+    /^tell me about (xmrt|xmrt[- ]dao|eliza)[?.! ]*$/
+  ];
+
+  if (simplePatterns.some((pattern) => pattern.test(normalized))) return true;
+
+  const explicitlyActionOrLiveData = /(http[s]?:\/\/|www\.|status|metrics|current|latest|today|price|check|open|browse|search|analyze|upload|attachment|email|send|create|run|execute|invoke|github|deploy|function|edge function|tool)/i;
+  if (explicitlyActionOrLiveData.test(normalized)) return false;
+
+  // Short conceptual questions are usually best answered directly from model memory.
+  return normalized.length <= 140;
+}
+
+function isExplicitActionRequest(query: string): boolean {
+  const normalized = (query || '').trim().toLowerCase();
+  if (!normalized) return false;
+  return /(http[s]?:\/\/|www\.|open|browse|visit|check|status|metrics|latest|today|current|search|analyze|upload|attachment|email|send|create|run|execute|invoke|deploy|github|edge function|tool call|function call|workflow)/i.test(normalized);
+}
+
 // ========== TOOL CALLING MANDATE ==========
 const TOOL_CALLING_MANDATE = `
 🚨 CRITICAL TOOL CALLING RULES:
+0. For greetings/simple explanatory questions that do NOT require live data, file analysis, external browsing, or side effects, answer directly from built-in knowledge without calling tools.
 1. When the user asks for data/status/metrics, you MUST call tools using the native function calling mechanism
 2. DO NOT describe tool calls in text. DO NOT say "I will call..." or "Let me check..."
 3. DIRECTLY invoke functions - the system will handle execution
@@ -4560,6 +4590,10 @@ Deno.serve(async (req) => {
     } = await conversationManager.loadConversationHistory();
     
     const allMessages = [...savedMessages, ...messages].slice(-CONVERSATION_HISTORY_LIMIT);
+    const isFirstEngagement = savedMessages.length === 0 && previousToolResults.length === 0;
+    const preferDirectAnswer = isSimpleDirectAnswerQuery(query);
+    const explicitActionRequest = isExplicitActionRequest(query);
+    const firstTurnDirectFastPath = isFirstEngagement && preferDirectAnswer && !explicitActionRequest;
     
     if (attachments && attachments.length > 0) {
       console.log(`📎 Found ${attachments.length} attachment(s) in request`);
@@ -4678,7 +4712,9 @@ Deno.serve(async (req) => {
     ];
     
     // Get initial AI response
-    const tools = use_tools ? ELIZA_TOOLS : [];
+    const tools = (use_tools && !firstTurnDirectFastPath) ? ELIZA_TOOLS : [];
+    const maxToolIterations = (isFirstEngagement && !explicitActionRequest) ? 1 : MAX_TOOL_ITERATIONS;
+    console.log(`⚡ First-turn optimization: firstEngagement=${isFirstEngagement}, directFastPath=${firstTurnDirectFastPath}, toolsEnabled=${tools.length > 0}, maxToolIterations=${maxToolIterations}`);
     let initialResult = await callAIFunction(messagesArray, tools);
     
     // If AI call failed, use emergency fallback
@@ -4718,7 +4754,7 @@ Deno.serve(async (req) => {
       ipAddress,
       callAIFunction,
       tools,
-      MAX_TOOL_ITERATIONS,
+      maxToolIterations,
       conversationManager
     );
     
