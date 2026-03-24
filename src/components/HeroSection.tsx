@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { AnimatedCounter } from './AnimatedCounter';
-import { ActivityPulse } from './ActivityPulse';
 import { supabase } from '@/integrations/supabase/client';
 import {
   Zap,
@@ -12,7 +11,9 @@ import {
   AlertTriangle,
   Workflow,
   BrainCircuit,
-  Radio,
+  Network,
+  Database,
+  Cpu,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -32,11 +33,48 @@ interface HeroSectionProps {
   stats: Stats;
 }
 
+interface EcosystemEndpoint {
+  id: string;
+  name: string;
+  path: string;
+  status: 'healthy' | 'degraded' | 'error' | 'unknown';
+  metric: string;
+}
+
 export const HeroSection = ({ stats }: HeroSectionProps) => {
   const { t } = useLanguage();
   const [currentBanner, setCurrentBanner] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
-  const [recentActivityCount, setRecentActivityCount] = useState(0);
+  const [ecosystemEndpoints, setEcosystemEndpoints] = useState<EcosystemEndpoint[]>([
+    {
+      id: 'system-status',
+      name: 'System status',
+      path: 'system-status',
+      status: 'unknown',
+      metric: 'Syncing...',
+    },
+    {
+      id: 'edge-functions',
+      name: 'Edge functions',
+      path: 'edge_functions',
+      status: 'unknown',
+      metric: `${stats.registeredEdgeFunctions} registered`,
+    },
+    {
+      id: 'activity-log',
+      name: 'Activity stream',
+      path: 'activity_log',
+      status: 'unknown',
+      metric: 'Awaiting telemetry',
+    },
+    {
+      id: 'database',
+      name: 'Database',
+      path: 'database',
+      status: 'unknown',
+      metric: 'Awaiting response',
+    },
+  ]);
 
   const marketingBanners = [
     {
@@ -72,32 +110,80 @@ export const HeroSection = ({ stats }: HeroSectionProps) => {
   }, [isPaused, marketingBanners.length]);
 
   useEffect(() => {
-    const fetchActivityCount = async () => {
-      const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-      const { count } = await supabase
-        .from('eliza_activity_log')
-        .select('*', { count: 'exact', head: true })
-        .gte('created_at', since);
+    const fetchEcosystemSnapshot = async () => {
+      const { data, error } = await supabase.functions.invoke('system-status', {
+        body: {},
+      });
 
-      setRecentActivityCount(count || 0);
+      if (error || !data?.success || !data.status) {
+        setEcosystemEndpoints((prev) =>
+          prev.map((endpoint) => ({
+            ...endpoint,
+            status: endpoint.status === 'healthy' ? endpoint.status : 'degraded',
+          }))
+        );
+        return;
+      }
+
+      const status = data.status;
+      const edgeFunctions = status.components?.edge_functions;
+      const activityLog = status.components?.activity_log;
+      const database = status.components?.database;
+      const agents = status.components?.agents;
+      const mining = status.components?.mining;
+
+      const nextEndpoints: EcosystemEndpoint[] = [
+        {
+          id: 'system-status',
+          name: 'System status',
+          path: 'system-status',
+          status: status.overall_status === 'unhealthy' ? 'error' : status.overall_status,
+          metric: `${status.health_score}% health`,
+        },
+        {
+          id: 'edge-functions',
+          name: 'Edge functions',
+          path: 'edge_functions',
+          status: edgeFunctions?.status || 'unknown',
+          metric: `${edgeFunctions?.total_active_24h ?? 0} active / 24h`,
+        },
+        {
+          id: 'activity-log',
+          name: 'Activity stream',
+          path: 'activity_log',
+          status: activityLog?.status || 'unknown',
+          metric: `${activityLog?.stats?.total_24h ?? 0} events / 24h`,
+        },
+        {
+          id: 'database',
+          name: 'Database',
+          path: 'database',
+          status: database?.status || 'unknown',
+          metric: `${database?.response_time_ms ?? 0}ms latency`,
+        },
+        {
+          id: 'agent-runtime',
+          name: 'Agent runtime',
+          path: 'agents',
+          status: agents?.status || 'unknown',
+          metric: `${agents?.stats?.working ?? 0} agents working`,
+        },
+        {
+          id: 'mining-telemetry',
+          name: 'Mining telemetry',
+          path: 'mining',
+          status: mining?.status || 'unknown',
+          metric: `${mining?.active_workers ?? 0} active workers`,
+        },
+      ];
+
+      setEcosystemEndpoints(nextEndpoints);
     };
 
-    fetchActivityCount();
+    fetchEcosystemSnapshot();
+    const interval = setInterval(fetchEcosystemSnapshot, 60000);
 
-    const channel = supabase
-      .channel('hero-activity-count')
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'eliza_activity_log' },
-        () => {
-          setRecentActivityCount((prev) => prev + 1);
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => clearInterval(interval);
   }, []);
 
   const banner = marketingBanners[currentBanner];
@@ -206,40 +292,23 @@ export const HeroSection = ({ stats }: HeroSectionProps) => {
             />
           </div>
 
-          <div className="glass-card flex h-[112px] flex-col rounded-xl border border-primary/15 bg-background/65 p-2 shadow-lg shadow-primary/5">
-            <div className="mb-1.5 flex items-start justify-between gap-2">
+          <div className="glass-card flex min-h-[112px] flex-col rounded-xl border border-primary/15 bg-background/65 p-2 shadow-lg shadow-primary/5">
+            <div className="mb-1.5 flex items-center justify-between gap-2">
               <div>
                 <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
-                  <span className="relative flex h-2 w-2">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
-                    <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
-                  </span>
-                  Agent activity
+                  <Network className="h-3 w-3 text-primary" />
+                  Ecosystem endpoints
                 </div>
                 <p className="mt-0.5 text-[10px] text-muted-foreground">
-                  Live operations, health checks, function calls, and agent events.
+                  Live endpoint telemetry across core services.
                 </p>
-              </div>
-              <div className="flex flex-wrap justify-end gap-1 text-[9px]">
-                <MetricPill
-                  icon={<Radio className="h-2.5 w-2.5" />}
-                  label="Live 24h"
-                  value={recentActivityCount}
-                />
-                <MetricPill
-                  icon={<Workflow className="h-2.5 w-2.5" />}
-                  label="System count"
-                  value={registeredEdgeFunctions}
-                />
               </div>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-hidden rounded-lg border border-border/50 bg-background/40 p-0.5">
-              <ActivityPulse
-                healthScore={stats.healthScore}
-                compact
-                maxItems={4}
-              />
+            <div className="grid min-h-0 flex-1 grid-cols-2 gap-1 overflow-hidden">
+              {ecosystemEndpoints.slice(0, 6).map((endpoint) => (
+                <EndpointCard key={endpoint.id} endpoint={endpoint} />
+              ))}
             </div>
           </div>
         </div>
@@ -265,21 +334,39 @@ const StatCard = ({ icon, label, value, suffix = '' }: StatCardProps) => (
   </div>
 );
 
-const MetricPill = ({
-  icon,
-  label,
-  value,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: number;
-}) => (
-  <div className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-background/75 px-1.5 py-0.5 text-muted-foreground">
-    {icon}
-    <span>{label}</span>
-    <span className="font-semibold text-foreground">{value}</span>
-  </div>
-);
+const EndpointCard = ({ endpoint }: { endpoint: EcosystemEndpoint }) => {
+  const statusClass =
+    endpoint.status === 'healthy'
+      ? 'bg-emerald-500'
+      : endpoint.status === 'degraded'
+        ? 'bg-amber-500'
+        : endpoint.status === 'error'
+          ? 'bg-destructive'
+          : 'bg-muted-foreground';
+
+  const icon =
+    endpoint.id === 'database' ? (
+      <Database className="h-2.5 w-2.5" />
+    ) : endpoint.id === 'agent-runtime' ? (
+      <Cpu className="h-2.5 w-2.5" />
+    ) : (
+      <Workflow className="h-2.5 w-2.5" />
+    );
+
+  return (
+    <div className="rounded-md border border-border/50 bg-background/50 px-1.5 py-1 text-[9px]">
+      <div className="flex items-center justify-between gap-1">
+        <div className="inline-flex items-center gap-1 truncate font-medium text-foreground">
+          {icon}
+          <span className="truncate">{endpoint.name}</span>
+        </div>
+        <span className={cn('h-1.5 w-1.5 rounded-full', statusClass)} />
+      </div>
+      <p className="truncate text-[8px] text-muted-foreground">/{endpoint.path}</p>
+      <p className="truncate text-[9px] text-foreground">{endpoint.metric}</p>
+    </div>
+  );
+};
 
 interface HealthStatCardProps {
   healthScore: number;
