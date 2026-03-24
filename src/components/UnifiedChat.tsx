@@ -136,21 +136,21 @@ const PROCESSING_STICKY_TEMPLATES: ProcessingStickyTemplate[] = [
 ];
 
 const ProcessingStickyNotes = React.memo(({ notes }: { notes: ProcessingStickyNote[] }) => {
-  if (notes.length === 0) return null;
+  const visibleNotes = notes.filter((note) => !note.isFallingAway).slice(-2).reverse();
+  if (visibleNotes.length === 0) return null;
 
-  const visibleNotes = notes.slice(-2).reverse();
   const stackOffsets = [
     { top: 0, right: 0, floatDelay: 0, zIndex: 20 },
-    { top: 56, right: 24, floatDelay: 180, zIndex: 10 },
+    { top: 94, right: 58, floatDelay: 180, zIndex: 10 },
   ];
 
   return (
-    <div className="pointer-events-none absolute right-3 top-36 z-30 hidden md:block">
-      <div className="relative h-[220px] w-[128px]">
+    <div className="pointer-events-none absolute right-6 top-36 z-30 hidden md:block">
+      <div className="relative h-[260px] w-[220px]">
         {visibleNotes.map((note, index) => {
           const offset = stackOffsets[index] ?? {
-            top: index * 56,
-            right: Math.min(index * 24, 36),
+            top: index * 94,
+            right: Math.min(index * 58, 96),
             floatDelay: index * 180,
             zIndex: Math.max(20 - index * 10, 1),
           };
@@ -158,7 +158,7 @@ const ProcessingStickyNotes = React.memo(({ notes }: { notes: ProcessingStickyNo
           return (
           <div
             key={note.id}
-            className={`absolute right-0 w-[88px] rounded-[2px] border bg-gradient-to-br p-2.5 shadow-[0_14px_32px_rgba(120,93,10,0.18)] transition-all duration-700 ${note.rotationClassName} ${
+            className={`absolute right-0 w-[116px] rounded-[2px] border bg-gradient-to-br p-2.5 shadow-[0_14px_32px_rgba(120,93,10,0.18)] transition-all duration-700 ${note.rotationClassName} ${
               note.variant === 'error'
                 ? 'border-rose-400/80 from-rose-200/95 via-red-100 to-rose-50 shadow-[0_14px_32px_rgba(127,29,29,0.22)]'
                 : `border-amber-300/70 ${note.accentClassName}`
@@ -197,11 +197,12 @@ const ProcessingStickyNotes = React.memo(({ notes }: { notes: ProcessingStickyNo
 });
 
 const ProcessingStickyNotesInline = React.memo(({ notes }: { notes: ProcessingStickyNote[] }) => {
-  if (notes.length === 0) return null;
+  const visibleNotes = notes.filter((note) => !note.isFallingAway).slice(-2).reverse();
+  if (visibleNotes.length === 0) return null;
 
   return (
     <div className="relative flex h-12 w-[110px] items-start justify-end md:hidden" aria-hidden="true">
-    {notes.slice(-2).reverse().map((note, index) => (
+    {visibleNotes.map((note, index) => (
       <div
         key={note.id}
         className={`absolute right-0 top-0 w-16 rounded-[2px] border bg-gradient-to-br px-2 py-1.5 shadow-[0_10px_24px_rgba(120,93,10,0.18)] ${note.rotationClassName} ${
@@ -1004,11 +1005,20 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   }, []);
 
   useEffect(() => {
-    if (isProcessing && processingNotes.length === 0) {
-      enqueueProcessingNote('Organizing tool calls for your request');
+    if (isProcessing) {
+      clearPendingNoteTimeouts();
+
+      const activeNoteCount = processingNotes.filter((note) => !note.isFallingAway).length;
+      if (activeNoteCount === 0) {
+        enqueueProcessingNote('Organizing tool calls for your request');
+      }
+      if (activeNoteCount < 2) {
+        enqueueProcessingNote('Cross-checking context before responding');
+      }
+      return;
     }
 
-    if (!isProcessing && processingNotes.length > 0) {
+    if (processingNotes.length > 0) {
       clearPendingNoteTimeouts();
       processingNotes.forEach((_, index) => {
         const timeout = window.setTimeout(() => {
@@ -2299,7 +2309,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       {/* Clean Messages Area */}
       <div className="flex-1 overflow-hidden">
         <ScrollArea className="h-full">
-          <div className="p-4 space-y-4">
+          <div className="space-y-4 p-4 xl:pr-40">
             {/* Live Camera for Multimodal Mode */}
             {inputMode === 'multimodal' && (
               <div className="mb-4">
