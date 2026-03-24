@@ -21,6 +21,39 @@ function isValidUUID(str: string): boolean {
   return uuidRegex.test(str);
 }
 
+async function resolveSession(
+  supabase: ReturnType<typeof createClient>,
+  sessionIdentifier: string
+): Promise<{ id: string; session_key: string } | null> {
+  // Check UUID first
+  if (isValidUUID(sessionIdentifier)) {
+    const { data, error } = await supabase
+      .from('conversation_sessions')
+      .select('id, session_key')
+      .eq('id', sessionIdentifier)
+      .maybeSingle();
+
+    if (error) {
+      console.error('Error fetching session by UUID:', error);
+    }
+
+    if (data) return data;
+  }
+
+  // Fallback: treat as session_key
+  const { data, error } = await supabase
+    .from('conversation_sessions')
+    .select('id, session_key')
+    .eq('session_key', sessionIdentifier)
+    .maybeSingle();
+
+  if (error) {
+    console.error('Error fetching session by session_key:', error);
+  }
+
+  return data;
+}
+
 serve(async (req) => {
   const usageTracker = startUsageTracking(FUNCTION_NAME);
   const startedAt = Date.now();
@@ -35,7 +68,7 @@ serve(async (req) => {
     const {
       action,
       sessionKey,
-      sessionId,
+      sessionId: rawSessionId,
       messageData,
       limit,
       offset,
@@ -46,7 +79,7 @@ serve(async (req) => {
       ...requestContext,
       operation: action,
       has_session_key: Boolean(sessionKey),
-      session_id_present: Boolean(sessionId),
+      session_id_present: Boolean(rawSessionId),
     });
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -58,8 +91,8 @@ serve(async (req) => {
     console.log('Conversation access request:', {
       action,
       sessionKey,
-      sessionId,
-      isValidUUID: sessionId ? isValidUUID(sessionId) : null,
+      sessionId: rawSessionId,
+      isValidUUID: rawSessionId ? isValidUUID(rawSessionId) : null,
     });
 
     // Validate session ownership based on session_key
@@ -86,6 +119,9 @@ serve(async (req) => {
         }
       );
     }
+
+    // Backward-compatible fallback: if frontend forgot sessionId, use sessionKey.
+    const sessionId = rawSessionId || sessionKey;
 
     switch (action) {
       case 'get_session': {
@@ -158,35 +194,7 @@ serve(async (req) => {
         }
 
         // Verify session ownership - handle both UUID and session_key formats
-        let session;
-
-        // Check if sessionId is a valid UUID first
-        if (isValidUUID(sessionId)) {
-          const { data, error } = await supabase
-            .from('conversation_sessions')
-            .select('id, session_key')
-            .eq('id', sessionId)
-            .maybeSingle();
-
-          if (error) {
-            console.error('Error fetching session by UUID:', error);
-          }
-          session = data;
-        }
-
-        // If not found or not a UUID, try as session_key
-        if (!session) {
-          const { data, error } = await supabase
-            .from('conversation_sessions')
-            .select('id, session_key')
-            .eq('session_key', sessionId)
-            .maybeSingle();
-
-          if (error) {
-            console.error('Error fetching session by session_key:', error);
-          }
-          session = data;
-        }
+        const session = await resolveSession(supabase, sessionId);
 
         if (!session || session.session_key !== sessionKey) {
           await usageTracker.failure(
@@ -245,35 +253,7 @@ serve(async (req) => {
         }
 
         // Verify session ownership - handle both UUID and session_key formats
-        let session;
-
-        // Check if sessionId is a valid UUID first
-        if (isValidUUID(sessionId)) {
-          const { data, error } = await supabase
-            .from('conversation_sessions')
-            .select('id, session_key')
-            .eq('id', sessionId)
-            .maybeSingle();
-
-          if (error) {
-            console.error('Error fetching session by UUID:', error);
-          }
-          session = data;
-        }
-
-        // If not found or not a UUID, try as session_key
-        if (!session) {
-          const { data, error } = await supabase
-            .from('conversation_sessions')
-            .select('id, session_key')
-            .eq('session_key', sessionId)
-            .maybeSingle();
-
-          if (error) {
-            console.error('Error fetching session by session_key:', error);
-          }
-          session = data;
-        }
+        const session = await resolveSession(supabase, sessionId);
 
         if (!session || session.session_key !== sessionKey) {
           await usageTracker.failure(
@@ -319,13 +299,26 @@ serve(async (req) => {
       }
 
       case 'add_message': {
-        if (!sessionId || !messageData) {
+        const hasMessageType = Boolean(messageData?.message_type);
+        const hasContent =
+          typeof messageData?.content === 'string' &&
+          messageData.content.trim().length > 0;
+
+        if (!sessionId || !messageData || !hasMessageType || !hasContent) {
           await usageTracker.failure(
-            'Session ID and message data required',
+            'Session ID, message_type, and non-empty content are required',
             400
           );
           return new Response(
-            JSON.stringify({ error: 'Session ID and message data required' }),
+            JSON.stringify({
+              error:
+                'Session ID, message_type, and non-empty content are required',
+              details: {
+                sessionIdProvided: Boolean(sessionId),
+                messageTypeProvided: hasMessageType,
+                contentProvided: hasContent,
+              },
+            }),
             {
               status: 400,
               headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -334,35 +327,7 @@ serve(async (req) => {
         }
 
         // Verify session ownership - handle both UUID and session_key formats
-        let session;
-
-        // Check if sessionId is a valid UUID first
-        if (isValidUUID(sessionId)) {
-          const { data, error } = await supabase
-            .from('conversation_sessions')
-            .select('id, session_key')
-            .eq('id', sessionId)
-            .maybeSingle();
-
-          if (error) {
-            console.error('Error fetching session by UUID:', error);
-          }
-          session = data;
-        }
-
-        // If not found or not a UUID, try as session_key
-        if (!session) {
-          const { data, error } = await supabase
-            .from('conversation_sessions')
-            .select('id, session_key')
-            .eq('session_key', sessionId)
-            .maybeSingle();
-
-          if (error) {
-            console.error('Error fetching session by session_key:', error);
-          }
-          session = data;
-        }
+        const session = await resolveSession(supabase, sessionId);
 
         if (!session || session.session_key !== sessionKey) {
           await usageTracker.failure(
@@ -420,35 +385,7 @@ serve(async (req) => {
         }
 
         // Verify session ownership - handle both UUID and session_key formats
-        let session;
-
-        // Check if sessionId is a valid UUID first
-        if (isValidUUID(sessionId)) {
-          const { data, error } = await supabase
-            .from('conversation_sessions')
-            .select('id, session_key')
-            .eq('id', sessionId)
-            .maybeSingle();
-
-          if (error) {
-            console.error('Error fetching session by UUID:', error);
-          }
-          session = data;
-        }
-
-        // If not found or not a UUID, try as session_key
-        if (!session) {
-          const { data, error } = await supabase
-            .from('conversation_sessions')
-            .select('id, session_key')
-            .eq('session_key', sessionId)
-            .maybeSingle();
-
-          if (error) {
-            console.error('Error fetching session by session_key:', error);
-          }
-          session = data;
-        }
+        const session = await resolveSession(supabase, sessionId);
 
         if (!session || session.session_key !== sessionKey) {
           await usageTracker.failure(

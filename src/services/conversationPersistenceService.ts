@@ -115,6 +115,13 @@ export class ConversationPersistenceService {
     sender: 'user' | 'assistant',
     metadata?: Record<string, any>
   ): Promise<void> {
+    const normalizedContent =
+      typeof content === 'string' ? content.trim() : '';
+    if (!normalizedContent) {
+      console.warn('Skipping message persistence due to empty content');
+      return;
+    }
+
     if (!this.currentSessionId) {
       await this.initializeSession();
     }
@@ -130,7 +137,7 @@ export class ConversationPersistenceService {
           sessionKey,
           sessionId: this.currentSessionId,
           messageData: {
-            content,
+            content: normalizedContent,
             message_type: sender,
             metadata: {
               ...metadata,
@@ -165,12 +172,15 @@ export class ConversationPersistenceService {
       });
 
       // Store important messages in enhanced memory
-      if (sender === 'user' || (sender === 'assistant' && content.length > 100)) {
+      if (
+        sender === 'user' ||
+        (sender === 'assistant' && normalizedContent.length > 100)
+      ) {
         const importanceScore = sender === 'user' ? 0.7 : 0.6;
         await enhancedMemoryService.storeMemory(
           userIP,
           this.currentSessionId!,
-          content,
+          normalizedContent,
           sender === 'user' ? 'user_query' : 'assistant_response',
           importanceScore,
           metadata
@@ -232,6 +242,10 @@ export class ConversationPersistenceService {
   // Get recent conversation history (lazy loading - only recent messages)
   public async getRecentConversationHistory(limit: number = 200): Promise<ConversationMessage[]> {
     if (!this.currentSessionId) {
+      await this.initializeSession();
+    }
+
+    if (!this.currentSessionId) {
       return [];
     }
 
@@ -276,6 +290,10 @@ export class ConversationPersistenceService {
 
   // Get conversation history with pagination support
   public async getConversationHistory(limit: number = 500, offset: number = 0): Promise<ConversationMessage[]> {
+    if (!this.currentSessionId) {
+      await this.initializeSession();
+    }
+
     if (!this.currentSessionId) {
       return [];
     }
@@ -331,6 +349,10 @@ export class ConversationPersistenceService {
     totalMessageCount: number;
     hasMoreMessages: boolean;
   }> {
+    if (!this.currentSessionId) {
+      await this.initializeSession();
+    }
+
     if (!this.currentSessionId) {
       return {
         summaries: [],

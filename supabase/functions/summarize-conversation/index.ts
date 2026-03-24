@@ -39,11 +39,13 @@ serve(async (req) => {
       // Empty body for cron triggers
     }
 
-    const { session_id, messages } = body;
+    const session_id = body.session_id ?? body.sessionId ?? null;
+    const messages = Array.isArray(body.messages) ? body.messages : [];
 
     // Early return for cron triggers with no session/messages
-    if (!session_id || !messages || messages.length === 0) {
+    if (!session_id || messages.length === 0) {
       console.log('📝 Cron trigger - no conversation to summarize');
+      await usageTracker.success({ cron: true, skipped: true });
       return new Response(JSON.stringify({ 
         success: true, 
         cron: true, 
@@ -57,7 +59,7 @@ serve(async (req) => {
 
     // Prepare conversation text (truncate to avoid token limits)
     const conversationText = messages.slice(-20).map((msg: any) => 
-      `${msg.message_type}: ${msg.content?.slice(0, 200) || ''}`
+      `${msg.message_type || msg.sender || 'unknown'}: ${msg.content?.slice(0, 200) || ''}`
     ).join('\n');
 
     const prompt = `Create a concise summary of this conversation. Focus on key topics and decisions. Keep it under 150 words.
