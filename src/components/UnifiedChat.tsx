@@ -1141,15 +1141,15 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
           ...msg.metadata
         }));
 
+        // Compute unique messages up-front for reliable pagination state updates
+        const existingIds = new Set(messages.filter(m => m.id !== 'greeting').map(m => m.id));
+        const uniqueNewMessages = convertedMessages.filter(m => !existingIds.has(m.id));
+
         // Prepend the older messages to the current message list
         setMessages(prev => {
           const greeting = prev.find(msg => msg.id === 'greeting');
           const existingMessages = prev.filter(msg => msg.id !== 'greeting');
-          
-          // Avoid duplicates by checking IDs
-          const existingIds = new Set(existingMessages.map(m => m.id));
-          const uniqueNewMessages = convertedMessages.filter(m => !existingIds.has(m.id));
-          
+
           const combined = [...uniqueNewMessages, ...existingMessages];
           return greeting ? [greeting, ...combined] : combined;
         });
