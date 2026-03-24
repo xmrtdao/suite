@@ -10,6 +10,7 @@ interface QuickResponseButtonsProps {
   disabled?: boolean;
   lastMessageRole?: 'user' | 'assistant' | null;
   hasUserEngaged?: boolean;
+  hasPastConversations?: boolean;
   lastMessageContent?: string;
   lastExecutive?: string;
 }
@@ -135,6 +136,13 @@ const emptyConversationResponses: ButtonConfig[] = [
   { label: "Hello! What can you do?", emoji: "👋" },
   { label: "Show me system status", emoji: "📊" },
   { label: "Help me get started", emoji: "🎯" }
+];
+
+// Buttons shown for returning users who already have conversation history
+const returningUserResponses: ButtonConfig[] = [
+  { label: "Where were we?", emoji: "🧠" },
+  { label: "What's new?", emoji: "✨" },
+  { label: "Get my email", emoji: "📧" }
 ];
 
 // Buttons shown after user sends (while waiting for AI)
@@ -279,10 +287,14 @@ const getContextualButtons = (
   lastMessageContent: string | undefined,
   lastExecutive: string | undefined,
   hasUserEngaged: boolean,
-  lastMessageRole: 'user' | 'assistant' | null | undefined
+  lastMessageRole: 'user' | 'assistant' | null | undefined,
+  hasPastConversations: boolean
 ): ButtonConfig[] => {
   // Welcome state - show intro buttons
   if (!hasUserEngaged) {
+    if (hasPastConversations) {
+      return returningUserResponses;
+    }
     return emptyConversationResponses;
   }
   
@@ -342,6 +354,7 @@ export const QuickResponseButtons = ({
   disabled,
   lastMessageRole,
   hasUserEngaged = false,
+  hasPastConversations = false,
   lastMessageContent,
   lastExecutive
 }: QuickResponseButtonsProps) => {
@@ -349,7 +362,8 @@ export const QuickResponseButtons = ({
     lastMessageContent,
     lastExecutive,
     hasUserEngaged,
-    lastMessageRole
+    lastMessageRole,
+    hasPastConversations
   );
 
   return (
