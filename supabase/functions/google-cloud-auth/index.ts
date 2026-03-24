@@ -585,9 +585,13 @@ serve(async (req) => {
         authUrl.searchParams.set('scope', SCOPES);
         authUrl.searchParams.set('access_type', 'offline');
         authUrl.searchParams.set('prompt', 'consent');
+        const returnTo = typeof body.return_to === 'string' && body.return_to.trim().length > 0
+          ? body.return_to.trim()
+          : null;
+        const encodedReturnTo = returnTo ? encodeURIComponent(returnTo) : null;
         const oauthState = userContext.userId
-          ? `google_cloud_oauth:${userContext.userId}`
-          : 'google_cloud_oauth';
+          ? `google_cloud_oauth:${userContext.userId}${encodedReturnTo ? `:${encodedReturnTo}` : ''}`
+          : `google_cloud_oauth${encodedReturnTo ? `:${encodedReturnTo}` : ''}`;
         authUrl.searchParams.set('state', oauthState);
 
         return new Response(JSON.stringify({
@@ -602,7 +606,9 @@ serve(async (req) => {
       case 'callback': {
         const code = url.searchParams.get('code') || body.code;
         const state = url.searchParams.get('state') || body.state || '';
-        const stateUserId = state.startsWith('google_cloud_oauth:') ? state.split(':')[1] : undefined;
+        const stateParts = state.split(':');
+        const stateUserId = state.startsWith('google_cloud_oauth:') ? stateParts[1] : undefined;
+        const stateReturnTo = stateParts.length > 2 ? decodeURIComponent(stateParts.slice(2).join(':')) : null;
         const callbackUserId = stateUserId || userContext.userId;
         if (!code) {
           return new Response(JSON.stringify({
@@ -701,14 +707,53 @@ serve(async (req) => {
           }
         }
 
-        return new Response(JSON.stringify({
+        const callbackResponse = {
           success: true,
           message: 'Authorization successful! Refresh token has been saved to the database.',
           refresh_token: tokens.refresh_token,
           access_token: tokens.access_token,
           expires_in: tokens.expires_in,
           scope: tokens.scope
-        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        };
+
+        // Browser redirects from Google are GET requests.
+        // Return an auto-close + redirect page to support popup (desktop) and full-page/mobile flows.
+        if (req.method === 'GET') {
+          const safeReturnTo = stateReturnTo && /^https?:\/\//i.test(stateReturnTo)
+            ? stateReturnTo
+            : null;
+          const fallbackUrl = `${url.origin}/dashboard`;
+          const redirectTarget = safeReturnTo || fallbackUrl;
+          const redirectTargetJson = JSON.stringify(redirectTarget);
+          const payloadJson = JSON.stringify(callbackResponse);
+          const html = `<!doctype html>
+<html>
+  <head><meta charset="utf-8"><title>Google Cloud Connected</title></head>
+  <body>
+    <script>
+      (function () {
+        const payload = ${payloadJson};
+        const redirectTarget = ${redirectTargetJson};
+        try {
+          if (window.opener && !window.opener.closed) {
+            window.opener.postMessage({ type: 'google-cloud-oauth-complete', success: true, data: payload }, '*');
+            window.close();
+            return;
+          }
+        } catch (_) {}
+        window.location.replace(redirectTarget);
+      })();
+    </script>
+    <p>Authorization complete. Redirecting…</p>
+  </body>
+</html>`;
+
+          return new Response(html, {
+            headers: { ...corsHeaders, 'Content-Type': 'text/html; charset=utf-8' }
+          });
+        }
+
+        return new Response(JSON.stringify(callbackResponse), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
       case 'get_access_token': {
