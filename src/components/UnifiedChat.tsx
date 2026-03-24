@@ -2507,6 +2507,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
             disabled={isProcessing}
             lastMessageRole={messages.length === 0 ? null : messages[messages.length - 1].sender === 'user' ? 'user' : 'assistant'}
             hasUserEngaged={hasUserEngaged}
+            hasPastConversations={conversationSummaries.length > 0 || totalMessageCount > 0}
             lastMessageContent={messages.length > 0 ? messages[messages.length - 1].content : undefined}
             lastExecutive={messages.length > 0 ? (messages[messages.length - 1] as any).executive : undefined}
           />
