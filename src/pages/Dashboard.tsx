@@ -197,7 +197,7 @@ const Index = () => {
           </Card>
 
           {/* 3. System Activity Logs */}
-          <Card className="glass-card overflow-hidden">
+          <Card className="glass-card overflow-visible">
             <CardHeader className="border-b border-border/60 py-4 px-5">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-sm font-medium flex items-center gap-2">
@@ -209,7 +209,7 @@ const Index = () => {
                 </Badge>
               </div>
             </CardHeader>
-            <CardContent className="p-0">
+            <CardContent className="p-0 overflow-visible">
               <PythonShell />
             </CardContent>
           </Card>
