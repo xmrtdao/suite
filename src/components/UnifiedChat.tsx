@@ -101,14 +101,19 @@ interface UnifiedChatProps {
 }
 
 
-interface ProcessingStickyNote {
+interface ProcessingStickyTemplate {
   id: string;
   text: string;
   accentClassName: string;
   rotationClassName: string;
 }
 
-const PROCESSING_STICKY_NOTES: ProcessingStickyNote[] = [
+interface ProcessingStickyNote extends ProcessingStickyTemplate {
+  createdAt: number;
+  isFallingAway?: boolean;
+}
+
+const PROCESSING_STICKY_TEMPLATES: ProcessingStickyTemplate[] = [
   {
     id: 'tool-routing',
     text: 'Routing tools',
@@ -129,44 +134,22 @@ const PROCESSING_STICKY_NOTES: ProcessingStickyNote[] = [
   },
 ];
 
-const ProcessingStickyNotes = React.memo(({ isProcessing }: { isProcessing: boolean }) => {
-  const [isVisible, setIsVisible] = useState(isProcessing);
-  const [isFallingAway, setIsFallingAway] = useState(false);
-
-  useEffect(() => {
-    if (isProcessing) {
-      setIsVisible(true);
-      setIsFallingAway(false);
-      return;
-    }
-
-    if (!isVisible) return;
-
-    setIsFallingAway(true);
-    const timeout = window.setTimeout(() => {
-      setIsVisible(false);
-      setIsFallingAway(false);
-    }, 900);
-
-    return () => window.clearTimeout(timeout);
-  }, [isProcessing, isVisible]);
-
-  if (!isVisible) return null;
-
+const ProcessingStickyNotes = React.memo(({ notes }: { notes: ProcessingStickyNote[] }) => {
+  if (notes.length === 0) return null;
   return (
-    <div className="pointer-events-none absolute right-0 top-24 z-30 hidden xl:block">
-      <div className="relative w-[108px] translate-x-[calc(100%+16px)]">
-        {PROCESSING_STICKY_NOTES.map((note, index) => (
+    <div className="pointer-events-none absolute right-2 top-20 z-30 hidden md:block lg:right-0">
+      <div className="relative w-[116px] lg:translate-x-[calc(100%+16px)]">
+        {notes.map((note, index) => (
           <div
             key={note.id}
             className={`absolute right-0 w-[104px] rounded-[2px] border border-amber-300/70 bg-gradient-to-br ${note.accentClassName} p-3 shadow-[0_18px_45px_rgba(120,93,10,0.18)] transition-all duration-700 ${note.rotationClassName} ${
-              isFallingAway
+              note.isFallingAway
                 ? 'translate-y-[42vh] rotate-[16deg] opacity-0'
                 : 'opacity-100'
             }`}
             style={{
-              top: `${index * 132}px`,
-              animation: isFallingAway
+              top: `${index * 124}px`,
+              animation: note.isFallingAway
                 ? undefined
                 : `sticky-note-float 3.2s ease-in-out ${index * 180}ms infinite`,
               transitionDelay: `${index * 70}ms`,
@@ -190,16 +173,20 @@ const ProcessingStickyNotes = React.memo(({ isProcessing }: { isProcessing: bool
   );
 });
 
-const ProcessingStickyNotesInline = React.memo(() => (
-  <div className="relative flex h-12 w-[92px] items-start justify-end xl:hidden" aria-hidden="true">
-    {PROCESSING_STICKY_NOTES.map((note, index) => (
+const ProcessingStickyNotesInline = React.memo(({ notes }: { notes: ProcessingStickyNote[] }) => {
+  if (notes.length === 0) return null;
+
+  return (
+    <div className="relative flex h-12 w-[110px] items-start justify-end md:hidden" aria-hidden="true">
+    {notes.slice(-3).reverse().map((note, index) => (
       <div
         key={note.id}
         className={`absolute right-0 top-0 w-16 rounded-[2px] border border-amber-300/70 bg-gradient-to-br ${note.accentClassName} px-2 py-1.5 shadow-[0_10px_24px_rgba(120,93,10,0.18)] ${note.rotationClassName}`}
         style={{
           transform: `translateY(${index * 8}px) rotate(${index % 2 === 0 ? -6 : 5}deg)`,
           animation: `sticky-note-float 2.6s ease-in-out ${index * 180}ms infinite`,
-          zIndex: PROCESSING_STICKY_NOTES.length - index,
+          zIndex: 10 - index,
+          opacity: note.isFallingAway ? 0.2 : 1,
         }}
       >
         <p className="truncate text-[8px] font-semibold uppercase tracking-[0.14em] text-amber-900/70">
@@ -210,8 +197,46 @@ const ProcessingStickyNotesInline = React.memo(() => (
         </p>
       </div>
     ))}
-  </div>
-));
+    </div>
+  );
+});
+
+const normalizeStickyText = (value?: string | null) =>
+  value?.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+const getToolStickyText = (functionName: string) => {
+  const readable = normalizeStickyText(functionName) || 'this tool';
+  const lower = readable.toLowerCase();
+
+  if (lower.includes('browse') || lower.includes('search') || lower.includes('duckduckgo')) {
+    return `Looking up details using DuckDuckGo (${readable})`;
+  }
+  if (lower.includes('memory') || lower.includes('knowledge')) {
+    return `Checking memory context: ${readable}`;
+  }
+  if (lower.includes('github')) {
+    return `Reviewing GitHub changes via ${readable}`;
+  }
+  if (lower.includes('edge') || lower.includes('function')) {
+    return `Calling edge function: ${readable}`;
+  }
+  return `Working on: ${readable}`;
+};
+
+const getActivityStickyText = (activity: Record<string, any>) => {
+  const metadata = activity.metadata || {};
+  const functionName = normalizeStickyText(metadata.function_name || metadata.tool_name);
+  const description = normalizeStickyText(activity.description);
+  const title = normalizeStickyText(activity.title);
+  const activityType = normalizeStickyText(activity.activity_type)?.toLowerCase() || '';
+
+  if (functionName) return getToolStickyText(functionName);
+  if (activityType.includes('memory')) return `Trying to remember: ${description || title || 'recent context'}`;
+  if (activityType.includes('web') || activityType.includes('search')) return `Looking up: ${description || title || 'web context'}`;
+  if (activityType.includes('python')) return `Running Python task: ${title || description || 'execution'}`;
+  if (title) return title;
+  return description || 'Handling your request';
+};
 
 const MessageCopyButton = React.memo(({ content }: { content: string }) => {
   const [copied, setCopied] = useState(false);
@@ -459,6 +484,8 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   const [isConnected, setIsConnected] = useState(true); // Always connected for text/TTS mode
   const [realtimeConnected, setRealtimeConnected] = useState(false);
   const [hasUserEngaged, setHasUserEngaged] = useState(false); // Track if user has sent first message
+  const [processingNotes, setProcessingNotes] = useState<ProcessingStickyNote[]>([]);
+  const pendingNoteTimeoutsRef = useRef<number[]>([]);
 
   // Office Clerk loading progress
   const [officeClerkProgress, setOfficeClerkProgress] = useState<{
@@ -557,6 +584,47 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const liveProcessorRef = useRef<any>(null);
+
+  const clearPendingNoteTimeouts = useCallback(() => {
+    pendingNoteTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
+    pendingNoteTimeoutsRef.current = [];
+  }, []);
+
+  const enqueueProcessingNote = useCallback((text: string) => {
+    const normalizedText = normalizeStickyText(text);
+    if (!normalizedText) return;
+
+    setProcessingNotes((prev) => {
+      const template = PROCESSING_STICKY_TEMPLATES[prev.length % PROCESSING_STICKY_TEMPLATES.length];
+      const newNote: ProcessingStickyNote = {
+        ...template,
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        text: normalizedText,
+        createdAt: Date.now(),
+      };
+      return [...prev.slice(-5), newNote];
+    });
+  }, []);
+
+  const dropOldestProcessingNote = useCallback(() => {
+    let noteToRemoveId: string | null = null;
+
+    setProcessingNotes((prev) => {
+      const firstActive = prev.find((note) => !note.isFallingAway);
+      if (!firstActive) return prev;
+      noteToRemoveId = firstActive.id;
+      return prev.map((note) =>
+        note.id === firstActive.id ? { ...note, isFallingAway: true } : note
+      );
+    });
+
+    if (!noteToRemoveId) return;
+
+    const timeout = window.setTimeout(() => {
+      setProcessingNotes((prev) => prev.filter((note) => note.id !== noteToRemoveId));
+    }, 900);
+    pendingNoteTimeoutsRef.current.push(timeout);
+  }, []);
 
   // Input Mode State
   const [inputMode, setInputMode] = useState<'text' | 'voice' | 'multimodal'>('text');
@@ -835,6 +903,12 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       'eliza_activity_log',
       (payload) => {
         const activity = payload.new as Record<string, any>;
+        enqueueProcessingNote(getActivityStickyText(activity));
+
+        if (activity.status === 'completed' || activity.status === 'failed') {
+          dropOldestProcessingNote();
+        }
+
         if (activity.activity_type === 'agent_spawned') {
           console.log('🤖 Agent spawned:', activity.title);
         }
@@ -845,7 +919,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
 
     setRealtimeConnected(true);
     return () => unsubscribers.forEach(unsub => unsub());
-  }, [userContext?.ip]);
+  }, [userContext?.ip, enqueueProcessingNote, dropOldestProcessingNote]);
 
   // Subscribe to Office Clerk loading progress
   useEffect(() => {
@@ -879,6 +953,24 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       if (autoAdvanceTimerRef.current) clearInterval(autoAdvanceTimerRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (isProcessing && processingNotes.length === 0) {
+      enqueueProcessingNote('Organizing tool calls for your request');
+    }
+
+    if (!isProcessing && processingNotes.length > 0) {
+      clearPendingNoteTimeouts();
+      processingNotes.forEach((_, index) => {
+        const timeout = window.setTimeout(() => {
+          dropOldestProcessingNote();
+        }, index * 320);
+        pendingNoteTimeoutsRef.current.push(timeout);
+      });
+    }
+  }, [isProcessing, processingNotes, enqueueProcessingNote, dropOldestProcessingNote, clearPendingNoteTimeouts]);
+
+  useEffect(() => () => clearPendingNoteTimeouts(), [clearPendingNoteTimeouts]);
 
   // Keep handleSendMessageRef always pointing to the latest closure (no stale captures in setInterval)
   // This runs after every render, so the ref is always fresh when the timer fires.
@@ -1795,6 +1887,14 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       const toolCalls = (window as any).__lastElizaToolCalls || [];
       const executiveTitle = (window as any).__lastElizaExecutiveTitle || '';
 
+      if (toolCalls.length > 0) {
+        toolCalls.forEach((tool: { function_name?: string }) => {
+          if (tool.function_name) {
+            enqueueProcessingNote(getToolStickyText(tool.function_name));
+          }
+        });
+      }
+
       const elizaMessage: UnifiedMessage = {
         id: `eliza-${Date.now()}`,
         content: typeof displayContent === 'string'
@@ -1981,7 +2081,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
 
   return (
     <div className="relative overflow-visible">
-      <ProcessingStickyNotes isProcessing={isProcessing} />
+      <ProcessingStickyNotes notes={processingNotes} />
       <Card className={`bg-card border-border/60 flex flex-col h-[500px] sm:h-[600px] ${className}`}>
       {/* Voice Intelligence Toggle */}
       {/* Voice Intelligence Toggle Removed */}
@@ -2294,7 +2394,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
                         Check the sticky notes on the right for Eliza's progress.
                       </p>
                     </div>
-                    <ProcessingStickyNotesInline />
+                    <ProcessingStickyNotesInline notes={processingNotes} />
                   </div>
                 </div>
               </div>
