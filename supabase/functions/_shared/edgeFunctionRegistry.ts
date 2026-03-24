@@ -949,6 +949,14 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
     example_use: 'Get comprehensive mining data including pool stats and individual worker performance'
   },
   {
+    name: 'mirofish-oracle',
+    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/mirofish-oracle',
+    description: 'Swarm-intelligence oracle for decentralized adaptive predictions across ecosystem data streams',
+    capabilities: ['Swarm consensus forecasting', 'Adaptive trend prediction', 'Data stream health scoring', 'Confidence-bounded projections'],
+    category: 'ai',
+    example_use: '{"action":"predict","stream_name":"market_price","data_stream":[{"value":101.2},{"value":102.6},{"value":103.4}],"horizon":12,"swarm_size":16}'
+  },
+  {
     name: 'mobile-miner-config',
     url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/mobile-miner-config',
     description: 'Configuration management for mobile mining devices',
