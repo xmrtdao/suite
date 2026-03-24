@@ -5,15 +5,14 @@ import {
   Zap,
   Bot,
   Activity,
-  CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  AlertTriangle,
   Workflow,
   BrainCircuit,
   Network,
   Database,
   Cpu,
+  Gauge,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useLanguage } from '@/contexts/LanguageContext';
@@ -39,6 +38,18 @@ interface EcosystemEndpoint {
   path: string;
   status: 'healthy' | 'degraded' | 'error' | 'unknown';
   metric: string;
+}
+
+interface HeroDataPoint {
+  id: string;
+  label: string;
+  detail?: string;
+  kind: 'stat' | 'health' | 'endpoint';
+  status?: 'healthy' | 'degraded' | 'error' | 'unknown';
+  icon: React.ReactNode;
+  value?: number;
+  suffix?: string;
+  path?: string;
 }
 
 export const HeroSection = ({ stats }: HeroSectionProps) => {
@@ -189,6 +200,76 @@ export const HeroSection = ({ stats }: HeroSectionProps) => {
   const banner = marketingBanners[currentBanner];
   const registeredEdgeFunctions = stats.registeredEdgeFunctions;
 
+  const heroDataPoints: HeroDataPoint[] = [
+    {
+      id: 'executions',
+      label: t('hero.stats.executions'),
+      kind: 'stat',
+      icon: <Zap className="h-3 w-3 text-primary" />,
+      value: stats.totalExecutions,
+      suffix: '+',
+    },
+    {
+      id: 'agents',
+      label: t('hero.stats.agents'),
+      kind: 'stat',
+      icon: <Bot className="h-3 w-3 text-emerald-500" />,
+      value: stats.activeAgents,
+    },
+    {
+      id: 'health',
+      label: t('hero.stats.health'),
+      kind: 'health',
+      icon: <Gauge className="h-3 w-3 text-amber-500" />,
+      value: stats.healthScore,
+      suffix: '%',
+      detail: stats.healthIssues[0],
+      status:
+        stats.healthScore >= 95
+          ? 'healthy'
+          : stats.healthScore >= 80
+            ? 'degraded'
+            : 'error',
+    },
+    {
+      id: 'tasks',
+      label: t('hero.stats.tasks'),
+      kind: 'stat',
+      icon: <Activity className="h-3 w-3 text-amber-500" />,
+      value: stats.activeTasks,
+    },
+    {
+      id: 'registered-edge-functions',
+      label: 'Edge functions (system)',
+      kind: 'stat',
+      icon: <Workflow className="h-3 w-3 text-sky-500" />,
+      value: registeredEdgeFunctions,
+    },
+    {
+      id: 'knowledge-entities',
+      label: 'Knowledge entities',
+      kind: 'stat',
+      icon: <BrainCircuit className="h-3 w-3 text-violet-500" />,
+      value: stats.knowledgeEntities,
+    },
+    ...ecosystemEndpoints.map((endpoint) => ({
+      id: endpoint.id,
+      label: endpoint.name,
+      kind: 'endpoint' as const,
+      icon:
+        endpoint.id === 'database' ? (
+          <Database className="h-2.5 w-2.5 text-primary" />
+        ) : endpoint.id === 'agent-runtime' ? (
+          <Cpu className="h-2.5 w-2.5 text-primary" />
+        ) : (
+          <Workflow className="h-2.5 w-2.5 text-primary" />
+        ),
+      detail: endpoint.metric,
+      status: endpoint.status,
+      path: endpoint.path,
+    })),
+  ];
+
   return (
     <section className="relative w-full overflow-hidden rounded-2xl border border-border/60 bg-card/70 shadow-sm">
       <div
@@ -256,60 +337,23 @@ export const HeroSection = ({ stats }: HeroSectionProps) => {
           </button>
         </div>
 
-        <div className="grid gap-2 xl:grid-cols-[minmax(0,1.8fr)_minmax(240px,0.9fr)]">
-          <div className="grid grid-cols-3 gap-2 md:grid-cols-6">
-            <StatCard
-              icon={<Zap className="h-3 w-3 text-primary" />}
-              label={t('hero.stats.executions')}
-              value={stats.totalExecutions}
-              suffix="+"
-            />
-            <StatCard
-              icon={<Bot className="h-3 w-3 text-emerald-500" />}
-              label={t('hero.stats.agents')}
-              value={stats.activeAgents}
-            />
-            <HealthStatCard
-              healthScore={stats.healthScore}
-              healthStatus={stats.healthStatus}
-              healthIssues={stats.healthIssues}
-              label={t('hero.stats.health')}
-            />
-            <StatCard
-              icon={<Activity className="h-3 w-3 text-amber-500" />}
-              label={t('hero.stats.tasks')}
-              value={stats.activeTasks}
-            />
-            <StatCard
-              icon={<Workflow className="h-3 w-3 text-sky-500" />}
-              label="Edge functions (system)"
-              value={registeredEdgeFunctions}
-            />
-            <StatCard
-              icon={<BrainCircuit className="h-3 w-3 text-violet-500" />}
-              label="Knowledge entities"
-              value={stats.knowledgeEntities}
-            />
+        <div className="glass-card rounded-xl border border-primary/15 bg-background/65 p-2 shadow-lg shadow-primary/5">
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <div>
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+                <Network className="h-3 w-3 text-primary" />
+                Unified data module
+              </div>
+              <p className="mt-0.5 text-[10px] text-muted-foreground">
+                Core hero metrics and ecosystem endpoint telemetry.
+              </p>
+            </div>
           </div>
 
-          <div className="glass-card flex min-h-[112px] flex-col rounded-xl border border-primary/15 bg-background/65 p-2 shadow-lg shadow-primary/5">
-            <div className="mb-1.5 flex items-center justify-between gap-2">
-              <div>
-                <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
-                  <Network className="h-3 w-3 text-primary" />
-                  Ecosystem endpoints
-                </div>
-                <p className="mt-0.5 text-[10px] text-muted-foreground">
-                  Live endpoint telemetry across core services.
-                </p>
-              </div>
-            </div>
-
-            <div className="grid min-h-0 flex-1 grid-cols-2 gap-1 overflow-hidden">
-              {ecosystemEndpoints.slice(0, 6).map((endpoint) => (
-                <EndpointCard key={endpoint.id} endpoint={endpoint} />
-              ))}
-            </div>
+          <div className="grid grid-cols-2 gap-1 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+            {heroDataPoints.map((point) => (
+              <DataPointCard key={point.id} point={point} />
+            ))}
           </div>
         </div>
       </div>
@@ -317,107 +361,51 @@ export const HeroSection = ({ stats }: HeroSectionProps) => {
   );
 };
 
-interface StatCardProps {
-  icon: React.ReactNode;
-  label: string;
-  value: number;
-  suffix?: string;
-}
-
-const StatCard = ({ icon, label, value, suffix = '' }: StatCardProps) => (
-  <div className="glass-card rounded-xl border border-border/50 bg-background/60 p-1.5 text-center backdrop-blur-sm transition-transform hover:-translate-y-0.5">
-    <div className="mb-1 flex justify-center">{icon}</div>
-    <div className="text-sm font-bold text-foreground md:text-base">
-      <AnimatedCounter end={value} suffix={suffix} />
-    </div>
-    <p className="mt-0.5 text-[9px] leading-tight text-muted-foreground">{label}</p>
-  </div>
-);
-
-const EndpointCard = ({ endpoint }: { endpoint: EcosystemEndpoint }) => {
+const DataPointCard = ({ point }: { point: HeroDataPoint }) => {
   const statusClass =
-    endpoint.status === 'healthy'
+    point.status === 'healthy'
       ? 'bg-emerald-500'
-      : endpoint.status === 'degraded'
+      : point.status === 'degraded'
         ? 'bg-amber-500'
-        : endpoint.status === 'error'
+        : point.status === 'error'
           ? 'bg-destructive'
           : 'bg-muted-foreground';
-
-  const icon =
-    endpoint.id === 'database' ? (
-      <Database className="h-2.5 w-2.5" />
-    ) : endpoint.id === 'agent-runtime' ? (
-      <Cpu className="h-2.5 w-2.5" />
-    ) : (
-      <Workflow className="h-2.5 w-2.5" />
-    );
+  const isEndpoint = point.kind === 'endpoint';
+  const isHealth = point.kind === 'health';
+  const valueClass =
+    isHealth && point.value !== undefined
+      ? point.value >= 95
+        ? 'text-emerald-500'
+        : point.value >= 80
+          ? 'text-amber-500'
+          : 'text-destructive'
+      : 'text-foreground';
 
   return (
     <div className="rounded-md border border-border/50 bg-background/50 px-1.5 py-1 text-[9px]">
       <div className="flex items-center justify-between gap-1">
         <div className="inline-flex items-center gap-1 truncate font-medium text-foreground">
-          {icon}
-          <span className="truncate">{endpoint.name}</span>
+          {point.icon}
+          <span className="truncate">{point.label}</span>
         </div>
-        <span className={cn('h-1.5 w-1.5 rounded-full', statusClass)} />
+        {(isEndpoint || isHealth) && (
+          <span className={cn('h-1.5 w-1.5 rounded-full', statusClass)} />
+        )}
       </div>
-      <p className="truncate text-[8px] text-muted-foreground">/{endpoint.path}</p>
-      <p className="truncate text-[9px] text-foreground">{endpoint.metric}</p>
-    </div>
-  );
-};
-
-interface HealthStatCardProps {
-  healthScore: number;
-  healthStatus: 'healthy' | 'degraded' | 'critical';
-  healthIssues: string[];
-  label: string;
-}
-
-const HealthStatCard = ({
-  healthScore,
-  healthIssues,
-  label,
-}: HealthStatCardProps) => {
-  const getHealthColor = () => {
-    if (healthScore >= 95) return 'text-emerald-500';
-    if (healthScore >= 80) return 'text-amber-500';
-    return 'text-destructive';
-  };
-
-  const getHealthIcon = () => {
-    if (healthScore >= 95)
-      return <CheckCircle2 className="h-4 w-4 text-emerald-500" />;
-    if (healthScore >= 80)
-      return <AlertTriangle className="h-4 w-4 text-amber-500" />;
-    return <AlertTriangle className="h-4 w-4 text-destructive" />;
-  };
-
-  const getBorderClass = () => {
-    if (healthScore >= 95) return '';
-    if (healthScore >= 80) return 'ring-1 ring-amber-500/40';
-    return 'ring-1 ring-destructive/50';
-  };
-
-  return (
-    <div
-      className={cn(
-        'glass-card rounded-xl border border-border/50 bg-background/60 p-1.5 text-center backdrop-blur-sm transition-transform hover:-translate-y-0.5',
-        getBorderClass()
-      )}
-    >
-      <div className="mb-1 flex justify-center">{getHealthIcon()}</div>
-      <div className={cn('text-sm font-bold md:text-base', getHealthColor())}>
-        <AnimatedCounter end={healthScore} suffix="%" />
-      </div>
-      <p className="mt-0.5 text-[9px] leading-tight text-muted-foreground">
-        {label}
-      </p>
-      {healthIssues.length > 0 && (
-        <p className="mt-0.5 truncate text-[9px] text-amber-500">
-          {healthIssues[0]}
-        </p>
+      {isEndpoint ? (
+        <>
+          <p className="truncate text-[8px] text-muted-foreground">/{point.path}</p>
+          <p className="truncate text-[9px] text-foreground">{point.detail}</p>
+        </>
+      ) : (
+        <>
+          <div className={cn('truncate text-sm font-bold md:text-base', valueClass)}>
+            <AnimatedCounter end={point.value ?? 0} suffix={point.suffix} />
+          </div>
+          <p className="truncate text-[8px] text-muted-foreground">
+            {point.detail || 'Live dashboard metric'}
+          </p>
+        </>
       )}
     </div>
   );
