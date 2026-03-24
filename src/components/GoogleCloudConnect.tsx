@@ -25,7 +25,7 @@ export const GoogleCloudConnect: React.FC<GoogleCloudConnectProps> = ({ classNam
     const code = urlParams.get('code');
     const state = urlParams.get('state');
     
-    if (code && state === 'google_cloud_oauth') {
+    if (code && state?.startsWith('google_cloud_oauth')) {
       handleOAuthCallback(code);
       // Clean up URL
       window.history.replaceState({}, document.title, window.location.pathname);

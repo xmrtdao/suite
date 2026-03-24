@@ -157,7 +157,7 @@ export const DiscreetCredentialPrompt: React.FC<DiscreetCredentialPromptProps> =
                 )}
               </Button>
               <p className="text-xs text-muted-foreground text-center">
-                Opens Google sign-in for xmrtsolutions@gmail.com
+                Opens Google sign-in so you can authorize your own account
               </p>
             </div>
           ) : (
@@ -235,7 +235,7 @@ export const DiscreetCredentialPrompt: React.FC<DiscreetCredentialPromptProps> =
             <AlertCircle className="h-3 w-3 mt-0.5 flex-shrink-0" />
             <p>
               {isOAuthService 
-                ? 'OAuth connection uses xmrtsolutions@gmail.com for backend access only'
+                ? 'OAuth connects your own Google account so edge functions run on your authorized Gmail/Drive/Sheets access.'
                 : "Your credential won't be logged or permanently stored unless you uncheck \"session only\""
               }
             </p>
