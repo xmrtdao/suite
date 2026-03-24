@@ -225,9 +225,11 @@ async function getUserRefreshTokenStrict(opts: {
  * First checks user-specific tokens in database, then falls back to environment variable
  */
 export async function getGoogleAccessToken(
-  userCtx: { userId?: string; userEmail?: string; requestedFrom?: string }
+  userCtx: { userId?: string; userEmail?: string; requestedFrom?: string },
+  options?: { allowEnvFallback?: boolean }
 ): Promise<UserTokenInfo | { error: string; code: number; reason?: string }> {
   try {
+    const allowEnvFallback = options?.allowEnvFallback ?? false;
     const strict = await getUserRefreshTokenStrict(userCtx);
 
     // If requestedFrom is specified but no matching token found, return error
@@ -240,7 +242,7 @@ export async function getGoogleAccessToken(
     }
 
     // No user-specific token found, try environment fallback
-    if (!strict) {
+    if (!strict && allowEnvFallback) {
       const envRefresh = Deno.env.get('GOOGLE_REFRESH_TOKEN') || Deno.env.get('GMAIL_REFRESH_TOKEN');
       
       if (!envRefresh) {
@@ -256,6 +258,14 @@ export async function getGoogleAccessToken(
         accessToken: access, 
         userEmail: 'env-fallback', 
         userId: 'env-fallback' 
+      };
+    }
+
+    if (!strict) {
+      return {
+        error: 'No Google account connected for this user. Please authorize your own Google account.',
+        code: 401,
+        reason: 'user_oauth_required'
       };
     }
 
@@ -305,8 +315,8 @@ export async function isGoogleConfigured(userCtx?: { userId?: string; userEmail?
       }
     }
 
-    // Check environment fallback
-    if (Deno.env.get('GOOGLE_REFRESH_TOKEN') || Deno.env.get('GMAIL_REFRESH_TOKEN')) {
+    // Check environment fallback only when no user context is provided
+    if (!userCtx && (Deno.env.get('GOOGLE_REFRESH_TOKEN') || Deno.env.get('GMAIL_REFRESH_TOKEN'))) {
       console.log('Google configured via environment variables (fallback)');
       return true;
     }
