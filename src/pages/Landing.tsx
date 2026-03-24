@@ -5,6 +5,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { useAuth } from '@/contexts/AuthContext';
 import { DemoVideoModal } from '@/components/DemoVideoModal';
 import { LandingNav } from '@/components/LandingNav';
+import { AuthModal } from '@/components/AuthModal';
 import { Footer } from '@/components/Footer';
 import { useLanguage } from '@/contexts/LanguageContext';
 import {
@@ -126,6 +127,7 @@ export default function Landing() {
   const { isAuthenticated, isLoading } = useAuth();
   const { t } = useLanguage();
   const [demoOpen, setDemoOpen] = useState(false);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
 
   // Redirect authenticated users to dashboard
   useEffect(() => {
@@ -136,9 +138,9 @@ export default function Landing() {
 
   const handleGetStarted = async () => {
     if (isAuthenticated) {
-      window.location.href = '/dashboard';
+      navigate('/dashboard');
     } else {
-      window.location.href = '/signup'; // <--- This will correctly redirect to the signup/OAuth screen
+      setAuthModalOpen(true);
     }
   };
 
@@ -470,6 +472,9 @@ export default function Landing() {
       </section>
 
       <Footer />
+
+      {/* Auth Modal */}
+      <AuthModal open={authModalOpen} onOpenChange={setAuthModalOpen} />
 
       {/* Demo Video Modal */}
       <DemoVideoModal open={demoOpen} onOpenChange={setDemoOpen} />
