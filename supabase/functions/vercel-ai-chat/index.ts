@@ -34,7 +34,7 @@ serve(async (req) => {
       executiveName: 'Dr. Anya Sharma',
       // Non-lead execs must not receive ELIZA_TOOLS — only the lead gets tool access
       useFullElizaContext: councilMode ? !!isLeadExecutive : true,
-      maxTokens: 4000,
+      maxTokens: 16000,
       temperature: 0.7,
     };
 

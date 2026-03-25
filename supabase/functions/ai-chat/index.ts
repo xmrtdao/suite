@@ -163,6 +163,7 @@ const corsHeaders = {
 // ========== SHARED CONSTANTS ==========
 const AMBIGUOUS_RESPONSES = ['yes', 'yeah', 'yep', 'sure', 'ok', 'okay', 'alright', 'fine', 'go ahead', 'proceed', 'no', 'nope', 'nah'];
 const POSITIVE_AMBIGUOUS = ['yes', 'yeah', 'yep', 'sure', 'ok', 'okay', 'alright', 'fine', 'go ahead', 'proceed'];
+const RESPONSE_MAX_TOKENS = parseInt(Deno.env.get('RESPONSE_MAX_TOKENS') || '16000');
 
 function isSimpleDirectAnswerQuery(query: string): boolean {
   const normalized = (query || '').trim().toLowerCase();
@@ -2430,7 +2431,7 @@ async function callDeepSeekFallback(messages: any[], tools?: any[]): Promise<any
         tools,
         tool_choice: tools ? (forceTools ? 'required' : 'auto') : undefined,
         temperature: 0.7,
-        max_tokens: 8000,
+        max_tokens: RESPONSE_MAX_TOKENS,
       }),
       signal: controller.signal
     });
@@ -2486,7 +2487,7 @@ async function callKimiFallback(messages: any[], tools?: any[]): Promise<any> {
         tools,
         tool_choice: tools ? (forceTools ? 'required' : 'auto') : undefined,
         temperature: 0.9,
-        max_tokens: 8000,
+        max_tokens: RESPONSE_MAX_TOKENS,
       }),
       signal: controller.signal
     });
@@ -2565,7 +2566,7 @@ async function callGeminiFallback(
           body: JSON.stringify({
             contents: [{ parts }],
             tools: geminiTools,
-            generationConfig: { temperature: 0.7, maxOutputTokens: 8000 }
+            generationConfig: { temperature: 0.7, maxOutputTokens: RESPONSE_MAX_TOKENS }
           }),
           signal: controller.signal
         }
@@ -3098,7 +3099,7 @@ class EnhancedProviderCascade {
         model: 'gpt-4o-mini',
         messages: messages,
         temperature: 0.7,
-        max_tokens: 4000,
+        max_tokens: RESPONSE_MAX_TOKENS,
         ...(tools.length > 0 && { 
           tools: tools, 
           tool_choice: forceTools ? 'required' : 'auto' 
@@ -3221,7 +3222,7 @@ class EnhancedProviderCascade {
           contents: geminiMessages,
           generationConfig: {
             temperature: 0.7,
-            maxOutputTokens: 4000
+            maxOutputTokens: RESPONSE_MAX_TOKENS
           }
         };
         
@@ -3332,7 +3333,7 @@ class EnhancedProviderCascade {
         model: 'deepseek-chat',
         messages: messages,
         temperature: 0.7,
-        max_tokens: 4000,
+        max_tokens: RESPONSE_MAX_TOKENS,
         ...(tools.length > 0 && { 
           tools: tools, 
           tool_choice: forceTools ? 'required' : 'auto' 
@@ -3385,7 +3386,7 @@ class EnhancedProviderCascade {
         model: 'moonshotai/kimi-k2',
         messages: messages,
         temperature: 0.9,
-        max_tokens: 4000,
+        max_tokens: RESPONSE_MAX_TOKENS,
         ...(tools.length > 0 && { 
           tools: tools, 
           tool_choice: forceTools ? 'required' : 'auto' 
@@ -3437,7 +3438,7 @@ class EnhancedProviderCascade {
       },
       body: JSON.stringify({
         model: 'claude-3-5-haiku-20241022',
-        max_tokens: 4000,
+        max_tokens: RESPONSE_MAX_TOKENS,
         temperature: 0.7,
         system: systemPrompt,
         messages: [{
