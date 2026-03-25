@@ -3045,15 +3045,15 @@ Response includes ecosystem_summary with one-line stats for each component.`,
   {
     type: 'function',
     function: {
-      name: 'google_gmail',
-      description: '📧 Send and manage emails via xmrtsolutions@gmail.com. Actions: send_email, list_emails, get_email, create_draft. Use for automated notifications, lead follow-ups, and professional communications.',
+      name: 'google_cloud_auth',
+      description: '☁️ Unified Google Cloud operations via google-cloud-auth. Handles Gmail, Drive, Sheets, and Calendar actions through a single authenticated endpoint.',
       parameters: {
         type: 'object',
         properties: {
           action: {
             type: 'string',
-            enum: ['send_email', 'list_emails', 'get_email', 'create_draft'],
-            description: 'Gmail action to perform'
+            enum: ['status', 'send_email', 'list_emails', 'get_email', 'create_draft', 'list_files', 'upload_file', 'get_file', 'download_file', 'create_folder', 'share_file', 'create_spreadsheet', 'read_sheet', 'write_sheet', 'append_sheet', 'get_spreadsheet_info', 'list_events', 'create_event', 'update_event', 'delete_event', 'get_event'],
+            description: 'google-cloud-auth action to perform'
           },
           to: { type: 'string', description: 'Recipient email address (for send_email, create_draft)' },
           subject: { type: 'string', description: 'Email subject line' },
