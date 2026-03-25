@@ -3,6 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 
 export interface MiningStats {
   hashRate: number;
+  hashrate: number; // Alias for mining telemetry consumers
   validShares: number;
   totalHashes: number;
   amountDue: number;
@@ -183,14 +184,20 @@ class UnifiedDataService {
       
       const data = await response.json();
       console.log('✅ UnifiedData: Mining stats retrieved');
+
+      // mining-proxy may expose hashrate as hash/currentHashrate/totalHashrate/hashRate
+      const hashrate = Number(
+        data.hash ?? data.currentHashrate ?? data.totalHashrate ?? data.hashRate ?? 0
+      );
       
       const miningStats: MiningStats = {
-        hashRate: data.hash || 0,
+        hashRate: hashrate,
+        hashrate,
         validShares: data.validShares || 0,
         totalHashes: data.totalHashes || 0,
-        amountDue: (data.amtDue || 0) / 1000000000000, // Convert from atomic units
-        amountPaid: (data.amtPaid || 0) / 1000000000000,
-        isOnline: data.lastHash ? ((Date.now() / 1000) - data.lastHash) < 300 : false, // Online if last hash within 5 minutes
+        amountDue: Number(data.amountDue ?? data.amtDue ?? 0),
+        amountPaid: Number(data.amountPaid ?? data.amtPaid ?? 0),
+        isOnline: data.lastHash ? ((Date.now() / 1000) - data.lastHash) < 300 : hashrate > 0, // Online if last hash within 5 minutes
         lastUpdate: new Date()
       };
 
