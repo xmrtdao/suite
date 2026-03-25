@@ -4260,6 +4260,40 @@ const ELIZA_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'updateGitHubIssue',
+      description: 'Update an existing GitHub issue',
+      parameters: {
+        type: 'object',
+        properties: {
+          issue_number: { type: 'number' },
+          title: { type: 'string' },
+          body: { type: 'string' },
+          state: { type: 'string', enum: ['open', 'closed', 'all'] },
+          labels: { type: 'array', items: { type: 'string' } },
+          assignees: { type: 'array', items: { type: 'string' } }
+        },
+        required: ['issue_number']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'closeGitHubIssue',
+      description: 'Close a GitHub issue',
+      parameters: {
+        type: 'object',
+        properties: {
+          issue_number: { type: 'number' },
+          body: { type: 'string' }
+        },
+        required: ['issue_number']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
       name: 'commentOnGitHubDiscussion',
       description: 'Add a comment to a GitHub discussion',
       parameters: {
