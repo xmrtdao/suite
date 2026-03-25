@@ -14,6 +14,49 @@ interface VscoRequestOptions {
   params?: Record<string, string>;
 }
 
+const VSCO_SYNC_MAX_RETRIES = 3;
+const VSCO_SYNC_RETRY_DELAY_MS = 250;
+
+function isNil(value: unknown): value is null | undefined {
+  return value === null || value === undefined;
+}
+
+function moneyCentsToDollars(value: unknown): number | null {
+  if (isNil(value) || value === '') return null;
+  const parsed = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  return parsed / 100;
+}
+
+function integerFromCents(value: unknown): number | null {
+  const dollars = moneyCentsToDollars(value);
+  if (isNil(dollars)) return null;
+  return Math.round(dollars);
+}
+
+function buildJobFinancials(job: Record<string, any>) {
+  const cents = {
+    totalRevenue: job.totalRevenue ?? job.total ?? null,
+    totalCost: job.totalCost ?? null,
+    totalProfit: job.totalProfit ?? null,
+    accountBalance: job.accountBalance ?? null,
+  };
+
+  return {
+    cents,
+    dollars: {
+      total_revenue: moneyCentsToDollars(cents.totalRevenue),
+      total_cost: moneyCentsToDollars(cents.totalCost),
+      total_profit: integerFromCents(cents.totalProfit),
+      account_balance: moneyCentsToDollars(cents.accountBalance),
+    },
+  };
+}
+
+async function delay(ms: number) {
+  return await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function vscoRequest(
   supabase: any,
   endpoint: string,
@@ -1592,6 +1635,12 @@ Deno.serve(async (req) => {
             let chunkJobCount = 0;
             let firstPageMeta: any = null;
 
+            const debugSampleSize = Math.max(1, Number(data.debug_sample_size) || 10);
+            let financialDebugLogged = 0;
+            let jobsWithFinancials = 0;
+            let jobsWithoutFinancials = 0;
+            let upsertFailures = 0;
+
             for (let page = startPage; page <= endPage; page++) {
               const jobsResponse = await vscoRequest(supabase, '/job', {
                 params: { page: String(page), pageSize: '100', includeClosed: 'true' }
@@ -1617,7 +1666,15 @@ Deno.serve(async (req) => {
 
               for (const job of jobsArray) {
                 const pc = job.primaryContact || {};
-                const { error: upsertErr } = await supabase.from('vsco_jobs').upsert({
+                const financials = buildJobFinancials(job);
+                const hasAnyFinancials = Object.values(financials.dollars).some((value) => value !== null);
+                if (hasAnyFinancials) {
+                  jobsWithFinancials++;
+                } else {
+                  jobsWithoutFinancials++;
+                }
+
+                const jobUpsertPayload = {
                   vsco_id: job.id,
                   name: job.name,
                   stage: job.stage,
@@ -1633,22 +1690,83 @@ Deno.serve(async (req) => {
                   brand_id: job.brandId,
                   event_date: job.eventDate,
                   booking_date: job.bookingDate,
-                  total_revenue: job.total,
+                  total_revenue: financials.dollars.total_revenue,
+                  total_cost: financials.dollars.total_cost,
+                  total_profit: financials.dollars.total_profit,
+                  account_balance: financials.dollars.account_balance,
                   closed: job.closed ?? false,
                   closed_reason: job.closedReason,
                   raw_data: job,
                   synced_at: new Date().toISOString(),
-                }, { onConflict: 'vsco_id' });
+                };
+
+                if (financialDebugLogged < debugSampleSize) {
+                  console.log(`🔍 [sync_jobs] Financial mapping sample ${financialDebugLogged + 1}/${debugSampleSize}`, JSON.stringify({
+                    job_id: job.id,
+                    job_name: job.name,
+                    source_cents: financials.cents,
+                    mapped_payload: {
+                      total_revenue: jobUpsertPayload.total_revenue,
+                      total_cost: jobUpsertPayload.total_cost,
+                      total_profit: jobUpsertPayload.total_profit,
+                      account_balance: jobUpsertPayload.account_balance,
+                    },
+                  }));
+                  financialDebugLogged++;
+                }
+
+                let upsertErr: any = null;
+                for (let attempt = 1; attempt <= VSCO_SYNC_MAX_RETRIES; attempt++) {
+                  const { error } = await supabase
+                    .from('vsco_jobs')
+                    .upsert(jobUpsertPayload, { onConflict: 'vsco_id' });
+
+                  if (!error) {
+                    upsertErr = null;
+                    break;
+                  }
+
+                  upsertErr = error;
+                  console.error(`❌ [sync_jobs] UPSERT FAILED (attempt ${attempt}/${VSCO_SYNC_MAX_RETRIES})`, JSON.stringify({
+                    job_id: job.id,
+                    job_name: job.name,
+                    message: error.message,
+                    details: error.details,
+                    hint: error.hint,
+                    code: error.code,
+                    financial_payload: {
+                      total_revenue: jobUpsertPayload.total_revenue,
+                      total_cost: jobUpsertPayload.total_cost,
+                      total_profit: jobUpsertPayload.total_profit,
+                      account_balance: jobUpsertPayload.account_balance,
+                    },
+                    source_financial_cents: financials.cents,
+                  }));
+
+                  if (attempt < VSCO_SYNC_MAX_RETRIES) {
+                    await delay(VSCO_SYNC_RETRY_DELAY_MS * attempt);
+                  }
+                }
 
                 if (upsertErr) {
-                  if (syncResults.jobs === 0 && chunkJobCount === 0) {
-                    console.error(`❌ [sync_jobs] UPSERT FAILED: ${upsertErr.message}`);
-                  }
+                  upsertFailures++;
                   syncResults.errors.push(`Upsert ${job.id}: ${upsertErr.message}`);
-                } else {
-                  syncResults.jobs++;
-                  chunkJobCount++;
+                  continue;
                 }
+
+                if (hasAnyFinancials && (syncResults.jobs + chunkJobCount) % 200 === 0) {
+                  console.log(`✅ [sync_jobs] Financial payload persisted`, JSON.stringify({
+                    job_id: job.id,
+                    job_name: job.name,
+                    total_revenue: jobUpsertPayload.total_revenue,
+                    total_cost: jobUpsertPayload.total_cost,
+                    total_profit: jobUpsertPayload.total_profit,
+                    account_balance: jobUpsertPayload.account_balance,
+                  }));
+                }
+
+                syncResults.jobs++;
+                chunkJobCount++;
               }
 
               lastPageSynced = page;
@@ -1685,6 +1803,14 @@ Deno.serve(async (req) => {
               syncResults.delta_mode = true;
               syncResults.progress = `Delta sync: checked page 1 for new/modified jobs. ${chunkJobCount} records updated.`;
             }
+
+            console.log(`📊 [sync_jobs] Financial sync summary`, JSON.stringify({
+              jobs_updated_this_call: chunkJobCount,
+              jobs_with_financials: jobsWithFinancials,
+              jobs_without_financials: jobsWithoutFinancials,
+              upsert_failures: upsertFailures,
+              pages_synced: syncResults.pages_synced_this_call,
+            }));
 
           } catch (e) {
             syncResults.errors.push(`Jobs sync exception: ${e}`);
