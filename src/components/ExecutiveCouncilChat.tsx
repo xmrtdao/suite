@@ -86,8 +86,9 @@ export const ExecutiveCouncilChat: React.FC<ExecutiveCouncilChatProps> = ({ deli
           code({ node, inline, className, children, ...props }: any) {
             const match = /language-(\w+)/.exec(className || '');
             const codeString = String(children).replace(/\n$/, '');
-            if (!inline && match) {
-              return <CodeBlock code={codeString} language={match[1]} {...props} />;
+            const language = match?.[1] || 'text';
+            if (!inline) {
+              return <CodeBlock code={codeString} language={language} {...props} />;
             }
             return (
               <code className={`${className} bg-muted px-1.5 py-0.5 rounded-md font-mono text-xs`} {...props}>

@@ -292,9 +292,10 @@ const markdownComponents = {
   code({ inline, className, children, ...props }: any) {
     const match = /language-(\w+)/.exec(className || '');
     const codeString = String(children).replace(/\n$/, '');
+    const language = match?.[1] || 'text';
 
-    if (!inline && match) {
-      return <MessageCodeBlock code={codeString} language={match[1]} {...props} />;
+    if (!inline) {
+      return <MessageCodeBlock code={codeString} language={language} {...props} />;
     }
 
     return (

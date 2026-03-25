@@ -133,8 +133,9 @@ export const ExecutiveMiniChat = ({ executive, className = '' }: ExecutiveMiniCh
           code({ node, inline, className, children, ...props }: any) {
             const match = /language-(\w+)/.exec(className || '');
             const codeString = String(children).replace(/\n$/, '');
-            if (!inline && match) {
-              return <CodeBlock code={codeString} language={match[1]} {...props} />;
+            const language = match?.[1] || 'text';
+            if (!inline) {
+              return <CodeBlock code={codeString} language={language} {...props} />;
             }
             return (
               <code className={`${className} bg-muted px-1 py-0.5 rounded font-mono text-[10px]`} {...props}>
