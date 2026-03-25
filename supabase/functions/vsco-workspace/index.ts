@@ -214,7 +214,7 @@ Deno.serve(async (req) => {
           { name: 'update_contact', category: 'contacts', required: ['contact_id'], optional: ['email', 'first_name', 'last_name'] },
           { name: 'delete_contact', category: 'contacts', required: ['contact_id'], optional: [] },
           // Events
-          { name: 'list_events', category: 'events', required: [], optional: ['start_date', 'end_date', 'job_id'] },
+          { name: 'list_events', category: 'events', required: [], optional: ['start_date', 'end_date', 'job_id', 'page', 'page_size', 'sort_by', 'sort', 'sort_order', 'max_recent_pages'] },
           { name: 'get_event', category: 'events', required: ['event_id'], optional: [] },
           { name: 'create_event', category: 'events', required: ['title', 'start_date'], optional: ['end_date', 'job_id'] },
           { name: 'update_event', category: 'events', required: ['event_id'], optional: ['title', 'start_date'] },
@@ -1261,7 +1261,6 @@ Deno.serve(async (req) => {
       case 'list_events': {
         const params: Record<string, string> = {};
         if (data.job_id) params.jobId = data.job_id;
-        if (data.page) params.page = String(data.page);
         if (data.page_size) params.pageSize = String(data.page_size);
         else params.pageSize = '100';
 
@@ -1269,12 +1268,6 @@ Deno.serve(async (req) => {
         if (data.sort_by) params.sortBy = data.sort_by;
         else if (data.sort) params.sortBy = data.sort; // backward compatibility for existing callers
         else params.sortBy = '-startDate';
-
-        const response = await vscoRequest(supabase, '/event', { params }, executive);
-
-        // VSCO API returns: { meta, type, items } - items is the data array
-        let events = response.data?.items || response.data?.events || response.data || [];
-        const pagination = response.data?.meta;
 
         // Client-side date filtering because VSCO /event does not support start/end query filtering
         const parseDateBoundary = (value: string, boundary: 'start' | 'end'): number | null => {
@@ -1291,9 +1284,12 @@ Deno.serve(async (req) => {
 
         const filterStart = parseDateBoundary(data.start_date, 'start');
         const filterEnd = parseDateBoundary(data.end_date, 'end');
+        const hasDateFilter = filterStart !== null || filterEnd !== null;
 
-        if (Array.isArray(events) && (filterStart !== null || filterEnd !== null)) {
-          events = events.filter((event: any) => {
+        const filterEventsByDate = (rawEvents: any[]): any[] => {
+          if (!Array.isArray(rawEvents) || !hasDateFilter) return Array.isArray(rawEvents) ? rawEvents : [];
+
+          return rawEvents.filter((event: any) => {
             const eventStartRaw = event.startDate || event.start_date || event.created;
             if (!eventStartRaw) return false;
 
@@ -1303,6 +1299,86 @@ Deno.serve(async (req) => {
             if (filterEnd !== null && eventStart > filterEnd) return false;
             return true;
           });
+        };
+
+        let events: any[] = [];
+        let pagination: any = null;
+
+        if (data.page || !hasDateFilter) {
+          if (data.page) params.page = String(data.page);
+          const response = await vscoRequest(supabase, '/event', { params }, executive);
+
+          // VSCO API returns: { meta, type, items } - items is the data array
+          events = response.data?.items || response.data?.events || response.data || [];
+          pagination = response.data?.meta;
+
+          if (response.error) {
+            result = { success: false, error: response.error };
+            break;
+          }
+
+          events = filterEventsByDate(events);
+        } else {
+          // Date range queries: scan recent pages from the end so we evaluate newest events first.
+          const bootstrapResponse = await vscoRequest(supabase, '/event', {
+            params: { ...params, page: '1' },
+          }, executive);
+
+          if (bootstrapResponse.error) {
+            result = { success: false, error: bootstrapResponse.error };
+            break;
+          }
+
+          const bootstrapMeta = bootstrapResponse.data?.meta || {};
+          const totalPages = Math.max(1, Number(bootstrapMeta.totalPages || 1));
+          const maxPagesToScan = Math.max(1, Number(data.max_recent_pages || 10));
+          const startPage = totalPages;
+          const endPage = Math.max(1, totalPages - maxPagesToScan + 1);
+          let matchedPage: number | null = null;
+          let scannedPages = 0;
+
+          for (let page = startPage; page >= endPage; page--) {
+            const pageResponse = await vscoRequest(supabase, '/event', {
+              params: { ...params, page: String(page) },
+            }, executive);
+
+            if (pageResponse.error) {
+              result = { success: false, error: pageResponse.error };
+              break;
+            }
+
+            scannedPages += 1;
+            const pageEvents = pageResponse.data?.items || pageResponse.data?.events || pageResponse.data || [];
+            const filteredPageEvents = filterEventsByDate(pageEvents);
+
+            if (filteredPageEvents.length > 0) {
+              matchedPage = page;
+              events = filteredPageEvents;
+              pagination = {
+                ...(pageResponse.data?.meta || {}),
+                strategy: 'reverse_scan_recent_pages',
+                requestedDateRange: { start_date: data.start_date || null, end_date: data.end_date || null },
+                scannedPages,
+                scanWindow: { startPage, endPage, maxPagesToScan },
+                matchedPage,
+              };
+              break;
+            }
+          }
+
+          if (!result && matchedPage === null) {
+            events = [];
+            pagination = {
+              ...bootstrapMeta,
+              strategy: 'reverse_scan_recent_pages',
+              requestedDateRange: { start_date: data.start_date || null, end_date: data.end_date || null },
+              scannedPages,
+              scanWindow: { startPage, endPage, maxPagesToScan },
+              matchedPage: null,
+            };
+          }
+
+          if (result?.success === false) break;
         }
 
         // Client-side fallback sort: newest first (descending by startDate)
@@ -1318,9 +1394,7 @@ Deno.serve(async (req) => {
 
         console.log(`🔍 [list_events] Found ${Array.isArray(events) ? events.length : 0} events (sorted ${data.sort_order || 'desc'}), filtered range: ${data.start_date || 'none'} → ${data.end_date || 'none'}, pagination: ${JSON.stringify(pagination)}`);
 
-        result = response.error
-          ? { success: false, error: response.error }
-          : { success: true, events: Array.isArray(events) ? events : [], pagination };
+        result = { success: true, events: Array.isArray(events) ? events : [], pagination };
         break;
       }
 
