@@ -201,7 +201,7 @@ const TOOL_CALLING_MANDATE = `
 1. When the user asks for data/status/metrics, you MUST call tools using the native function calling mechanism
 2. DO NOT describe tool calls in text. DO NOT say "I will call..." or "Let me check..."
 3. DIRECTLY invoke functions - the system will handle execution
-4. Available critical tools: get_mining_stats, get_system_status, get_ecosystem_metrics, invoke_edge_function, search_knowledge, recall_entity, vertex_generate_image, vertex_generate_video, vertex_check_video_status, search_edge_functions, browse_web, analyze_attachment, google_gmail
+4. Available critical tools: get_mining_stats, get_system_status, get_ecosystem_metrics, invoke_edge_function, search_knowledge, recall_entity, vertex_generate_image, vertex_generate_video, vertex_check_video_status, search_edge_functions, browse_web, analyze_attachment, google_cloud_auth
 5. If you need current data, ALWAYS use tools. Never guess or make up data.
 6. After tool execution, synthesize results into natural language - never show raw JSON to users.
 
@@ -233,7 +233,7 @@ const TOOL_CALLING_MANDATE = `
 - Always analyze attachments when they are provided
 
 📧 EMAIL SENDING (MANDATORY):
-- When user asks to SEND EMAIL or mentions email address → IMMEDIATELY call google_gmail({action: 'send_email', to: "recipient@email.com", subject: "Subject", body: "Email body"})
+- When user asks to SEND EMAIL or mentions email address → IMMEDIATELY call google_cloud_auth({action: 'send_email', to: "recipient@email.com", subject: "Subject", body: "Email body"})
 - DO NOT generate contract code or unrelated content when asked to send emails
 - Always show draft for approval before sending
 - Use conversation context to understand what email content is needed
@@ -1923,10 +1923,10 @@ async function executeRealToolCall(
       });
       
     } else if (name === 'google_drive') {
-      result = await invokeEdgeFunction('google-drive', parsedArgs);
+      result = await invokeEdgeFunction('google-cloud-auth', parsedArgs);
       
-    } else if (name === 'google_gmail') {
-      result = await invokeEdgeFunction('google-gmail', parsedArgs);
+    } else if (name === 'google_cloud_auth' || name === 'google_gmail') {
+      result = await invokeEdgeFunction('google-cloud-auth', parsedArgs);
       
     // ----- NEW SOLUTION ENGINE TOOLS -----
     } else if (name === 'propose_edge_function') {
@@ -2261,7 +2261,7 @@ const knownTools = [
   'get_mining_stats', 'get_system_status', 'get_ecosystem_metrics',
   'search_knowledge', 'recall_entity', 'invoke_edge_function',
   'get_edge_function_logs', 'get_agent_status', 'list_agents', 'list_tasks',
-  'search_edge_functions', 'browse_web', 'analyze_attachment', 'google_gmail',
+  'search_edge_functions', 'browse_web', 'analyze_attachment', 'google_cloud_auth',
 
   // Supabase: Database
   'execute_sql', 'list_tables', 'list_extensions', 'list_policies',
@@ -2886,8 +2886,8 @@ class EnhancedConversationManager {
           else if (tool.name === 'analyze_attachment') {
             context += `   Analyzed ${tool.result.total_attachments || 0} attachments\n`;
           }
-          else if (tool.name === 'google_gmail') {
-            context += `   Email action: ${tool.result.action || 'sent'}\n`;
+          else if (tool.name === 'google_cloud_auth' || tool.name === 'google_gmail') {
+            context += `   Google action: ${tool.result.action || 'executed'}\n`;
             if (tool.result.to) {
               context += `   To: ${tool.result.to}\n`;
             }
@@ -3797,7 +3797,7 @@ ${solutionEngineSection}
 - When user provides ANY attachment (files, images, documents, code), IMMEDIATELY call analyze_attachment({attachments: [...]})
 
 ## 📧 EMAIL SENDING:
-- When user asks to SEND EMAIL or mentions email address → IMMEDIATELY call google_gmail({action: 'send_email', to: "...", subject: "...", body: "..."})
+- When user asks to SEND EMAIL or mentions email address → IMMEDIATELY call google_cloud_auth({action: 'send_email', to: "...", subject: "...", body: "..."})
 
 ## 🔍 FUNCTION DISCOVERY:
 - If the user asks about available edge functions or capabilities, you MUST call search_edge_functions({mode: 'full_registry'})
@@ -3875,7 +3875,7 @@ const ELIZA_TOOLS = [
   {
     type: 'function',
     function: {
-      name: 'google_gmail',
+      name: 'google_cloud_auth',
       description: '📧 Send and manage emails via xmrtsolutions@gmail.com',
       parameters: {
         type: 'object',
