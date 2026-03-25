@@ -289,6 +289,19 @@ const MessageCodeBlock = React.memo(({ code, language, ...props }: { code: strin
 });
 
 const markdownComponents = {
+  a({ href, children, ...props }: any) {
+    return (
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-blue-700 underline decoration-blue-500/60 underline-offset-2 hover:text-blue-800"
+        {...props}
+      >
+        {children}
+      </a>
+    );
+  },
   code({ inline, className, children, ...props }: any) {
     const match = /language-(\w+)/.exec(className || '');
     const codeString = String(children).replace(/\n$/, '');
@@ -327,8 +340,8 @@ const ChatMessage = React.memo(({ message }: { message: UnifiedMessage }) => {
         <div className="max-w-[80%] sm:max-w-[75%]">
           <div
             className={`group p-3 rounded-xl ${message.sender === 'user'
-              ? 'bg-primary text-primary-foreground rounded-br-sm'
-              : 'bg-muted/50 text-foreground rounded-bl-sm border border-border/40'
+              ? 'bg-white text-gray-900 rounded-br-sm border border-gray-300 shadow-sm'
+              : 'bg-gray-50 text-gray-900 rounded-bl-sm border border-gray-300'
               }`}
           >
             {message.attachments?.images && message.attachments.images.length > 0 && (
@@ -365,7 +378,7 @@ const ChatMessage = React.memo(({ message }: { message: UnifiedMessage }) => {
               </div>
             )}
 
-            <div className="text-sm leading-relaxed prose prose-sm dark:prose-invert max-w-none">
+            <div className="text-sm leading-relaxed prose prose-sm max-w-none text-gray-900 prose-headings:text-gray-900 prose-p:text-gray-900 prose-strong:text-gray-900 prose-li:text-gray-900 prose-code:text-gray-900 prose-a:text-blue-700">
               <ReactMarkdown components={markdownComponents}>
                 {message.content}
               </ReactMarkdown>

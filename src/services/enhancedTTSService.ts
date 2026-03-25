@@ -20,10 +20,9 @@ export class EnhancedTTSService {
 
   private toSpeechFriendlyText(text: string): string {
     return text
-      // Fenced code blocks: preserve content but drop markdown fences
-      .replace(/```[\w-]*\n([\s\S]*?)```/g, '$1')
-      // Inline code
-      .replace(/`([^`]+)`/g, '$1')
+      // Remove code entirely so TTS doesn't read symbols/syntax aloud
+      .replace(/```[\s\S]*?```/g, '')
+      .replace(/`[^`]+`/g, '')
       // Headings
       .replace(/^\s{0,3}#{1,6}\s+/gm, '')
       // Blockquotes
