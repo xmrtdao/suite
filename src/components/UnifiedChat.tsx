@@ -10,10 +10,9 @@ import { useAuth } from '@/contexts/AuthContext';
 import { ReasoningSteps, type ReasoningStep } from './ReasoningSteps';
 // 🎤 TTS is now language-aware: English (en) / Spanish (es)
 import { GitHubPATInput } from './GitHubContributorRegistration';
-import { GitHubTokenStatus } from './GitHubTokenStatus';
 import { mobilePermissionService } from '@/services/mobilePermissionService';
 import { formatTime } from '@/utils/dateFormatter';
-import { Send, Volume2, VolumeX, Trash2, Key, Wifi, Users, Vote, Paperclip, X, Mic, MicOff, Video, VideoOff, Copy, Check } from 'lucide-react';
+import { Send, Volume2, VolumeX, Trash2, Wifi, Users, Vote, Paperclip, X, Mic, MicOff, Video, VideoOff, Copy, Check } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
@@ -644,7 +643,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   }, []);
 
   // Input Mode State
-  const [inputMode, setInputMode] = useState<'text' | 'voice' | 'multimodal'>('text');
+  const [inputMode, setInputMode] = useState<'text' | 'voice' | 'multimodal'>('multimodal');
   const [isRecording, setIsRecording] = useState(false);
   const [liveVideoActive, setLiveVideoActive] = useState(false);
 
@@ -2161,31 +2160,14 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
             </div>
           </div>
 
-          {/* Mode Switcher */}
+          {/* Unified Input Mode */}
           <div className="flex bg-muted/30 rounded-lg p-1 gap-1">
             <Button
-              variant={inputMode === 'text' ? 'secondary' : 'ghost'}
+              variant="secondary"
               size="sm"
-              onClick={() => handleModeChange('text')}
-              className="h-6 px-2 text-[10px] sm:text-xs"
+              className="h-6 px-2 text-[10px] sm:text-xs pointer-events-none"
             >
-              Text
-            </Button>
-            <Button
-              variant={inputMode === 'voice' ? 'secondary' : 'ghost'}
-              size="sm"
-              onClick={() => handleModeChange('voice')}
-              className="h-6 px-2 text-[10px] sm:text-xs"
-            >
-              Voice
-            </Button>
-            <Button
-              variant={inputMode === 'multimodal' ? 'secondary' : 'ghost'}
-              size="sm"
-              onClick={() => handleModeChange('multimodal')}
-              className="h-6 px-2 text-[10px] sm:text-xs"
-            >
-              Full
+              Unified
             </Button>
           </div>
 
@@ -2201,12 +2183,12 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
                     className="text-xs h-7 px-1.5 sm:px-2 flex-shrink-0"
                   >
                     <Users className="h-3 w-3 sm:mr-1" />
-                    <span className="hidden sm:inline">{councilMode ? 'Multi-AI' : 'Single'}</span>
+                    <span className="hidden sm:inline">{councilMode ? 'Council' : 'Eliza'}</span>
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" className="max-w-xs">
                   <p className="font-medium text-sm mb-1">
-                    {councilMode ? 'Multi-AI Mode Active' : 'Single Executive Mode'}
+                    {councilMode ? 'Council Mode Active' : 'Eliza Mode Active'}
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {councilMode
@@ -2227,22 +2209,6 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
                 <span>Live</span>
               </Badge>
             )}
-
-            {/* GitHub Token Status Indicator */}
-            <div className="hidden md:block">
-              <GitHubTokenStatus onRequestPAT={() => setShowAPIKeyInput(true)} />
-            </div>
-
-            {/* API Key Button */}
-            <Button
-              onClick={() => setShowAPIKeyInput(true)}
-              variant="ghost"
-              size="sm"
-              className={`hidden sm:flex h-7 w-7 sm:h-8 sm:w-8 p-0 ${needsAPIKey ? 'text-orange-500 animate-pulse' : 'text-muted-foreground'}`}
-              title="Add or update Gemini API key"
-            >
-              <Key className="h-4 w-4" />
-            </Button>
 
             {/* Clear Conversation Button */}
             {totalMessageCount > 0 && (
