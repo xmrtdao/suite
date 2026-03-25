@@ -136,6 +136,9 @@ export class ConversationPersistenceService {
           action: 'add_message',
           sessionKey,
           sessionId: this.currentSessionId,
+          session_id: this.currentSessionId,
+          message_type: sender,
+          content: normalizedContent,
           messageData: {
             content: normalizedContent,
             message_type: sender,
@@ -161,6 +164,7 @@ export class ConversationPersistenceService {
           action: 'update_session',
           sessionKey,
           sessionId: this.currentSessionId,
+          session_id: this.currentSessionId,
           messageData: {
             updated_at: new Date().toISOString(),
             metadata: {
@@ -259,6 +263,7 @@ export class ConversationPersistenceService {
           action: 'get_messages',
           sessionKey,
           sessionId: this.currentSessionId,
+          session_id: this.currentSessionId,
           limit,
           offset: 0
         }
@@ -308,6 +313,7 @@ export class ConversationPersistenceService {
           action: 'get_messages',
           sessionKey,
           sessionId: this.currentSessionId,
+          session_id: this.currentSessionId,
           limit,
           offset
         }
@@ -371,7 +377,8 @@ export class ConversationPersistenceService {
         body: {
           action: 'get_summaries',
           sessionKey,
-          sessionId: this.currentSessionId
+          sessionId: this.currentSessionId,
+          session_id: this.currentSessionId
         }
       });
 
