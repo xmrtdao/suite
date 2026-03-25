@@ -1027,15 +1027,16 @@ export async function executeToolCall(
 
       case 'closeGitHubIssue':
         console.log(`❌ [${executiveName}] Close Issue: #${parsedArgs.issue_number}`);
+        const closingComment = parsedArgs.body ?? parsedArgs.comment;
         // If comment provided, add it first
-        if (parsedArgs.comment) {
+        if (closingComment) {
           await supabase.functions.invoke('github-integration', {
             body: {
               action: 'comment_on_issue',
               data: {
                 repo: parsedArgs.repo || 'XMRT-Ecosystem',
                 issue_number: parsedArgs.issue_number,
-                comment: parsedArgs.comment
+                comment: closingComment
               },
               session_credentials
             }

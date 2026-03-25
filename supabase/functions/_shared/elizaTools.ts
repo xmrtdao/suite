@@ -1102,7 +1102,7 @@ export const ELIZA_TOOLS = [
           issue_number: { type: 'number', description: 'Issue number to update' },
           title: { type: 'string', description: 'New title (optional)' },
           body: { type: 'string', description: 'New body content (optional)' },
-          state: { type: 'string', enum: ['open', 'closed'], description: 'Issue state' },
+          state: { type: 'string', enum: ['open', 'closed', 'all'], description: 'Issue state' },
           labels: { type: 'array', items: { type: 'string' }, description: 'New labels array' },
           assignees: {
             type: 'array',
@@ -1124,7 +1124,7 @@ export const ELIZA_TOOLS = [
         properties: {
           repo: { type: 'string', description: 'Repository name ONLY (e.g., "XMRT-Ecosystem")' },
           issue_number: { type: 'number', description: 'Issue number to close' },
-          comment: { type: 'string', description: 'Optional closing comment to add before closing' }
+          body: { type: 'string', description: 'Optional comment to add before closing' }
         },
         required: ['issue_number']
       }
