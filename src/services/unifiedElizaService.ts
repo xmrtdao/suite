@@ -361,6 +361,11 @@ export class UnifiedElizaService {
     try {
       const safeInput = (typeof userInput === 'string' && userInput.trim()) ? userInput.trim() : 'Hello';
       const safeContext = (context && typeof context === 'object') ? context : {};
+      const hasVisualOrAttachmentInput =
+        safeContext.inputMode === 'vision' ||
+        !!safeContext.isLiveCameraFeed ||
+        !!(safeContext.images && safeContext.images.length > 0) ||
+        !!(safeContext.attachments && safeContext.attachments.length > 0);
 
       console.log('📋 Safe input length:', safeInput.length);
 
@@ -368,7 +373,7 @@ export class UnifiedElizaService {
       // When targetExecutive is set (council page individual chats), skip the
       // health-check waterfall entirely and call that one function directly,
       // with the executive's character injected as a system message.
-      if (safeContext.targetExecutive && EXECUTIVE_PERSONA_PROMPTS[safeContext.targetExecutive]) {
+      if (safeContext.targetExecutive && EXECUTIVE_PERSONA_PROMPTS[safeContext.targetExecutive] && !hasVisualOrAttachmentInput) {
         console.log(`🎭 Persona-locked mode: routing to ${safeContext.targetExecutive}`);
         const personaResponse = await this.callSingleExecutive(
           safeContext.targetExecutive, safeInput, safeContext
@@ -376,6 +381,8 @@ export class UnifiedElizaService {
         if (personaResponse) return personaResponse;
         // If that function is down, fall through to waterfall below
         console.warn(`⚠️ ${safeContext.targetExecutive} unavailable, falling back to waterfall`);
+      } else if (safeContext.targetExecutive && hasVisualOrAttachmentInput) {
+        console.log(`📎 Attachment/vision input detected; bypassing persona-locked routing for ${safeContext.targetExecutive} so backend attachment analysis can run`);
       }
 
       // ── Vision / attachment override ───────────────────────────────────────
@@ -402,12 +409,7 @@ export class UnifiedElizaService {
       // (vercel-ai-chat, deepseek-chat, etc.) are emergency fallbacks only.
       // They answer as their specific persona and should NEVER be Eliza's voice.
       const executiveFallbacks = await this.getHealthyExecutives();
-      const hasVisualInput =
-        safeContext.inputMode === 'vision' ||
-        !!safeContext.isLiveCameraFeed ||
-        !!(safeContext.images && safeContext.images.length > 0) ||
-        !!(safeContext.attachments && safeContext.attachments.length > 0);
-      const elizaFirstRouting = hasVisualInput
+      const elizaFirstRouting = hasVisualOrAttachmentInput
         ? ['vertex-ai-chat', 'ai-chat', ...executiveFallbacks.filter(e => e !== 'ai-chat' && e !== 'vertex-ai-chat')]
         : ['ai-chat', ...executiveFallbacks.filter(e => e !== 'ai-chat')];
       console.log('💚 Routing order (Eliza first):', elizaFirstRouting);
