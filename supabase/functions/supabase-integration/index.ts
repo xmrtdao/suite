@@ -38,6 +38,16 @@ function assertSqlSafety(query: string, allowDangerous = false) {
   }
 }
 
+function assertSelectOnlyQuery(query: string) {
+  const trimmed = query.trim();
+  if (!trimmed) throw new Error('query is required');
+
+  const firstToken = trimmed.split(/\s+/)[0]?.toLowerCase();
+  if (firstToken !== 'select') {
+    throw new Error('Only SELECT queries are allowed for this action');
+  }
+}
+
 async function executeSql(query: string, params: unknown[] = [], allowDangerous = false) {
   if (!query?.trim()) throw new Error('query is required');
   assertSqlSafety(query, allowDangerous);
@@ -145,6 +155,23 @@ async function callManagement(path: string, init?: RequestInit) {
   return payload;
 }
 
+const SUPPORTED_ACTIONS = [
+  'execute_sql',
+  'query',
+  'exec_sql',
+  'manage_schema',
+  'deploy_edge_function',
+  'list_edge_functions',
+  'get_function_logs',
+  'backup_database',
+  'restore_database',
+  'manage_secrets',
+  'list_tables',
+  'get_table_schema',
+  'health',
+  'list_actions',
+] as const;
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -161,6 +188,28 @@ serve(async (req) => {
     switch (action) {
       case 'execute_sql': {
         result = await executeSql(body.query, body.params, body.allow_dangerous === true);
+        break;
+      }
+
+      case 'query':
+      case 'exec_sql': {
+        if (!body.query) throw new Error('query is required');
+        assertSelectOnlyQuery(body.query);
+        result = await executeSql(body.query, body.params, false);
+        break;
+      }
+
+      case 'health': {
+        result = {
+          status: 'ok',
+          function: 'supabase-integration',
+          timestamp: new Date().toISOString(),
+        };
+        break;
+      }
+
+      case 'list_actions': {
+        result = { actions: SUPPORTED_ACTIONS };
         break;
       }
 
