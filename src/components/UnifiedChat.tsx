@@ -136,29 +136,30 @@ const PROCESSING_STICKY_TEMPLATES: ProcessingStickyTemplate[] = [
 ];
 
 const ProcessingStickyNotes = React.memo(({ notes }: { notes: ProcessingStickyNote[] }) => {
-  const visibleNotes = notes.filter((note) => !note.isFallingAway).slice(-2).reverse();
+  const visibleNotes = notes.filter((note) => !note.isFallingAway).slice(-3).reverse();
   if (visibleNotes.length === 0) return null;
 
   const stackOffsets = [
-    { top: 0, right: 0, floatDelay: 0, zIndex: 20 },
-    { top: 94, right: 58, floatDelay: 180, zIndex: 10 },
+    { top: 0, right: 0, floatDelay: 0, zIndex: 30 },
+    { top: 86, right: 42, floatDelay: 160, zIndex: 20 },
+    { top: 168, right: 84, floatDelay: 300, zIndex: 10 },
   ];
 
   return (
-    <div className="pointer-events-none absolute right-6 top-36 z-30 hidden md:block">
-      <div className="relative h-[260px] w-[220px]">
+    <div className="pointer-events-none fixed right-2 top-24 z-40 sm:absolute sm:right-6 sm:top-36 sm:z-30">
+      <div className="relative h-[248px] w-[152px] sm:h-[286px] sm:w-[220px]">
         {visibleNotes.map((note, index) => {
           const offset = stackOffsets[index] ?? {
-            top: index * 94,
-            right: Math.min(index * 58, 96),
+            top: index * 86,
+            right: Math.min(index * 42, 96),
             floatDelay: index * 180,
-            zIndex: Math.max(20 - index * 10, 1),
+            zIndex: Math.max(30 - index * 10, 1),
           };
 
           return (
           <div
             key={note.id}
-            className={`absolute right-0 w-[116px] rounded-[2px] border bg-gradient-to-br p-2.5 shadow-[0_14px_32px_rgba(120,93,10,0.18)] transition-all duration-700 ${note.rotationClassName} ${
+            className={`absolute right-0 w-[88px] rounded-[2px] border bg-gradient-to-br p-2 shadow-[0_14px_32px_rgba(120,93,10,0.18)] transition-all duration-700 sm:w-[116px] sm:p-2.5 ${note.rotationClassName} ${
               note.variant === 'error'
                 ? 'border-rose-400/80 from-rose-200/95 via-red-100 to-rose-50 shadow-[0_14px_32px_rgba(127,29,29,0.22)]'
                 : `border-amber-300/70 ${note.accentClassName}`
@@ -179,12 +180,12 @@ const ProcessingStickyNotes = React.memo(({ notes }: { notes: ProcessingStickyNo
             }}
             aria-hidden="true"
           >
-            <div className={`absolute left-1/2 top-1.5 h-3.5 w-3.5 -translate-x-1/2 rounded-full shadow-[inset_0_1px_0_rgba(255,255,255,0.8),0_1px_3px_rgba(120,93,10,0.18)] ${note.variant === 'error' ? 'bg-rose-100/90' : 'bg-amber-50/80'}`} />
+            <div className={`absolute left-1/2 top-1.5 h-3 w-3 -translate-x-1/2 rounded-full shadow-[inset_0_1px_0_rgba(255,255,255,0.8),0_1px_3px_rgba(120,93,10,0.18)] sm:h-3.5 sm:w-3.5 ${note.variant === 'error' ? 'bg-rose-100/90' : 'bg-amber-50/80'}`} />
             <div className={`mt-3 border-t pt-2 ${note.variant === 'error' ? 'border-rose-500/20' : 'border-amber-500/15'}`}>
-              <p className={`text-[9px] font-semibold uppercase tracking-[0.16em] ${note.variant === 'error' ? 'text-rose-900/70' : 'text-amber-900/70'}`}>
+              <p className={`text-[8px] font-semibold uppercase tracking-[0.14em] sm:text-[9px] sm:tracking-[0.16em] ${note.variant === 'error' ? 'text-rose-900/70' : 'text-amber-900/70'}`}>
                 {note.variant === 'error' ? 'System error' : 'Eliza note'}
               </p>
-              <p className={`mt-1.5 text-[11px] font-medium leading-snug ${note.variant === 'error' ? 'text-rose-950/90' : 'text-amber-950/90'}`}>
+              <p className={`mt-1 text-[10px] font-medium leading-snug sm:mt-1.5 sm:text-[11px] ${note.variant === 'error' ? 'text-rose-950/90' : 'text-amber-950/90'}`}>
                 {note.text}
               </p>
             </div>
@@ -192,39 +193,6 @@ const ProcessingStickyNotes = React.memo(({ notes }: { notes: ProcessingStickyNo
           );
         })}
       </div>
-    </div>
-  );
-});
-
-const ProcessingStickyNotesInline = React.memo(({ notes }: { notes: ProcessingStickyNote[] }) => {
-  const visibleNotes = notes.filter((note) => !note.isFallingAway).slice(-2).reverse();
-  if (visibleNotes.length === 0) return null;
-
-  return (
-    <div className="relative flex h-12 w-[110px] items-start justify-end md:hidden" aria-hidden="true">
-    {visibleNotes.map((note, index) => (
-      <div
-        key={note.id}
-        className={`absolute right-0 top-0 w-16 rounded-[2px] border bg-gradient-to-br px-2 py-1.5 shadow-[0_10px_24px_rgba(120,93,10,0.18)] ${note.rotationClassName} ${
-          note.variant === 'error'
-            ? 'border-rose-400/80 from-rose-200/95 via-red-100 to-rose-50'
-            : `border-amber-300/70 ${note.accentClassName}`
-        }`}
-        style={{
-          transform: `translateY(${index * 8}px) rotate(${index % 2 === 0 ? -6 : 5}deg)`,
-          animation: `sticky-note-float 2.6s ease-in-out ${index * 180}ms infinite`,
-          zIndex: 10 - index,
-          opacity: note.isFallingAway ? 0.2 : 1,
-        }}
-      >
-        <p className={`truncate text-[8px] font-semibold uppercase tracking-[0.14em] ${note.variant === 'error' ? 'text-rose-900/70' : 'text-amber-900/70'}`}>
-          {note.variant === 'error' ? 'Error' : 'Eliza'}
-        </p>
-        <p className={`mt-0.5 truncate text-[9px] font-medium ${note.variant === 'error' ? 'text-rose-950/90' : 'text-amber-950/90'}`}>
-          {note.text}
-        </p>
-      </div>
-    ))}
     </div>
   );
 });
@@ -638,7 +606,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
 
       let nextNotes = [...prev, newNote];
 
-      if (activeNotes.length >= 2 && oldestActive) {
+      if (activeNotes.length >= 3 && oldestActive) {
         noteToRemoveId = oldestActive.id;
         nextNotes = nextNotes.map((note) =>
           note.id === oldestActive.id ? { ...note, isFallingAway: true } : note
@@ -1012,7 +980,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       if (activeNoteCount === 0) {
         enqueueProcessingNote('Organizing tool calls for your request');
       }
-      if (activeNoteCount < 2) {
+      if (activeNoteCount < 3) {
         enqueueProcessingNote('Cross-checking context before responding');
       }
       return;
@@ -2453,7 +2421,6 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
                         Check the sticky notes on the right for Eliza's progress.
                       </p>
                     </div>
-                    <ProcessingStickyNotesInline notes={processingNotes} />
                   </div>
                 </div>
               </div>
