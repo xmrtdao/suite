@@ -7,6 +7,42 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+class HttpError extends Error {
+  status: number;
+
+  constructor(message: string, status = 500) {
+    super(message);
+    this.name = 'HttpError';
+    this.status = status;
+  }
+}
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isUuid(value: string): boolean {
+  return UUID_REGEX.test(value);
+}
+
+function normalizeTaskId(rawTaskId: unknown): { normalizedTaskId: string; normalizedFromLegacyPrefix: boolean } {
+  if (typeof rawTaskId !== 'string' || rawTaskId.trim() === '') {
+    throw new HttpError('task_id is required', 400);
+  }
+
+  const trimmed = rawTaskId.trim();
+  if (isUuid(trimmed)) {
+    return { normalizedTaskId: trimmed, normalizedFromLegacyPrefix: false };
+  }
+
+  if (trimmed.startsWith('task-')) {
+    const withoutPrefix = trimmed.slice(5);
+    if (isUuid(withoutPrefix)) {
+      return { normalizedTaskId: withoutPrefix, normalizedFromLegacyPrefix: true };
+    }
+  }
+
+  throw new HttpError(`Invalid task_id format "${trimmed}". Expected UUID.`, 400);
+}
+
 // ... interfaces ...
 
 /**
@@ -28,8 +64,11 @@ serve(async (req) => {
       auth: { autoRefreshToken: false, persistSession: false }
     });
 
-    const body = await req.json();
+    const body = await req.json().catch(() => ({}));
     const { action, data = {} } = body;
+    if (!action || typeof action !== 'string') {
+      throw new HttpError('action is required and must be a string', 400);
+    }
 
     // usageTracker.setExecutionSource(detectExecutionSource(req, body)); // Optional: if we want to be precise about source
 
@@ -218,7 +257,7 @@ serve(async (req) => {
         const { data: template, error: templateError } = await supabase.from('task_templates').select('*').eq('template_name', template_name).eq('is_active', true).single();
         if (templateError || !template) throw new Error(`Template '${template_name}' not found or inactive`);
         const taskDescription = description || template.description_template.replace('{{title}}', title);
-        const taskId = `task-${crypto.randomUUID()}`;
+        const taskId = crypto.randomUUID();
         const { data: task, error: taskError } = await supabase.from('tasks').insert({
           id: taskId, title, description: taskDescription, repo: repo || 'xmrt-ecosystem', category: template.category, stage: template.default_stage, priority: priority ?? template.default_priority, status: 'PENDING',
           metadata: { created_from_template: template_name, template_id: template.id, required_skills: template.required_skills, checklist: template.checklist, auto_advance_threshold_hours: template.auto_advance_threshold_hours, estimated_duration_hours: template.estimated_duration_hours },
@@ -500,17 +539,38 @@ serve(async (req) => {
 
       case 'advance_task_stage': {
         const { task_id, target_stage } = data;
-        if (!task_id) throw new Error('task_id is required');
+        const { normalizedTaskId, normalizedFromLegacyPrefix } = normalizeTaskId(task_id);
         const STAGE_ORDER = ['DISCUSS', 'PLAN', 'EXECUTE', 'VERIFY', 'INTEGRATE'];
-        const { data: task } = await supabase.from('tasks').select('*').eq('id', task_id).single();
-        if (!task) throw new Error(`Task ${task_id} not found`);
+        const { data: task, error: taskFetchError } = await supabase.from('tasks').select('*').eq('id', normalizedTaskId).single();
+        if (taskFetchError) {
+          if (taskFetchError.code === 'PGRST116') {
+            throw new HttpError(`Task ${normalizedTaskId} not found`, 404);
+          }
+          console.error('❌ [STAE] advance_task_stage fetch error:', taskFetchError);
+          throw new HttpError(`Failed to fetch task ${normalizedTaskId}: ${taskFetchError.message}`, 500);
+        }
+        if (!task) throw new HttpError(`Task ${normalizedTaskId} not found`, 404);
+        if (!STAGE_ORDER.includes(task.stage)) {
+          throw new HttpError(`Task ${normalizedTaskId} has invalid current stage "${task.stage}"`, 422);
+        }
         const currentIdx = STAGE_ORDER.indexOf(task.stage);
         let nextStage = target_stage;
-        if (!nextStage) { if (currentIdx < STAGE_ORDER.length - 1) { nextStage = STAGE_ORDER[currentIdx + 1]; } else { throw new Error('Task is already at final stage'); } }
-        if (!STAGE_ORDER.includes(nextStage)) { throw new Error(`Invalid stage: ${nextStage}. Valid: ${STAGE_ORDER.join(', ')}`); }
-        await supabase.from('tasks').update({ stage: nextStage, stage_started_at: new Date().toISOString() }).eq('id', task_id);
-        await supabase.from('eliza_activity_log').insert({ activity_type: 'stae_manual_advance', title: `⏩ STAE: Manual Stage Advance`, description: `Task "${task.title}" manually advanced from ${task.stage} to ${nextStage}`, status: 'completed', task_id });
-        result = { success: true, task_id, previous_stage: task.stage, new_stage: nextStage };
+        if (!nextStage) { if (currentIdx < STAGE_ORDER.length - 1) { nextStage = STAGE_ORDER[currentIdx + 1]; } else { throw new HttpError('Task is already at final stage', 409); } }
+        if (!STAGE_ORDER.includes(nextStage)) { throw new HttpError(`Invalid stage: ${nextStage}. Valid: ${STAGE_ORDER.join(', ')}`, 400); }
+        if (nextStage === task.stage) {
+          result = { success: true, task_id: normalizedTaskId, previous_stage: task.stage, new_stage: nextStage, no_op: true, normalized_from_legacy_prefix: normalizedFromLegacyPrefix };
+          break;
+        }
+        if (STAGE_ORDER.indexOf(nextStage) < currentIdx) {
+          throw new HttpError(`Cannot move task backwards from ${task.stage} to ${nextStage}`, 409);
+        }
+        const { error: taskUpdateError } = await supabase.from('tasks').update({ stage: nextStage, stage_started_at: new Date().toISOString() }).eq('id', normalizedTaskId);
+        if (taskUpdateError) {
+          console.error('❌ [STAE] advance_task_stage update error:', taskUpdateError);
+          throw new HttpError(`Failed to update task stage: ${taskUpdateError.message}`, 500);
+        }
+        await supabase.from('eliza_activity_log').insert({ activity_type: 'stae_manual_advance', title: `⏩ STAE: Manual Stage Advance`, description: `Task "${task.title}" manually advanced from ${task.stage} to ${nextStage}`, status: 'completed', task_id: normalizedTaskId });
+        result = { success: true, task_id: normalizedTaskId, previous_stage: task.stage, new_stage: nextStage, normalized_from_legacy_prefix: normalizedFromLegacyPrefix };
         break;
       }
 
@@ -535,9 +595,11 @@ serve(async (req) => {
 
   } catch (error) {
     console.error('❌ [STAE] Error:', error);
+    const statusCode = error instanceof HttpError ? error.status : 500;
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     // Log failure
-    await usageTracker.failure(error.message, 500);
-    return new Response(JSON.stringify({ success: false, error: error.message }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    await usageTracker.failure(errorMessage, statusCode);
+    return new Response(JSON.stringify({ success: false, error: errorMessage }), { status: statusCode, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 });
 
