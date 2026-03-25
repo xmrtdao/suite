@@ -319,6 +319,38 @@ async function handleSystemOperation(supabase: any, operation: string, body: DBO
   };
 
   switch(operation) {
+    case 'list_edge_functions':
+    case 'get_function_logs': {
+      const supabaseUrl = Deno.env.get('SUPABASE_URL');
+      const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+      if (!supabaseUrl || !serviceRoleKey) {
+        throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY for supabase-integration forwarding');
+      }
+
+      const response = await fetch(`${supabaseUrl}/functions/v1/supabase-integration`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${serviceRoleKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(
+          operation === 'list_edge_functions'
+            ? { action: 'list_edge_functions' }
+            : { action: 'get_function_logs', function_name: body.function_name, limit: body.limit ?? 50 },
+        ),
+      });
+
+      const data = await response.json().catch(() => ({}));
+      return new Response(JSON.stringify({
+        ...data,
+        deprecated: true,
+        message: 'python-db-bridge system operation forwarded to supabase-integration.',
+      }), {
+        status: response.status,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      });
+    }
+
     case 'system_info': {
       // Get comprehensive system information
       const [
@@ -431,79 +463,6 @@ async function handleSystemOperation(supabase: any, operation: string, body: DBO
             ? ((healthy.length / data.length) * 100).toFixed(1) + '%'
             : 'N/A'
         }
-      }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
-
-    case 'list_edge_functions': {
-      // Get unique function names from usage logs
-      const { data, error } = await supabase
-        .from('eliza_function_usage')
-        .select('function_name')
-        .order('function_name');
-
-      if (error) throw error;
-
-      // Deduplicate
-      const uniqueFunctions = [...new Set(data?.map((r: any) => r.function_name))];
-
-      // Get stats for each function
-      const { data: statsData } = await supabase
-        .from('eliza_function_usage')
-        .select('function_name, success, execution_time_ms, created_at')
-        .gte('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
-
-      const stats: Record<string, any> = {};
-      (statsData || []).forEach((row: any) => {
-        if (!stats[row.function_name]) {
-          stats[row.function_name] = { calls: 0, success: 0, total_time: 0 };
-        }
-        stats[row.function_name].calls++;
-        if (row.success) stats[row.function_name].success++;
-        stats[row.function_name].total_time += row.execution_time_ms || 0;
-      });
-
-      return new Response(JSON.stringify({
-        success: true,
-        operation: 'list_edge_functions',
-        data: uniqueFunctions.map(fn => ({
-          function_name: fn,
-          calls_24h: stats[fn]?.calls || 0,
-          success_rate: stats[fn]?.calls > 0 
-            ? ((stats[fn].success / stats[fn].calls) * 100).toFixed(1) + '%' 
-            : 'N/A',
-          avg_time_ms: stats[fn]?.calls > 0 
-            ? Math.round(stats[fn].total_time / stats[fn].calls)
-            : null
-        })),
-        count: uniqueFunctions.length
-      }), {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-      });
-    }
-
-    case 'get_function_logs': {
-      const { function_name, limit: logLimit = 50 } = body;
-      
-      let query = supabase
-        .from('eliza_function_usage')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(logLimit);
-
-      if (function_name) {
-        query = query.eq('function_name', function_name);
-      }
-
-      const { data, error } = await query;
-      if (error) throw error;
-
-      return new Response(JSON.stringify({
-        success: true,
-        operation: 'get_function_logs',
-        data: data,
-        count: data?.length || 0
       }), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       });
