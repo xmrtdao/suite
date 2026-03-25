@@ -290,7 +290,7 @@ const GO_SURFING_BUTTON: ButtonConfig = {
 };
 
 const GO_SURFING_PROMPT =
-  "Go Surfing 🏄‍♀️ — Eliza, use browse_web to follow your curiosity and engage your imagination for a series of 20 chained tool calls based on your own whims.";
+  "Go Surfing 🏄‍♀️ — Eliza, use browse_web to follow your curiosity and engage your imagination for a series of 3 chained tool calls based on your own whims.";
 
 const getContextualButtons = (
   lastMessageContent: string | undefined,
