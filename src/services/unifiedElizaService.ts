@@ -209,7 +209,7 @@ export class UnifiedElizaService {
     // Ensure we have a valid array
     const safeExecutives = Array.isArray(healthyExecutives) && healthyExecutives.length > 0
       ? healthyExecutives
-      : ['ai-chat', 'deepseek-chat', 'gemini-chat'];
+      : ['ai-chat', 'vertex-ai-chat', 'deepseek-chat', 'gemini-chat'];
 
     console.log('🔒 Safe executives:', safeExecutives.length, 'available');
 
@@ -402,7 +402,14 @@ export class UnifiedElizaService {
       // (vercel-ai-chat, deepseek-chat, etc.) are emergency fallbacks only.
       // They answer as their specific persona and should NEVER be Eliza's voice.
       const executiveFallbacks = await this.getHealthyExecutives();
-      const elizaFirstRouting = ['ai-chat', ...executiveFallbacks.filter(e => e !== 'ai-chat')];
+      const hasVisualInput =
+        safeContext.inputMode === 'vision' ||
+        !!safeContext.isLiveCameraFeed ||
+        !!(safeContext.images && safeContext.images.length > 0) ||
+        !!(safeContext.attachments && safeContext.attachments.length > 0);
+      const elizaFirstRouting = hasVisualInput
+        ? ['vertex-ai-chat', 'ai-chat', ...executiveFallbacks.filter(e => e !== 'ai-chat' && e !== 'vertex-ai-chat')]
+        : ['ai-chat', ...executiveFallbacks.filter(e => e !== 'ai-chat')];
       console.log('💚 Routing order (Eliza first):', elizaFirstRouting);
 
       const result = await this.routeToExecutive(safeInput, safeContext, elizaFirstRouting, language);
