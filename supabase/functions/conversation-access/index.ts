@@ -21,20 +21,54 @@ function isValidUUID(str: string): boolean {
   return uuidRegex.test(str);
 }
 
+function formatHashAsUuid(bytes: Uint8Array): string {
+  const uuidBytes = bytes.slice(0, 16);
+  uuidBytes[6] = (uuidBytes[6] & 0x0f) | 0x40; // version 4
+  uuidBytes[8] = (uuidBytes[8] & 0x3f) | 0x80; // RFC 4122 variant
+
+  const hex = Array.from(uuidBytes, (b) =>
+    b.toString(16).padStart(2, '0')
+  ).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
+
+async function sessionIdToUUID(sessionId: string): Promise<string> {
+  const normalized = sessionId.trim().toLowerCase();
+  const data = new TextEncoder().encode(`conversation-access:${normalized}`);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  return formatHashAsUuid(new Uint8Array(digest));
+}
+
 async function resolveSession(
   supabase: ReturnType<typeof createClient>,
   sessionIdentifier: string
 ): Promise<{ id: string; session_key: string } | null> {
+  const normalizedIdentifier = sessionIdentifier.trim();
+
   // Check UUID first
-  if (isValidUUID(sessionIdentifier)) {
+  if (isValidUUID(normalizedIdentifier)) {
     const { data, error } = await supabase
       .from('conversation_sessions')
       .select('id, session_key')
-      .eq('id', sessionIdentifier)
+      .eq('id', normalizedIdentifier)
       .maybeSingle();
 
     if (error) {
       console.error('Error fetching session by UUID:', error);
+    }
+
+    if (data) return data;
+  } else {
+    // Deterministically hash non-UUID session IDs into valid UUIDs.
+    const hashedSessionId = await sessionIdToUUID(normalizedIdentifier);
+    const { data, error } = await supabase
+      .from('conversation_sessions')
+      .select('id, session_key')
+      .eq('id', hashedSessionId)
+      .maybeSingle();
+
+    if (error) {
+      console.error('Error fetching session by hashed UUID:', error);
     }
 
     if (data) return data;
