@@ -24,6 +24,7 @@ const PROVIDER_TIMEOUTS = {
   kimi: 8000,
   embedding: 10000,
 };
+const RESPONSE_MAX_TOKENS = parseInt(Deno.env.get('RESPONSE_MAX_TOKENS') || '16000');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SERVICE ACCOUNT JWT HELPER
@@ -180,7 +181,7 @@ async function callVertexWithServiceAccount(
       parts: [{ text: msg.content }],
     }));
 
-    const maxTokens = options.maxTokens || options.max_tokens || 2000;
+    const maxTokens = options.maxTokens || options.max_tokens || RESPONSE_MAX_TOKENS;
 
     const requestBody: any = {
       contents,
@@ -424,7 +425,7 @@ async function callGemini(
       parts: [{ text: msg.content }],
     }));
 
-    const maxTokens = options.maxTokens || options.max_tokens || 2000;
+    const maxTokens = options.maxTokens || options.max_tokens || RESPONSE_MAX_TOKENS;
 
     const requestBody: any = {
       contents,
@@ -555,7 +556,7 @@ async function callLovable(
       ...messages.filter(m => m.role !== 'system')
     ];
 
-    const maxTokens = options.maxTokens || options.max_tokens || 2000;
+    const maxTokens = options.maxTokens || options.max_tokens || RESPONSE_MAX_TOKENS;
 
     const requestBody: any = {
       model: 'anthropic/claude-3.5-sonnet', // The "Lovable" brain
@@ -644,7 +645,7 @@ async function callDeepSeek(
       ...messages.filter(m => m.role !== 'system')
     ];
 
-    const maxTokens = options.maxTokens || options.max_tokens || 2000;
+    const maxTokens = options.maxTokens || options.max_tokens || RESPONSE_MAX_TOKENS;
 
     const requestBody: any = {
       model: 'deepseek-chat',
@@ -732,7 +733,7 @@ async function callKimi(
       ...messages.filter(m => m.role !== 'system')
     ];
 
-    const maxTokens = options.maxTokens || options.max_tokens || 2000;
+    const maxTokens = options.maxTokens || options.max_tokens || RESPONSE_MAX_TOKENS;
 
     const requestBody: any = {
       model: 'moonshotai/kimi-k2',
@@ -907,4 +908,3 @@ export async function generateEmbedding(text: string): Promise<number[]> {
     throw error;
   }
 }
-
