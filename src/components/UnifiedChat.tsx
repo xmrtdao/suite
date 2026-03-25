@@ -306,6 +306,24 @@ const markdownComponents = {
     const match = /language-(\w+)/.exec(className || '');
     const codeString = String(children).replace(/\n$/, '');
     const language = match?.[1] || 'text';
+    const isIdentifierLike = /^[a-zA-Z_][\w.-]*$/.test(codeString.trim());
+    const shouldRenderAsSubtleInlineTag =
+      !inline &&
+      !match?.[1] &&
+      !codeString.includes('\n') &&
+      codeString.trim().length <= 40 &&
+      isIdentifierLike;
+
+    if (shouldRenderAsSubtleInlineTag) {
+      return (
+        <code
+          className={`${className} text-muted-foreground bg-muted/40 px-1.5 py-0.5 rounded-md font-mono text-xs`}
+          {...props}
+        >
+          {children}
+        </code>
+      );
+    }
 
     if (!inline) {
       return <MessageCodeBlock code={codeString} language={language} {...props} />;
