@@ -1261,21 +1261,49 @@ Deno.serve(async (req) => {
       case 'list_events': {
         const params: Record<string, string> = {};
         if (data.job_id) params.jobId = data.job_id;
-        // ✅ FIX: Táve v2 API uses 'start'/'end' not 'startDate'/'endDate'
-        if (data.start_date) params.start = data.start_date;
-        if (data.end_date) params.end = data.end_date;
         if (data.page) params.page = String(data.page);
+        if (data.page_size) params.pageSize = String(data.page_size);
+        else params.pageSize = '100';
 
-        // Try to request sorted by startDate descending (newest first)
-        // Common API patterns: -startDate, sort=-startDate, order=desc
-        if (data.sort) params.sort = data.sort;
-        else params.sort = '-startDate';
+        // VSCO /event supports sortBy (not start/end date filters).
+        if (data.sort_by) params.sortBy = data.sort_by;
+        else if (data.sort) params.sortBy = data.sort; // backward compatibility for existing callers
+        else params.sortBy = '-startDate';
 
         const response = await vscoRequest(supabase, '/event', { params }, executive);
 
         // VSCO API returns: { meta, type, items } - items is the data array
         let events = response.data?.items || response.data?.events || response.data || [];
         const pagination = response.data?.meta;
+
+        // Client-side date filtering because VSCO /event does not support start/end query filtering
+        const parseDateBoundary = (value: string, boundary: 'start' | 'end'): number | null => {
+          if (!value || typeof value !== 'string') return null;
+
+          // Date-only values should be interpreted in UTC to avoid server timezone drift.
+          const isDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(value);
+          const normalized = isDateOnly
+            ? `${value}T${boundary === 'start' ? '00:00:00.000' : '23:59:59.999'}Z`
+            : value;
+          const parsed = new Date(normalized).getTime();
+          return Number.isFinite(parsed) ? parsed : null;
+        };
+
+        const filterStart = parseDateBoundary(data.start_date, 'start');
+        const filterEnd = parseDateBoundary(data.end_date, 'end');
+
+        if (Array.isArray(events) && (filterStart !== null || filterEnd !== null)) {
+          events = events.filter((event: any) => {
+            const eventStartRaw = event.startDate || event.start_date || event.created;
+            if (!eventStartRaw) return false;
+
+            const eventStart = new Date(eventStartRaw).getTime();
+            if (!Number.isFinite(eventStart)) return false;
+            if (filterStart !== null && eventStart < filterStart) return false;
+            if (filterEnd !== null && eventStart > filterEnd) return false;
+            return true;
+          });
+        }
 
         // Client-side fallback sort: newest first (descending by startDate)
         // In case the API doesn't support the sort parameter
@@ -1288,7 +1316,7 @@ Deno.serve(async (req) => {
           });
         }
 
-        console.log(`🔍 [list_events] Found ${Array.isArray(events) ? events.length : 0} events (sorted ${data.sort_order || 'desc'}), pagination: ${JSON.stringify(pagination)}`);
+        console.log(`🔍 [list_events] Found ${Array.isArray(events) ? events.length : 0} events (sorted ${data.sort_order || 'desc'}), filtered range: ${data.start_date || 'none'} → ${data.end_date || 'none'}, pagination: ${JSON.stringify(pagination)}`);
 
         result = response.error
           ? { success: false, error: response.error }
