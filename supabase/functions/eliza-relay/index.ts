@@ -11,7 +11,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.58.0";
  * Body:
  *   { "action": "send", "message": "...", "relay_tag": "optional-custom-tag" }
  *     → Posts message to inbox_messages for Eliza to see,
- *       then immediately calls Gemini on Eliza's behalf and inserts the reply.
+ *       then immediately routes the message through ai-chat and inserts the reply.
  *       Returns { relay_tag, message_id, reply, reply_id }
  *
  *   { "action": "check_reply", "relay_tag": "openclaw-relay-xxxx" }
@@ -20,7 +20,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.58.0";
  *
  * The local eliza-relay.mjs script writes to inbox_messages directly,
  * then polls Supabase. This edge function gives OpenClaw a single HTTP call
- * that does BOTH steps atomically (send + Gemini reply) in one round-trip.
+ * that does BOTH steps atomically (send + ai-chat reply) in one round-trip.
  */
 
 const corsHeaders = {
@@ -30,7 +30,6 @@ const corsHeaders = {
 };
 
 const OWNER_USER_ID = "1b865599-e9ae-45df-8e50-a2abec6811b4"; // joeyleepcs@gmail.com
-const GEMINI_MODEL = "gemini-2.0-flash";
 
 serve(async (req) => {
     if (req.method === "OPTIONS") {
@@ -39,7 +38,6 @@ serve(async (req) => {
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const geminiKey = Deno.env.get("GEMINI_API_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     try {
@@ -49,7 +47,7 @@ serve(async (req) => {
         console.log(`📡 eliza-relay action: ${action}`);
 
         // ── ACTION: send ───────────────────────────────────────────────────────────
-        // OpenClaw sends a message, Eliza (via Gemini) replies immediately.
+        // OpenClaw sends a message, Eliza (via ai-chat) replies immediately.
         if (action === "send") {
             const { message, relay_tag: customTag, agent_name, metadata: extraMeta } =
                 body;
@@ -96,12 +94,12 @@ serve(async (req) => {
             const messageId = msgRow.id;
             console.log(`  Stored request as inbox_message ${messageId}`);
 
-            // 2. Call Gemini to generate Eliza's reply
+            // 2. Route through ai-chat to generate Eliza's reply
             let reply: string;
             try {
-                reply = await callGemini(geminiKey, message);
+                reply = await callAiChat(supabase, message, relayTag, senderName);
             } catch (e: any) {
-                console.error("  Gemini error:", e.message);
+                console.error("  ai-chat error:", e.message);
                 reply = `⚠️ Eliza encountered an error: ${e.message}`;
             }
 
@@ -158,7 +156,7 @@ serve(async (req) => {
         }
 
         // ── ACTION: check_reply ────────────────────────────────────────────────────
-        // Let the local eliza-relay.mjs script poll for a reply without re-calling Gemini.
+        // Let the local eliza-relay.mjs script poll for a reply without re-calling ai-chat.
         if (action === "check_reply") {
             const { relay_tag } = body;
             if (!relay_tag) {
@@ -195,8 +193,8 @@ serve(async (req) => {
             return jsonOk({
                 status: "ok",
                 function: "eliza-relay",
-                version: "1.0.0",
-                description: "Relay messages from OpenClaw to Eliza (SuiteAI) via Gemini",
+                version: "1.1.0",
+                description: "Relay messages from OpenClaw to Eliza (SuiteAI) via ai-chat",
                 actions: ["send", "check_reply", "status"],
             });
         }
@@ -208,39 +206,44 @@ serve(async (req) => {
     }
 });
 
-// ── Gemini helper ─────────────────────────────────────────────────────────────
+// ── ai-chat helper ────────────────────────────────────────────────────────────
 
-async function callGemini(apiKey: string, userMessage: string): Promise<string> {
-    const systemPrompt = `You are Eliza, the cloud AI assistant for SuiteAI at suite-beta.vercel.app.
-You are receiving a request from an OpenClaw agent (Eliza-Dev), your local counterpart running in the user's gateway.
-Respond helpfully and concisely to the request. You have web knowledge up to your training cutoff.
-If asked to search the web, provide the best answer you can from your knowledge.
-Keep responses focused and actionable — OpenClaw will relay your answer back to the user or task system.
-Do NOT reveal API keys, service role keys, or internal system secrets.`;
-
-    const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
-        {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                system_instruction: { parts: [{ text: systemPrompt }] },
-                contents: [{ role: "user", parts: [{ text: userMessage }] }],
-                generationConfig: { maxOutputTokens: 1024, temperature: 0.7 },
-            }),
+async function callAiChat(
+    supabase: ReturnType<typeof createClient>,
+    userMessage: string,
+    relayTag: string,
+    senderName: string,
+): Promise<string> {
+    const { data, error } = await supabase.functions.invoke("ai-chat", {
+        body: {
+            messages: [{ role: "user", content: userMessage }],
+            use_tools: true,
+            userContext: {
+                source: "eliza-relay-edge-function",
+                channel: "openclaw",
+                relay_tag: relayTag,
+                agent_name: senderName,
+            },
         },
-    );
+    });
 
-    if (!res.ok) {
-        const err = await res.text();
-        throw new Error(`Gemini ${res.status}: ${err.slice(0, 200)}`);
+    if (error) {
+        throw new Error(error.message || "ai-chat invocation failed");
     }
 
-    const data = await res.json();
-    return (
-        data.candidates?.[0]?.content?.parts?.[0]?.text ??
-        "Eliza could not generate a response."
-    );
+    const reply =
+        data?.response ??
+        data?.content ??
+        data?.choices?.[0]?.message?.content ??
+        data?.message ??
+        data?.text ??
+        null;
+
+    if (!reply || typeof reply !== "string") {
+        throw new Error("ai-chat returned no textual response");
+    }
+
+    return reply;
 }
 
 // ── Response helpers ──────────────────────────────────────────────────────────
