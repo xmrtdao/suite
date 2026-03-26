@@ -102,7 +102,7 @@ const heroStickyNotes = [
     mobileRotation: '-7deg',
     accentClassName: 'from-yellow-200 via-amber-100 to-yellow-50',
     style: { top: '6%', left: '4%' },
-    mobileStyle: { top: '0%', left: '-2%' },
+    mobileStyle: { top: '-2%', left: '-8%' },
   },
   {
     id: 'right-ops',
@@ -113,7 +113,7 @@ const heroStickyNotes = [
     mobileRotation: '6deg',
     accentClassName: 'from-yellow-100 via-amber-50 to-yellow-50',
     style: { top: '18%', right: '2%' },
-    mobileStyle: { top: '4%', right: '-4%' },
+    mobileStyle: { top: '24%', right: '-6%' },
   },
   {
     id: 'right-draft',
@@ -124,7 +124,55 @@ const heroStickyNotes = [
     mobileRotation: '-3deg',
     accentClassName: 'from-amber-200 via-yellow-100 to-yellow-50',
     style: { top: '54%', right: '8%' },
-    mobileStyle: { top: '36%', left: '50%', transform: 'translateX(-50%)' },
+    mobileStyle: { top: '74%', right: '-4%' },
+  },
+] as const;
+
+const sectionStickyNotes = [
+  {
+    id: 'exec-left',
+    section: 'executives',
+    title: 'Hiring',
+    text: 'Vetting top candidates',
+    rotation: '-6deg',
+    accentClassName: 'from-yellow-200 via-amber-100 to-yellow-50',
+    style: { top: '10%', left: '2%' },
+  },
+  {
+    id: 'exec-right',
+    section: 'executives',
+    title: 'Growth',
+    text: 'Planning global launch',
+    rotation: '7deg',
+    accentClassName: 'from-yellow-100 via-amber-50 to-yellow-50',
+    style: { bottom: '8%', right: '2%' },
+  },
+  {
+    id: 'benefits-right',
+    section: 'benefits',
+    title: 'Savings',
+    text: 'Tracking cost wins',
+    rotation: '6deg',
+    accentClassName: 'from-amber-200 via-yellow-100 to-yellow-50',
+    style: { top: '16%', right: '2%' },
+  },
+  {
+    id: 'how-left',
+    section: 'how-it-works',
+    title: 'Process',
+    text: 'Automating daily flow',
+    rotation: '-5deg',
+    accentClassName: 'from-yellow-200 via-amber-100 to-yellow-50',
+    style: { bottom: '10%', left: '3%' },
+  },
+  {
+    id: 'cta-right',
+    section: 'cta',
+    title: 'Action',
+    text: 'Book kickoff today',
+    rotation: '8deg',
+    accentClassName: 'from-yellow-100 via-amber-50 to-yellow-50',
+    style: { top: '10%', right: '4%' },
   },
 ] as const;
 
@@ -225,7 +273,7 @@ export default function Landing() {
           </p>
 
           <div className="relative mb-16 xl:hidden">
-            <div className="pointer-events-none absolute inset-x-0 top-0 mx-auto h-52 max-w-sm" aria-hidden="true">
+            <div className="pointer-events-none absolute inset-x-0 -top-3 mx-auto h-[30rem] max-w-sm" aria-hidden="true">
               {heroStickyNotes.map((note, index) => (
                 <div
                   key={`mobile-${note.id}`}
@@ -261,7 +309,7 @@ export default function Landing() {
               ))}
             </div>
 
-            <div className="mx-auto max-w-sm px-8 pb-12 pt-44">
+            <div className="mx-auto max-w-sm px-8 pb-24 pt-44">
               <div className="flex flex-col items-center justify-center gap-4 sm:flex-row">
                 <Button
                   size="lg"
@@ -337,6 +385,38 @@ export default function Landing() {
 
       {/* AI Executives Section */}
       <section id="executives" className="py-12 px-4 relative scroll-mt-20">
+        <div className="pointer-events-none absolute inset-0 hidden xl:block" aria-hidden="true">
+          {sectionStickyNotes
+            .filter((note) => note.section === 'executives')
+            .map((note, index) => (
+              <div
+                key={note.id}
+                className="sticky-note-hero absolute w-[168px] 2xl:w-[184px]"
+                style={{
+                  ...note.style,
+                  ['--sticky-rotate' as string]: note.rotation,
+                  ['--sticky-duration' as string]: `${3.1 + index * 0.35}s`,
+                  ['--sticky-delay' as string]: `${index * 180}ms`,
+                }}
+              >
+                <div className="sticky-note-hero__shadow" />
+                <div className={`sticky-note-hero__paper bg-gradient-to-br ${note.accentClassName}`}>
+                  <div className="sticky-note-hero__tape" />
+                  <div className="sticky-note-hero__pin" />
+                  <div className="sticky-note-hero__fold" />
+                  <div className="mt-8 text-left">
+                    <div className="flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-[0.2em] text-amber-950/55">
+                      <Sparkles className="h-3 w-3 text-amber-900/55" />
+                      {note.title}
+                    </div>
+                    <p className="sticky-note-handwriting mt-2 text-[20px] leading-[1.06] text-black/88">
+                      {note.text}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ))}
+        </div>
         <div className="absolute inset-0 bg-gradient-to-b from-transparent via-muted/20 to-transparent" />
 
         <div className="container mx-auto max-w-6xl relative">
@@ -408,7 +488,39 @@ export default function Landing() {
       </section>
 
       {/* Why Section */}
-      <section id="benefits" className="py-12 px-4 scroll-mt-20">
+      <section id="benefits" className="relative py-12 px-4 scroll-mt-20">
+        <div className="pointer-events-none absolute inset-0 hidden xl:block" aria-hidden="true">
+          {sectionStickyNotes
+            .filter((note) => note.section === 'benefits')
+            .map((note, index) => (
+              <div
+                key={note.id}
+                className="sticky-note-hero absolute w-[168px]"
+                style={{
+                  ...note.style,
+                  ['--sticky-rotate' as string]: note.rotation,
+                  ['--sticky-duration' as string]: `${3.1 + index * 0.35}s`,
+                  ['--sticky-delay' as string]: `${index * 180}ms`,
+                }}
+              >
+                <div className="sticky-note-hero__shadow" />
+                <div className={`sticky-note-hero__paper bg-gradient-to-br ${note.accentClassName}`}>
+                  <div className="sticky-note-hero__tape" />
+                  <div className="sticky-note-hero__pin" />
+                  <div className="sticky-note-hero__fold" />
+                  <div className="mt-8 text-left">
+                    <div className="flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-[0.2em] text-amber-950/55">
+                      <Sparkles className="h-3 w-3 text-amber-900/55" />
+                      {note.title}
+                    </div>
+                    <p className="sticky-note-handwriting mt-2 text-[20px] leading-[1.06] text-black/88">
+                      {note.text}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ))}
+        </div>
         <div className="container mx-auto max-w-5xl">
           <div className="text-center mb-16">
             <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold mb-4">
@@ -481,7 +593,39 @@ export default function Landing() {
       </section>
 
       {/* How It Works */}
-      <section id="how-it-works" className="py-12 px-4 scroll-mt-20">
+      <section id="how-it-works" className="relative py-12 px-4 scroll-mt-20">
+        <div className="pointer-events-none absolute inset-0 hidden xl:block" aria-hidden="true">
+          {sectionStickyNotes
+            .filter((note) => note.section === 'how-it-works')
+            .map((note, index) => (
+              <div
+                key={note.id}
+                className="sticky-note-hero absolute w-[168px]"
+                style={{
+                  ...note.style,
+                  ['--sticky-rotate' as string]: note.rotation,
+                  ['--sticky-duration' as string]: `${3.1 + index * 0.35}s`,
+                  ['--sticky-delay' as string]: `${index * 180}ms`,
+                }}
+              >
+                <div className="sticky-note-hero__shadow" />
+                <div className={`sticky-note-hero__paper bg-gradient-to-br ${note.accentClassName}`}>
+                  <div className="sticky-note-hero__tape" />
+                  <div className="sticky-note-hero__pin" />
+                  <div className="sticky-note-hero__fold" />
+                  <div className="mt-8 text-left">
+                    <div className="flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-[0.2em] text-amber-950/55">
+                      <Sparkles className="h-3 w-3 text-amber-900/55" />
+                      {note.title}
+                    </div>
+                    <p className="sticky-note-handwriting mt-2 text-[20px] leading-[1.06] text-black/88">
+                      {note.text}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ))}
+        </div>
         <div className="container mx-auto max-w-4xl">
           <div className="text-center mb-16">
             <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold mb-4">
@@ -507,7 +651,39 @@ export default function Landing() {
       </section>
 
       {/* CTA Section */}
-      <section className="py-16 px-4">
+      <section className="relative py-16 px-4">
+        <div className="pointer-events-none absolute inset-0 hidden xl:block" aria-hidden="true">
+          {sectionStickyNotes
+            .filter((note) => note.section === 'cta')
+            .map((note, index) => (
+              <div
+                key={note.id}
+                className="sticky-note-hero absolute w-[168px]"
+                style={{
+                  ...note.style,
+                  ['--sticky-rotate' as string]: note.rotation,
+                  ['--sticky-duration' as string]: `${3.1 + index * 0.35}s`,
+                  ['--sticky-delay' as string]: `${index * 180}ms`,
+                }}
+              >
+                <div className="sticky-note-hero__shadow" />
+                <div className={`sticky-note-hero__paper bg-gradient-to-br ${note.accentClassName}`}>
+                  <div className="sticky-note-hero__tape" />
+                  <div className="sticky-note-hero__pin" />
+                  <div className="sticky-note-hero__fold" />
+                  <div className="mt-8 text-left">
+                    <div className="flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-[0.2em] text-amber-950/55">
+                      <Sparkles className="h-3 w-3 text-amber-900/55" />
+                      {note.title}
+                    </div>
+                    <p className="sticky-note-handwriting mt-2 text-[20px] leading-[1.06] text-black/88">
+                      {note.text}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ))}
+        </div>
         <div className="container mx-auto max-w-3xl text-center">
           <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold mb-6">
             {t('landing.cta.title')}
