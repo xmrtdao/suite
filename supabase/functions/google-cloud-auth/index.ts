@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { SignJWT, importPKCS8 } from 'https://deno.land/x/jose@v4.15.5/index.ts';
+import { extractUserContext } from "../_shared/googleAuthHelper.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -51,7 +52,7 @@ interface TokenResponse {
 }
 
 // Helper to get fresh access token
-async function getAccessToken(): Promise<string | null> {
+async function getAccessToken(userCtx?: { userId?: string; userEmail?: string }): Promise<string | null> {
   const clientId = Deno.env.get('GOOGLE_CLIENT_ID')?.trim();
   const clientSecret = Deno.env.get('GOOGLE_CLIENT_SECRET')?.trim();
   let refreshToken = (Deno.env.get('GOOGLE_REFRESH_TOKEN') || Deno.env.get('GMAIL_REFRESH_TOKEN'))?.trim();
@@ -64,10 +65,22 @@ async function getAccessToken(): Promise<string | null> {
 
       // Try to find a valid token from the database
       // We order by connected_at to get the most recent one
-      const { data } = await supabase
+      let q = supabase
         .from('oauth_connections')
         .select('refresh_token')
         .eq('provider', 'google_cloud')
+        .eq('is_active', true);
+
+      if (userCtx?.userId) {
+        q = q.eq('user_id', userCtx.userId);
+      } else if (userCtx?.userEmail) {
+        q = q.eq('account_email', userCtx.userEmail.toLowerCase());
+      } else {
+        // No user context for user token mode: do not accidentally pick another user's token.
+        q = q.limit(0);
+      }
+
+      const { data } = await q
         .order('connected_at', { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -82,7 +95,7 @@ async function getAccessToken(): Promise<string | null> {
   }
 
   // 2. Fallback to Env Vars if not in DB
-  if (!refreshToken) {
+  if (!refreshToken && !userCtx?.userId && !userCtx?.userEmail) {
     refreshToken = Deno.env.get('GOOGLE_REFRESH_TOKEN') || Deno.env.get('GMAIL_REFRESH_TOKEN');
     if (refreshToken) console.log('Using refresh token from Environment Variables');
   }
@@ -539,6 +552,7 @@ serve(async (req) => {
         body = {};
       }
     }
+    const userContext = extractUserContext(req, body);
 
     // Auto-detect callback mode when 'code' parameter is present (from Google's redirect)
     // This allows us to use a redirect URI without query parameters
@@ -571,7 +585,14 @@ serve(async (req) => {
         authUrl.searchParams.set('scope', SCOPES);
         authUrl.searchParams.set('access_type', 'offline');
         authUrl.searchParams.set('prompt', 'consent');
-        authUrl.searchParams.set('login_hint', 'xmrtsolutions@gmail.com');
+        const returnTo = typeof body.return_to === 'string' && body.return_to.trim().length > 0
+          ? body.return_to.trim()
+          : null;
+        const encodedReturnTo = returnTo ? encodeURIComponent(returnTo) : null;
+        const oauthState = userContext.userId
+          ? `google_cloud_oauth:${userContext.userId}${encodedReturnTo ? `:${encodedReturnTo}` : ''}`
+          : `google_cloud_oauth${encodedReturnTo ? `:${encodedReturnTo}` : ''}`;
+        authUrl.searchParams.set('state', oauthState);
 
         return new Response(JSON.stringify({
           success: true,
@@ -583,7 +604,12 @@ serve(async (req) => {
       }
 
       case 'callback': {
-        const code = url.searchParams.get('code');
+        const code = url.searchParams.get('code') || body.code;
+        const state = url.searchParams.get('state') || body.state || '';
+        const stateParts = state.split(':');
+        const stateUserId = state.startsWith('google_cloud_oauth:') ? stateParts[1] : undefined;
+        const stateReturnTo = stateParts.length > 2 ? decodeURIComponent(stateParts.slice(2).join(':')) : null;
+        const callbackUserId = stateUserId || userContext.userId;
         if (!code) {
           return new Response(JSON.stringify({
             success: false,
@@ -641,19 +667,24 @@ serve(async (req) => {
               });
               const userInfo = await userInfoResponse.json();
 
-              // Deactivate existing Google Cloud connections
-              await supabase
-                .from('oauth_connections')
-                .update({ is_active: false })
-                .eq('provider', 'google_cloud');
+              // Deactivate existing Google Cloud connections only for this user
+              if (callbackUserId) {
+                await supabase
+                  .from('oauth_connections')
+                  .update({ is_active: false })
+                  .eq('provider', 'google_cloud')
+                  .eq('user_id', callbackUserId);
+              }
 
               // Insert new connection
               await supabase
                 .from('oauth_connections')
                 .insert({
+                  user_id: callbackUserId || null,
                   provider: 'google_cloud',
                   provider_user_id: userInfo.id || null,
                   provider_email: userInfo.email || null,
+                  account_email: userInfo.email || null,
                   access_token: tokens.access_token,
                   refresh_token: tokens.refresh_token,
                   token_type: tokens.token_type || 'Bearer',
@@ -676,14 +707,53 @@ serve(async (req) => {
           }
         }
 
-        return new Response(JSON.stringify({
+        const callbackResponse = {
           success: true,
           message: 'Authorization successful! Refresh token has been saved to the database.',
           refresh_token: tokens.refresh_token,
           access_token: tokens.access_token,
           expires_in: tokens.expires_in,
           scope: tokens.scope
-        }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        };
+
+        // Browser redirects from Google are GET requests.
+        // Return an auto-close + redirect page to support popup (desktop) and full-page/mobile flows.
+        if (req.method === 'GET') {
+          const safeReturnTo = stateReturnTo && /^https?:\/\//i.test(stateReturnTo)
+            ? stateReturnTo
+            : null;
+          const fallbackUrl = `${url.origin}/dashboard`;
+          const redirectTarget = safeReturnTo || fallbackUrl;
+          const redirectTargetJson = JSON.stringify(redirectTarget);
+          const payloadJson = JSON.stringify(callbackResponse);
+          const html = `<!doctype html>
+<html>
+  <head><meta charset="utf-8"><title>Google Cloud Connected</title></head>
+  <body>
+    <script>
+      (function () {
+        const payload = ${payloadJson};
+        const redirectTarget = ${redirectTargetJson};
+        try {
+          if (window.opener && !window.opener.closed) {
+            window.opener.postMessage({ type: 'google-cloud-oauth-complete', success: true, data: payload }, '*');
+            window.close();
+            return;
+          }
+        } catch (_) {}
+        window.location.replace(redirectTarget);
+      })();
+    </script>
+    <p>Authorization complete. Redirecting…</p>
+  </body>
+</html>`;
+
+          return new Response(html, {
+            headers: { ...corsHeaders, 'Content-Type': 'text/html; charset=utf-8' }
+          });
+        }
+
+        return new Response(JSON.stringify(callbackResponse), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
       case 'get_access_token': {
@@ -712,13 +782,13 @@ serve(async (req) => {
         // 2. User OAuth (Refresh Token) 
         if (!accessToken && (authType === 'user' || authType === 'user_fallback')) {
           // Fallback to existing user flow
-          if (refreshToken) {
-            accessToken = await getAccessToken();
+          if (userContext.userId || userContext.userEmail || refreshToken) {
+            accessToken = await getAccessToken(userContext);
             if (accessToken) usedMethod = 'user_refresh_token';
           } else if (authType === 'user') {
             return new Response(JSON.stringify({
               success: false,
-              error: 'GOOGLE_REFRESH_TOKEN not configured. Run authorization flow first.',
+              error: 'Google account not connected for this user. Run authorization flow first.',
               needs_authorization: true
             }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
           }
@@ -740,7 +810,7 @@ serve(async (req) => {
       }
 
       case 'status': {
-        let hasRefreshToken = !!refreshToken;
+        let hasRefreshToken = (!userContext.userId && !userContext.userEmail) ? !!refreshToken : false;
         if (!hasRefreshToken) {
           try {
             const supabaseUrl = Deno.env.get('SUPABASE_URL');
@@ -748,13 +818,17 @@ serve(async (req) => {
             if (supabaseUrl && supabaseKey) {
               const { createClient } = await import('https://esm.sh/@supabase/supabase-js@2');
               const supabase = createClient(supabaseUrl, supabaseKey);
-              const { data } = await supabase
+              let q = supabase
                 .from('oauth_connections')
                 .select('id')
                 .eq('provider', 'google_cloud')
-                .eq('is_active', true)
-                .limit(1)
-                .maybeSingle();
+                .eq('is_active', true);
+              if (userContext.userId) {
+                q = q.eq('user_id', userContext.userId);
+              } else if (userContext.userEmail) {
+                q = q.eq('account_email', userContext.userEmail.toLowerCase());
+              }
+              const { data } = await q.limit(1).maybeSingle();
               hasRefreshToken = !!data;
             }
           } catch (err) {
@@ -780,7 +854,7 @@ serve(async (req) => {
 
       // ============= GMAIL ACTIONS =============
       case 'send_email': {
-        const accessToken = await getAccessToken();
+        const accessToken = await getAccessToken(userContext);
         if (!accessToken) {
           return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -798,7 +872,7 @@ serve(async (req) => {
       }
 
       case 'list_emails': {
-        const accessToken = await getAccessToken();
+        const accessToken = await getAccessToken(userContext);
         if (!accessToken) {
           return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -810,7 +884,7 @@ serve(async (req) => {
       }
 
       case 'get_email': {
-        const accessToken = await getAccessToken();
+        const accessToken = await getAccessToken(userContext);
         if (!accessToken) {
           return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -827,7 +901,7 @@ serve(async (req) => {
       }
 
       case 'create_draft': {
-        const accessToken = await getAccessToken();
+        const accessToken = await getAccessToken(userContext);
         if (!accessToken) {
           return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -846,7 +920,7 @@ serve(async (req) => {
 
       // ============= DRIVE ACTIONS =============
       case 'list_files': {
-        const accessToken = await getAccessToken();
+        const accessToken = await getAccessToken(userContext);
         if (!accessToken) {
           return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -858,7 +932,7 @@ serve(async (req) => {
       }
 
       case 'upload_file': {
-        const accessToken = await getAccessToken();
+        const accessToken = await getAccessToken(userContext);
         if (!accessToken) {
           return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -875,7 +949,7 @@ serve(async (req) => {
       }
 
       case 'get_file': {
-        const accessToken = await getAccessToken();
+        const accessToken = await getAccessToken(userContext);
         if (!accessToken) {
           return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -892,7 +966,7 @@ serve(async (req) => {
       }
 
       case 'download_file': {
-        const accessToken = await getAccessToken();
+        const accessToken = await getAccessToken(userContext);
         if (!accessToken) {
           return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -909,7 +983,7 @@ serve(async (req) => {
       }
 
       case 'create_folder': {
-        const accessToken = await getAccessToken();
+        const accessToken = await getAccessToken(userContext);
         if (!accessToken) {
           return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -926,7 +1000,7 @@ serve(async (req) => {
       }
 
       case 'share_file': {
-        const accessToken = await getAccessToken();
+        const accessToken = await getAccessToken(userContext);
         if (!accessToken) {
           return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -944,7 +1018,7 @@ serve(async (req) => {
 
       // ============= SHEETS ACTIONS =============
       case 'create_spreadsheet': {
-        const accessToken = await getAccessToken();
+        const accessToken = await getAccessToken(userContext);
         if (!accessToken) {
           return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -961,7 +1035,7 @@ serve(async (req) => {
       }
 
       case 'read_sheet': {
-        const accessToken = await getAccessToken();
+        const accessToken = await getAccessToken(userContext);
         if (!accessToken) {
           return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -978,7 +1052,7 @@ serve(async (req) => {
       }
 
       case 'write_sheet': {
-        const accessToken = await getAccessToken();
+        const accessToken = await getAccessToken(userContext);
         if (!accessToken) {
           return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -995,7 +1069,7 @@ serve(async (req) => {
       }
 
       case 'append_sheet': {
-        const accessToken = await getAccessToken();
+        const accessToken = await getAccessToken(userContext);
         if (!accessToken) {
           return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -1012,7 +1086,7 @@ serve(async (req) => {
       }
 
       case 'get_spreadsheet_info': {
-        const accessToken = await getAccessToken();
+        const accessToken = await getAccessToken(userContext);
         if (!accessToken) {
           return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -1030,7 +1104,7 @@ serve(async (req) => {
 
       // ============= CALENDAR ACTIONS =============
       case 'list_events': {
-        const accessToken = await getAccessToken();
+        const accessToken = await getAccessToken(userContext);
         if (!accessToken) {
           return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -1048,7 +1122,7 @@ serve(async (req) => {
       }
 
       case 'create_event': {
-        const accessToken = await getAccessToken();
+        const accessToken = await getAccessToken(userContext);
         if (!accessToken) {
           return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -1073,7 +1147,7 @@ serve(async (req) => {
       }
 
       case 'update_event': {
-        const accessToken = await getAccessToken();
+        const accessToken = await getAccessToken(userContext);
         if (!accessToken) {
           return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -1100,7 +1174,7 @@ serve(async (req) => {
       }
 
       case 'delete_event': {
-        const accessToken = await getAccessToken();
+        const accessToken = await getAccessToken(userContext);
         if (!accessToken) {
           return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -1117,7 +1191,7 @@ serve(async (req) => {
       }
 
       case 'get_event': {
-        const accessToken = await getAccessToken();
+        const accessToken = await getAccessToken(userContext);
         if (!accessToken) {
           return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -1135,7 +1209,7 @@ serve(async (req) => {
 
       // ============= DOCS ACTIONS =============
       case 'create_doc': {
-        const accessToken = await getAccessToken();
+        const accessToken = await getAccessToken(userContext);
         if (!accessToken) {
           return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -1166,7 +1240,7 @@ serve(async (req) => {
         // Insert structured content into a Google Doc via batchUpdate.
         // body.doc_id: string, body.requests: array of Docs API request objects
         // OR body.text: plain text to append at end of doc
-        const accessToken = await getAccessToken();
+        const accessToken = await getAccessToken(userContext);
         if (!accessToken) {
           return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -1205,7 +1279,7 @@ serve(async (req) => {
       case 'export_doc_pdf': {
         // Export a Google Doc as PDF, upload the bytes as a new Drive file, return public URL.
         // body.doc_id: string, body.file_name: string, body.folder_id?: string
-        const accessToken = await getAccessToken();
+        const accessToken = await getAccessToken(userContext);
         if (!accessToken) {
           return new Response(JSON.stringify({ success: false, error: 'Not authenticated' }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
@@ -1299,3 +1373,6 @@ serve(async (req) => {
     }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 });
+        const state = url.searchParams.get('state') || body.state || '';
+        const stateUserId = state.startsWith('google_cloud_oauth:') ? state.split(':')[1] : undefined;
+        const callbackUserId = stateUserId || userContext.userId;

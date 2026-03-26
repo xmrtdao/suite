@@ -5,32 +5,6 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// ============================================================================
-// HELPER FUNCTIONS FOR TIMESTAMP HANDLING
-// ============================================================================
-
-const asTimestamptz = (v: unknown): string | null => {
-  if (v == null) return null;
-  if (typeof v === 'string' && v.trim().toLowerCase() === 'undefined') return null;
-  const d = new Date(v as any);
-  return isNaN(d.getTime()) ? null : d.toISOString();
-};
-
-const asDateOnly = (v: unknown): string | null => {
-  if (v == null) return null;
-  if (typeof v === 'string' && v.trim().toLowerCase() === 'undefined') return null;
-  const d = new Date(v as any);
-  if (isNaN(d.getTime())) return null;
-  return d.toISOString().slice(0, 10);
-};
-
-const clean = (o: Record<string, any>) =>
-  Object.fromEntries(Object.entries(o).filter(([_, v]) => v !== undefined && v !== 'undefined'));
-
-// ============================================================================
-// END HELPER FUNCTIONS
-// ============================================================================
-
 const VSCO_API_KEY = Deno.env.get('VSCO_API_KEY');
 const BASE_URL = 'https://workspace.vsco.co/api/v2';
 
@@ -38,6 +12,49 @@ interface VscoRequestOptions {
   method?: string;
   body?: any;
   params?: Record<string, string>;
+}
+
+const VSCO_SYNC_MAX_RETRIES = 3;
+const VSCO_SYNC_RETRY_DELAY_MS = 250;
+
+function isNil(value: unknown): value is null | undefined {
+  return value === null || value === undefined;
+}
+
+function moneyCentsToDollars(value: unknown): number | null {
+  if (isNil(value) || value === '') return null;
+  const parsed = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  return parsed / 100;
+}
+
+function integerFromCents(value: unknown): number | null {
+  const dollars = moneyCentsToDollars(value);
+  if (isNil(dollars)) return null;
+  return Math.round(dollars);
+}
+
+function buildJobFinancials(job: Record<string, any>) {
+  const cents = {
+    totalRevenue: job.totalRevenue ?? job.total ?? null,
+    totalCost: job.totalCost ?? null,
+    totalProfit: job.totalProfit ?? null,
+    accountBalance: job.accountBalance ?? null,
+  };
+
+  return {
+    cents,
+    dollars: {
+      total_revenue: moneyCentsToDollars(cents.totalRevenue),
+      total_cost: moneyCentsToDollars(cents.totalCost),
+      total_profit: integerFromCents(cents.totalProfit),
+      account_balance: moneyCentsToDollars(cents.accountBalance),
+    },
+  };
+}
+
+async function delay(ms: number) {
+  return await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function vscoRequest(
@@ -197,7 +214,7 @@ Deno.serve(async (req) => {
           { name: 'update_contact', category: 'contacts', required: ['contact_id'], optional: ['email', 'first_name', 'last_name'] },
           { name: 'delete_contact', category: 'contacts', required: ['contact_id'], optional: [] },
           // Events
-          { name: 'list_events', category: 'events', required: [], optional: ['start_date', 'end_date', 'job_id'] },
+          { name: 'list_events', category: 'events', required: [], optional: ['start_date', 'end_date', 'job_id', 'page', 'page_size', 'sort_by', 'sort', 'sort_order', 'max_recent_pages'] },
           { name: 'get_event', category: 'events', required: ['event_id'], optional: [] },
           { name: 'create_event', category: 'events', required: ['title', 'start_date'], optional: ['end_date', 'job_id'] },
           { name: 'update_event', category: 'events', required: ['event_id'], optional: ['title', 'start_date'] },
@@ -330,7 +347,7 @@ Deno.serve(async (req) => {
               name: brand.name,
               is_default: brand.isDefault || false,
               raw_data: brand,
-              synced_at: asTimestamptz(new Date()),
+              synced_at: new Date().toISOString(),
             }, { onConflict: 'vsco_id' });
           }
           result = { success: true, brands: brandsArray, synced: brandsArray.length };
@@ -432,39 +449,21 @@ Deno.serve(async (req) => {
         } else {
           // Sync to local DB
           const job = response.data;
-          try {
-            const jobUpsertPayload = clean({
-              vsco_id: job.id,
-              name: job.name,
-              stage: job.stage,
-              lead_status: job.leadStatus,
-              lead_rating: job.leadRating,
-              lead_confidence: job.leadConfidence,
-              lead_source: job.leadSource,
-              job_type: job.jobType,
-              brand_id: job.brandId,
-              event_date: asDateOnly(job.eventDate),
-              raw_data: job,
-              synced_at: asTimestamptz(new Date()),
-            });
-            const { error: upsertErr } = await supabase.from('vsco_jobs').upsert(jobUpsertPayload, { onConflict: 'vsco_id' });
-            if (upsertErr) {
-              console.error(`❌ [create_job] UPSERT FAILED for job ${job.id}: ${upsertErr.message}`, {
-                payloadSent: jobUpsertPayload,
-                originalEventDate: job?.eventDate,
-                stack: (upsertErr as any).stack,
-              });
-              result = { success: false, error: upsertErr.message };
-            } else {
-              result = { success: true, job };
-            }
-          } catch (e) {
-            console.error(`❌ [create_job] UPSERT EXCEPTION for job ${job.id}: ${(e as any).message}`, {
-              originalJobData: job,
-              stack: (e as any).stack,
-            });
-            result = { success: false, error: (e as any).message };
-          }
+          await supabase.from('vsco_jobs').upsert({
+            vsco_id: job.id,
+            name: job.name,
+            stage: job.stage,
+            lead_status: job.leadStatus,
+            lead_rating: job.leadRating,
+            lead_confidence: job.leadConfidence,
+            lead_source: job.leadSource,
+            job_type: job.jobType,
+            brand_id: job.brandId,
+            event_date: job.eventDate,
+            raw_data: job,
+            synced_at: new Date().toISOString(),
+          }, { onConflict: 'vsco_id' });
+          result = { success: true, job };
         }
         break;
       }
@@ -517,40 +516,21 @@ Deno.serve(async (req) => {
           result = { success: false, error: response.error, job_id_used: jobIdToUpdate };
         } else {
           const job = response.data;
-          try {
-            const jobUpsertPayload = clean({
-              vsco_id: job.id,
-              name: job.name,
-              stage: job.stage,
-              lead_status: job.leadStatus,
-              lead_rating: job.leadRating,
-              lead_confidence: job.leadConfidence,
-              lead_source: job.leadSource,
-              event_date: asDateOnly(job.eventDate),
-              booking_date: asDateOnly(job.bookingDate),
-              brand_id: job.brandId,
-              raw_data: job,
-              synced_at: asTimestamptz(new Date()),
-            });
-            const { error: upsertErr } = await supabase.from('vsco_jobs').upsert(jobUpsertPayload, { onConflict: 'vsco_id' });
-            if (upsertErr) {
-              console.error(`❌ [update_job] UPSERT FAILED for job ${job.id}: ${upsertErr.message}`, {
-                payloadSent: jobUpsertPayload,
-                originalEventDate: job?.eventDate,
-                originalBookingDate: job?.bookingDate,
-                stack: (upsertErr as any).stack,
-              });
-              result = { success: false, error: upsertErr.message, job_id_used: jobIdToUpdate };
-            } else {
-              result = { success: true, job, job_id_used: jobIdToUpdate };
-            }
-          } catch (e) {
-            console.error(`❌ [update_job] UPSERT EXCEPTION for job ${job.id}: ${(e as any).message}`, {
-              originalJobData: job,
-              stack: (e as any).stack,
-            });
-            result = { success: false, error: (e as any).message, job_id_used: jobIdToUpdate };
-          }
+          await supabase.from('vsco_jobs').upsert({
+            vsco_id: job.id,
+            name: job.name,
+            stage: job.stage,
+            lead_status: job.leadStatus,
+            lead_rating: job.leadRating,
+            lead_confidence: job.leadConfidence,
+            lead_source: job.leadSource,
+            event_date: job.eventDate,
+            booking_date: job.bookingDate,
+            brand_id: job.brandId,
+            raw_data: job,
+            synced_at: new Date().toISOString(),
+          }, { onConflict: 'vsco_id' });
+          result = { success: true, job, job_id_used: jobIdToUpdate };
         }
         break;
       }
@@ -1101,35 +1081,13 @@ Deno.serve(async (req) => {
             result = { success: false, error: resp.error, operation: 'update', job_id: existingJobId, search_log: searchLog };
           } else {
             const job = resp.data;
-            try {
-              const jobUpsertPayload = clean({
-                vsco_id: job.id,
-                name: job.name,
-                stage: job.stage,
-                event_date: asDateOnly(job.eventDate),
-                booking_date: asDateOnly(job.bookingDate),
-                lead_source: job.leadSource,
-                raw_data: job,
-                synced_at: asTimestamptz(new Date()),
-              });
-              const { error: upsertErr } = await supabase.from('vsco_jobs').upsert(jobUpsertPayload, { onConflict: 'vsco_id' });
-              if (upsertErr) {
-                console.error(`❌ [upsert_job] UPSERT FAILED for job ${job.id}: ${upsertErr.message}`, {
-                  payloadSent: jobUpsertPayload,
-                  originalEventDate: job?.eventDate,
-                  stack: (upsertErr as any).stack,
-                });
-                result = { success: false, error: upsertErr.message, operation: 'update', job_id: existingJobId, search_log: searchLog };
-              } else {
-                result = { success: true, job, operation: 'updated', job_id: existingJobId, search_log: searchLog };
-              }
-            } catch (e) {
-              console.error(`❌ [upsert_job] UPSERT EXCEPTION for job ${job.id}: ${(e as any).message}`, {
-                originalJobData: job,
-                stack: (e as any).stack,
-              });
-              result = { success: false, error: (e as any).message, operation: 'update', job_id: existingJobId, search_log: searchLog };
-            }
+            await supabase.from('vsco_jobs').upsert({
+              vsco_id: job.id, name: job.name, stage: job.stage,
+              event_date: job.eventDate, booking_date: job.bookingDate,
+              lead_source: job.leadSource, raw_data: job,
+              synced_at: new Date().toISOString(),
+            }, { onConflict: 'vsco_id' });
+            result = { success: true, job, operation: 'updated', job_id: existingJobId, search_log: searchLog };
           }
         } else {
           // ── CREATE new job (all tiers failed to find existing) ──
@@ -1153,35 +1111,13 @@ Deno.serve(async (req) => {
             result = { success: false, error: resp.error, operation: 'create', search_log: searchLog };
           } else {
             const job = resp.data;
-            try {
-              const jobUpsertPayload = clean({
-                vsco_id: job.id,
-                name: job.name,
-                stage: job.stage,
-                event_date: asDateOnly(job.eventDate),
-                booking_date: asDateOnly(job.bookingDate),
-                lead_source: job.leadSource,
-                raw_data: job,
-                synced_at: asTimestamptz(new Date()),
-              });
-              const { error: upsertErr } = await supabase.from('vsco_jobs').upsert(jobUpsertPayload, { onConflict: 'vsco_id' });
-              if (upsertErr) {
-                console.error(`❌ [upsert_job] UPSERT FAILED for job ${job.id}: ${upsertErr.message}`, {
-                  payloadSent: jobUpsertPayload,
-                  originalEventDate: job?.eventDate,
-                  stack: (upsertErr as any).stack,
-                });
-                result = { success: false, error: upsertErr.message, operation: 'create', search_log: searchLog };
-              } else {
-                result = { success: true, job, operation: 'created', search_log: searchLog };
-              }
-            } catch (e) {
-              console.error(`❌ [upsert_job] UPSERT EXCEPTION for job ${job.id}: ${(e as any).message}`, {
-                originalJobData: job,
-                stack: (e as any).stack,
-              });
-              result = { success: false, error: (e as any).message, operation: 'create', search_log: searchLog };
-            }
+            await supabase.from('vsco_jobs').upsert({
+              vsco_id: job.id, name: job.name, stage: job.stage,
+              event_date: job.eventDate, booking_date: job.bookingDate,
+              lead_source: job.leadSource, raw_data: job,
+              synced_at: new Date().toISOString(),
+            }, { onConflict: 'vsco_id' });
+            result = { success: true, job, operation: 'created', search_log: searchLog };
           }
         }
         break;
@@ -1203,7 +1139,7 @@ Deno.serve(async (req) => {
           await supabase.from('vsco_jobs').update({
             closed: true,
             closed_reason: data.reason || 'completed',
-            synced_at: asTimestamptz(new Date()),
+            synced_at: new Date().toISOString(),
           }).eq('vsco_id', data.job_id);
           result = { success: true, job: response.data };
         }
@@ -1276,7 +1212,7 @@ Deno.serve(async (req) => {
             company_name: contact.companyName,
             brand_id: contact.brandId,
             raw_data: contact,
-            synced_at: asTimestamptz(new Date()),
+            synced_at: new Date().toISOString(),
           }, { onConflict: 'vsco_id' });
           result = { success: true, contact };
         }
@@ -1312,7 +1248,7 @@ Deno.serve(async (req) => {
             phone: contact.phone,
             cell_phone: contact.cellPhone,
             raw_data: contact,
-            synced_at: asTimestamptz(new Date()),
+            synced_at: new Date().toISOString(),
           }, { onConflict: 'vsco_id' });
           result = { success: true, contact };
         }
@@ -1325,21 +1261,125 @@ Deno.serve(async (req) => {
       case 'list_events': {
         const params: Record<string, string> = {};
         if (data.job_id) params.jobId = data.job_id;
-        // ✅ FIX: Táve v2 API uses 'start'/'end' not 'startDate'/'endDate'
-        if (data.start_date) params.start = data.start_date;
-        if (data.end_date) params.end = data.end_date;
-        if (data.page) params.page = String(data.page);
+        if (data.page_size) params.pageSize = String(data.page_size);
+        else params.pageSize = '100';
 
-        // Try to request sorted by startDate descending (newest first)
-        // Common API patterns: -startDate, sort=-startDate, order=desc
-        if (data.sort) params.sort = data.sort;
-        else params.sort = '-startDate';
+        // VSCO /event supports sortBy (not start/end date filters).
+        if (data.sort_by) params.sortBy = data.sort_by;
+        else if (data.sort) params.sortBy = data.sort; // backward compatibility for existing callers
+        else params.sortBy = '-startDate';
 
-        const response = await vscoRequest(supabase, '/event', { params }, executive);
+        // Client-side date filtering because VSCO /event does not support start/end query filtering
+        const parseDateBoundary = (value: string, boundary: 'start' | 'end'): number | null => {
+          if (!value || typeof value !== 'string') return null;
 
-        // VSCO API returns: { meta, type, items } - items is the data array
-        let events = response.data?.items || response.data?.events || response.data || [];
-        const pagination = response.data?.meta;
+          // Date-only values should be interpreted in UTC to avoid server timezone drift.
+          const isDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(value);
+          const normalized = isDateOnly
+            ? `${value}T${boundary === 'start' ? '00:00:00.000' : '23:59:59.999'}Z`
+            : value;
+          const parsed = new Date(normalized).getTime();
+          return Number.isFinite(parsed) ? parsed : null;
+        };
+
+        const filterStart = parseDateBoundary(data.start_date, 'start');
+        const filterEnd = parseDateBoundary(data.end_date, 'end');
+        const hasDateFilter = filterStart !== null || filterEnd !== null;
+
+        const filterEventsByDate = (rawEvents: any[]): any[] => {
+          if (!Array.isArray(rawEvents) || !hasDateFilter) return Array.isArray(rawEvents) ? rawEvents : [];
+
+          return rawEvents.filter((event: any) => {
+            const eventStartRaw = event.startDate || event.start_date || event.created;
+            if (!eventStartRaw) return false;
+
+            const eventStart = new Date(eventStartRaw).getTime();
+            if (!Number.isFinite(eventStart)) return false;
+            if (filterStart !== null && eventStart < filterStart) return false;
+            if (filterEnd !== null && eventStart > filterEnd) return false;
+            return true;
+          });
+        };
+
+        let events: any[] = [];
+        let pagination: any = null;
+
+        if (data.page || !hasDateFilter) {
+          if (data.page) params.page = String(data.page);
+          const response = await vscoRequest(supabase, '/event', { params }, executive);
+
+          // VSCO API returns: { meta, type, items } - items is the data array
+          events = response.data?.items || response.data?.events || response.data || [];
+          pagination = response.data?.meta;
+
+          if (response.error) {
+            result = { success: false, error: response.error };
+            break;
+          }
+
+          events = filterEventsByDate(events);
+        } else {
+          // Date range queries: scan recent pages from the end so we evaluate newest events first.
+          const bootstrapResponse = await vscoRequest(supabase, '/event', {
+            params: { ...params, page: '1' },
+          }, executive);
+
+          if (bootstrapResponse.error) {
+            result = { success: false, error: bootstrapResponse.error };
+            break;
+          }
+
+          const bootstrapMeta = bootstrapResponse.data?.meta || {};
+          const totalPages = Math.max(1, Number(bootstrapMeta.totalPages || 1));
+          const maxPagesToScan = Math.max(1, Number(data.max_recent_pages || 10));
+          const startPage = totalPages;
+          const endPage = Math.max(1, totalPages - maxPagesToScan + 1);
+          let matchedPage: number | null = null;
+          let scannedPages = 0;
+
+          for (let page = startPage; page >= endPage; page--) {
+            const pageResponse = await vscoRequest(supabase, '/event', {
+              params: { ...params, page: String(page) },
+            }, executive);
+
+            if (pageResponse.error) {
+              result = { success: false, error: pageResponse.error };
+              break;
+            }
+
+            scannedPages += 1;
+            const pageEvents = pageResponse.data?.items || pageResponse.data?.events || pageResponse.data || [];
+            const filteredPageEvents = filterEventsByDate(pageEvents);
+
+            if (filteredPageEvents.length > 0) {
+              matchedPage = page;
+              events = filteredPageEvents;
+              pagination = {
+                ...(pageResponse.data?.meta || {}),
+                strategy: 'reverse_scan_recent_pages',
+                requestedDateRange: { start_date: data.start_date || null, end_date: data.end_date || null },
+                scannedPages,
+                scanWindow: { startPage, endPage, maxPagesToScan },
+                matchedPage,
+              };
+              break;
+            }
+          }
+
+          if (!result && matchedPage === null) {
+            events = [];
+            pagination = {
+              ...bootstrapMeta,
+              strategy: 'reverse_scan_recent_pages',
+              requestedDateRange: { start_date: data.start_date || null, end_date: data.end_date || null },
+              scannedPages,
+              scanWindow: { startPage, endPage, maxPagesToScan },
+              matchedPage: null,
+            };
+          }
+
+          if (result?.success === false) break;
+        }
 
         // Client-side fallback sort: newest first (descending by startDate)
         // In case the API doesn't support the sort parameter
@@ -1352,11 +1392,9 @@ Deno.serve(async (req) => {
           });
         }
 
-        console.log(`🔍 [list_events] Found ${Array.isArray(events) ? events.length : 0} events (sorted ${data.sort_order || 'desc'}), pagination: ${JSON.stringify(pagination)}`);
+        console.log(`🔍 [list_events] Found ${Array.isArray(events) ? events.length : 0} events (sorted ${data.sort_order || 'desc'}), filtered range: ${data.start_date || 'none'} → ${data.end_date || 'none'}, pagination: ${JSON.stringify(pagination)}`);
 
-        result = response.error
-          ? { success: false, error: response.error }
-          : { success: true, events: Array.isArray(events) ? events : [], pagination };
+        result = { success: true, events: Array.isArray(events) ? events : [], pagination };
         break;
       }
 
@@ -1392,41 +1430,22 @@ Deno.serve(async (req) => {
           result = { success: false, error: response.error };
         } else {
           const event = response.data;
-          try {
-            const eventUpsertPayload = clean({
-              vsco_id: event.id,
-              vsco_job_id: event.jobId,
-              name: event.name,
-              event_type: event.eventType,
-              channel: event.channel,
-              start_date: asDateOnly(event.startDate),
-              start_time: event.startTime,
-              end_date: asDateOnly(event.endDate),
-              end_time: event.endTime,
-              location_address: event.locationAddress,
-              confirmed: event.confirmed,
-              raw_data: event,
-              synced_at: asTimestamptz(new Date()),
-            });
-            const { error: upsertErr } = await supabase.from('vsco_events').upsert(eventUpsertPayload, { onConflict: 'vsco_id' });
-            if (upsertErr) {
-              console.error(`❌ [create_event] UPSERT FAILED for event ${event.id}: ${upsertErr.message}`, {
-                payloadSent: eventUpsertPayload,
-                originalStartDate: event?.startDate,
-                originalEndDate: event?.endDate,
-                stack: (upsertErr as any).stack,
-              });
-              result = { success: false, error: upsertErr.message };
-            } else {
-              result = { success: true, event };
-            }
-          } catch (e) {
-            console.error(`❌ [create_event] UPSERT EXCEPTION for event ${event.id}: ${(e as any).message}`, {
-              originalEventData: event,
-              stack: (e as any).stack,
-            });
-            result = { success: false, error: (e as any).message };
-          }
+          await supabase.from('vsco_events').upsert({
+            vsco_id: event.id,
+            vsco_job_id: event.jobId,
+            name: event.name,
+            event_type: event.eventType,
+            channel: event.channel,
+            start_date: event.startDate,
+            start_time: event.startTime,
+            end_date: event.endDate,
+            end_time: event.endTime,
+            location_address: event.locationAddress,
+            confirmed: event.confirmed,
+            raw_data: event,
+            synced_at: new Date().toISOString(),
+          }, { onConflict: 'vsco_id' });
+          result = { success: true, event };
         }
         break;
       }
@@ -1453,37 +1472,18 @@ Deno.serve(async (req) => {
           result = { success: false, error: response.error };
         } else {
           const event = response.data;
-          try {
-            const eventUpsertPayload = clean({
-              vsco_id: event.id,
-              name: event.name,
-              start_date: asDateOnly(event.startDate),
-              start_time: event.startTime,
-              end_date: asDateOnly(event.endDate),
-              end_time: event.endTime,
-              confirmed: event.confirmed,
-              raw_data: event,
-              synced_at: asTimestamptz(new Date()),
-            });
-            const { error: upsertErr } = await supabase.from('vsco_events').upsert(eventUpsertPayload, { onConflict: 'vsco_id' });
-            if (upsertErr) {
-              console.error(`❌ [update_event] UPSERT FAILED for event ${event.id}: ${upsertErr.message}`, {
-                payloadSent: eventUpsertPayload,
-                originalStartDate: event?.startDate,
-                originalEndDate: event?.endDate,
-                stack: (upsertErr as any).stack,
-              });
-              result = { success: false, error: upsertErr.message };
-            } else {
-              result = { success: true, event };
-            }
-          } catch (e) {
-            console.error(`❌ [update_event] UPSERT EXCEPTION for event ${event.id}: ${(e as any).message}`, {
-              originalEventData: event,
-              stack: (e as any).stack,
-            });
-            result = { success: false, error: (e as any).message };
-          }
+          await supabase.from('vsco_events').upsert({
+            vsco_id: event.id,
+            name: event.name,
+            start_date: event.startDate,
+            start_time: event.startTime,
+            end_date: event.endDate,
+            end_time: event.endTime,
+            confirmed: event.confirmed,
+            raw_data: event,
+            synced_at: new Date().toISOString(),
+          }, { onConflict: 'vsco_id' });
+          result = { success: true, event };
         }
         break;
       }
@@ -1534,38 +1534,20 @@ Deno.serve(async (req) => {
           result = { success: false, error: response.error };
         } else {
           const order = response.data;
-          try {
-            const orderUpsertPayload = clean({
-              vsco_id: order.id,
-              vsco_job_id: order.jobId,
-              order_number: order.orderNumber,
-              order_date: asDateOnly(order.orderDate),
-              status: order.status,
-              subtotal: order.subtotal,
-              tax_total: order.taxTotal,
-              total: order.total,
-              balance_due: order.balanceDue,
-              raw_data: order,
-              synced_at: asTimestamptz(new Date()),
-            });
-            const { error: upsertErr } = await supabase.from('vsco_orders').upsert(orderUpsertPayload, { onConflict: 'vsco_id' });
-            if (upsertErr) {
-              console.error(`❌ [create_order] UPSERT FAILED for order ${order.id}: ${upsertErr.message}`, {
-                payloadSent: orderUpsertPayload,
-                originalOrderDate: order?.orderDate,
-                stack: (upsertErr as any).stack,
-              });
-              result = { success: false, error: upsertErr.message };
-            } else {
-              result = { success: true, order };
-            }
-          } catch (e) {
-            console.error(`❌ [create_order] UPSERT EXCEPTION for order ${order.id}: ${(e as any).message}`, {
-              originalOrderData: order,
-              stack: (e as any).stack,
-            });
-            result = { success: false, error: (e as any).message };
-          }
+          await supabase.from('vsco_orders').upsert({
+            vsco_id: order.id,
+            vsco_job_id: order.jobId,
+            order_number: order.orderNumber,
+            order_date: order.orderDate,
+            status: order.status,
+            subtotal: order.subtotal,
+            tax_total: order.taxTotal,
+            total: order.total,
+            balance_due: order.balanceDue,
+            raw_data: order,
+            synced_at: new Date().toISOString(),
+          }, { onConflict: 'vsco_id' });
+          result = { success: true, order };
         }
         break;
       }
@@ -1637,7 +1619,7 @@ Deno.serve(async (req) => {
             pipeline: stages,
             total_jobs: (jobs || []).length,
             total_revenue: totalRevenue,
-            last_synced: asTimestamptz(new Date()),
+            last_synced: new Date().toISOString(),
           },
         };
         break;
@@ -1755,6 +1737,12 @@ Deno.serve(async (req) => {
             let chunkJobCount = 0;
             let firstPageMeta: any = null;
 
+            const debugSampleSize = Math.max(1, Number(data.debug_sample_size) || 10);
+            let financialDebugLogged = 0;
+            let jobsWithFinancials = 0;
+            let jobsWithoutFinancials = 0;
+            let upsertFailures = 0;
+
             for (let page = startPage; page <= endPage; page++) {
               const jobsResponse = await vscoRequest(supabase, '/job', {
                 params: { page: String(page), pageSize: '100', includeClosed: 'true' }
@@ -1780,51 +1768,107 @@ Deno.serve(async (req) => {
 
               for (const job of jobsArray) {
                 const pc = job.primaryContact || {};
-                try {
-                  const jobUpsertPayload = clean({
-                    vsco_id: job.id,
-                    name: job.name,
-                    stage: job.stage,
-                    client_first_name: pc.firstName,
-                    client_last_name: pc.lastName,
-                    client_email: pc.email,
-                    client_phone: pc.phone,
-                    lead_status: job.leadStatus,
-                    lead_rating: job.leadRating,
-                    lead_confidence: job.leadConfidence,
-                    lead_source: job.leadSource,
-                    job_type: job.jobType,
-                    brand_id: job.brandId,
-                    event_date: asDateOnly(job.eventDate),
-                    booking_date: asDateOnly(job.bookingDate),
-                    total_revenue: job.total,
-                    closed: job.closed ?? false,
-                    closed_reason: job.closedReason,
-                    raw_data: job,
-                    synced_at: asTimestamptz(new Date()),
-                  });
-
-                  const { error: upsertErr } = await supabase.from('vsco_jobs').upsert(jobUpsertPayload, { onConflict: 'vsco_id' });
-
-                  if (upsertErr) {
-                    console.error(`❌ [sync_jobs] UPSERT FAILED for job ${job.id}: ${upsertErr.message}`, {
-                      payloadSent: jobUpsertPayload,
-                      originalEventDate: job?.eventDate,
-                      originalBookingDate: job?.bookingDate,
-                      stack: (upsertErr as any).stack,
-                    });
-                    syncResults.errors.push(`Upsert ${job.id}: ${upsertErr.message}`);
-                  } else {
-                    syncResults.jobs++;
-                    chunkJobCount++;
-                  }
-                } catch (e) {
-                  console.error(`❌ [sync_jobs] UPSERT EXCEPTION for job ${job.id}: ${(e as any).message}`, {
-                    originalJobData: job,
-                    stack: (e as any).stack,
-                  });
-                  syncResults.errors.push(`Upsert ${job.id} exception: ${(e as any).message}`);
+                const financials = buildJobFinancials(job);
+                const hasAnyFinancials = Object.values(financials.dollars).some((value) => value !== null);
+                if (hasAnyFinancials) {
+                  jobsWithFinancials++;
+                } else {
+                  jobsWithoutFinancials++;
                 }
+
+                const jobUpsertPayload = {
+                  vsco_id: job.id,
+                  name: job.name,
+                  stage: job.stage,
+                  client_first_name: pc.firstName,
+                  client_last_name: pc.lastName,
+                  client_email: pc.email,
+                  client_phone: pc.phone,
+                  lead_status: job.leadStatus,
+                  lead_rating: job.leadRating,
+                  lead_confidence: job.leadConfidence,
+                  lead_source: job.leadSource,
+                  job_type: job.jobType,
+                  brand_id: job.brandId,
+                  event_date: job.eventDate,
+                  booking_date: job.bookingDate,
+                  total_revenue: financials.dollars.total_revenue,
+                  total_cost: financials.dollars.total_cost,
+                  total_profit: financials.dollars.total_profit,
+                  account_balance: financials.dollars.account_balance,
+                  closed: job.closed ?? false,
+                  closed_reason: job.closedReason,
+                  raw_data: job,
+                  synced_at: new Date().toISOString(),
+                };
+
+                if (financialDebugLogged < debugSampleSize) {
+                  console.log(`🔍 [sync_jobs] Financial mapping sample ${financialDebugLogged + 1}/${debugSampleSize}`, JSON.stringify({
+                    job_id: job.id,
+                    job_name: job.name,
+                    source_cents: financials.cents,
+                    mapped_payload: {
+                      total_revenue: jobUpsertPayload.total_revenue,
+                      total_cost: jobUpsertPayload.total_cost,
+                      total_profit: jobUpsertPayload.total_profit,
+                      account_balance: jobUpsertPayload.account_balance,
+                    },
+                  }));
+                  financialDebugLogged++;
+                }
+
+                let upsertErr: any = null;
+                for (let attempt = 1; attempt <= VSCO_SYNC_MAX_RETRIES; attempt++) {
+                  const { error } = await supabase
+                    .from('vsco_jobs')
+                    .upsert(jobUpsertPayload, { onConflict: 'vsco_id' });
+
+                  if (!error) {
+                    upsertErr = null;
+                    break;
+                  }
+
+                  upsertErr = error;
+                  console.error(`❌ [sync_jobs] UPSERT FAILED (attempt ${attempt}/${VSCO_SYNC_MAX_RETRIES})`, JSON.stringify({
+                    job_id: job.id,
+                    job_name: job.name,
+                    message: error.message,
+                    details: error.details,
+                    hint: error.hint,
+                    code: error.code,
+                    financial_payload: {
+                      total_revenue: jobUpsertPayload.total_revenue,
+                      total_cost: jobUpsertPayload.total_cost,
+                      total_profit: jobUpsertPayload.total_profit,
+                      account_balance: jobUpsertPayload.account_balance,
+                    },
+                    source_financial_cents: financials.cents,
+                  }));
+
+                  if (attempt < VSCO_SYNC_MAX_RETRIES) {
+                    await delay(VSCO_SYNC_RETRY_DELAY_MS * attempt);
+                  }
+                }
+
+                if (upsertErr) {
+                  upsertFailures++;
+                  syncResults.errors.push(`Upsert ${job.id}: ${upsertErr.message}`);
+                  continue;
+                }
+
+                if (hasAnyFinancials && (syncResults.jobs + chunkJobCount) % 200 === 0) {
+                  console.log(`✅ [sync_jobs] Financial payload persisted`, JSON.stringify({
+                    job_id: job.id,
+                    job_name: job.name,
+                    total_revenue: jobUpsertPayload.total_revenue,
+                    total_cost: jobUpsertPayload.total_cost,
+                    total_profit: jobUpsertPayload.total_profit,
+                    account_balance: jobUpsertPayload.account_balance,
+                  }));
+                }
+
+                syncResults.jobs++;
+                chunkJobCount++;
               }
 
               lastPageSynced = page;
@@ -1844,7 +1888,7 @@ Deno.serve(async (req) => {
                 total_items: firstPageMeta?.totalItems || stateRow?.total_items || 0,
                 items_synced: newTotalSynced,
                 is_complete: isNowComplete,
-                last_synced_at: asTimestamptz(new Date()),
+                last_synced_at: new Date().toISOString(),
                 last_error: syncResults.errors.length > 0 ? syncResults.errors[syncResults.errors.length - 1] : null,
               }, { onConflict: 'entity' });
 
@@ -1861,6 +1905,14 @@ Deno.serve(async (req) => {
               syncResults.delta_mode = true;
               syncResults.progress = `Delta sync: checked page 1 for new/modified jobs. ${chunkJobCount} records updated.`;
             }
+
+            console.log(`📊 [sync_jobs] Financial sync summary`, JSON.stringify({
+              jobs_updated_this_call: chunkJobCount,
+              jobs_with_financials: jobsWithFinancials,
+              jobs_without_financials: jobsWithoutFinancials,
+              upsert_failures: upsertFailures,
+              pages_synced: syncResults.pages_synced_this_call,
+            }));
 
           } catch (e) {
             syncResults.errors.push(`Jobs sync exception: ${e}`);
@@ -1897,7 +1949,7 @@ Deno.serve(async (req) => {
                   company_name: contact.companyName,
                   brand_id: contact.brandId,
                   raw_data: contact,
-                  synced_at: asTimestamptz(new Date()),
+                  synced_at: new Date().toISOString(),
                 }, { onConflict: 'vsco_id' });
                 syncResults.contacts++;
               }
@@ -1940,7 +1992,7 @@ Deno.serve(async (req) => {
             success_rate_1h: totalCalls > 0 ? Math.round((successCalls / totalCalls) * 100) : 100,
             avg_response_time_ms: avgResponseTime,
             total_calls_1h: totalCalls,
-            last_check: asTimestamptz(new Date()),
+            last_check: new Date().toISOString(),
           },
         };
         break;
@@ -1973,7 +2025,7 @@ Deno.serve(async (req) => {
               category: product.category,
               is_active: product.isActive !== false,
               raw_data: product,
-              synced_at: asTimestamptz(new Date()),
+              synced_at: new Date().toISOString(),
             }, { onConflict: 'vsco_id' });
           }
           result = { success: true, products: productsArray, synced: productsArray.length };
@@ -2018,7 +2070,7 @@ Deno.serve(async (req) => {
             description: product.description,
             category: product.category,
             raw_data: product,
-            synced_at: asTimestamptz(new Date()),
+            synced_at: new Date().toISOString(),
           }, { onConflict: 'vsco_id' });
           result = { success: true, product };
         }
@@ -2062,7 +2114,7 @@ Deno.serve(async (req) => {
             contacts: response.data?.contacts || [],
             products: response.data?.products || [],
             raw_data: response.data,
-            synced_at: asTimestamptz(new Date()),
+            synced_at: new Date().toISOString(),
           }, { onConflict: 'vsco_job_id' });
           result = { success: true, worksheet: response.data };
         }
@@ -2097,7 +2149,7 @@ Deno.serve(async (req) => {
             stage: job.stage,
             job_type: job.jobType,
             raw_data: job,
-            synced_at: asTimestamptz(new Date()),
+            synced_at: new Date().toISOString(),
           }, { onConflict: 'vsco_id' });
           result = { success: true, job, created_with_worksheet: true };
         }
@@ -2127,7 +2179,7 @@ Deno.serve(async (req) => {
               content: note.content,
               note_type: note.noteType,
               raw_data: note,
-              synced_at: asTimestamptz(new Date()),
+              synced_at: new Date().toISOString(),
             }, { onConflict: 'vsco_id' });
           }
           result = { success: true, notes: notesArray, synced: notesArray.length };
@@ -2159,7 +2211,7 @@ Deno.serve(async (req) => {
             content: note.content,
             note_type: note.noteType,
             raw_data: note,
-            synced_at: asTimestamptz(new Date()),
+            synced_at: new Date().toISOString(),
           }, { onConflict: 'vsco_id' });
           result = { success: true, note };
         }
@@ -2365,7 +2417,7 @@ Deno.serve(async (req) => {
           await supabase.from('vsco_notes').update({
             content: data.content,
             note_type: data.note_type,
-            synced_at: asTimestamptz(new Date()),
+            synced_at: new Date().toISOString(),
           }).eq('vsco_id', data.note_id);
           result = { success: true, note: response.data };
         }
@@ -2484,7 +2536,7 @@ Deno.serve(async (req) => {
         } else {
           await supabase.from('vsco_orders').update({
             status: data.status,
-            synced_at: asTimestamptz(new Date()),
+            synced_at: new Date().toISOString(),
           }).eq('vsco_id', data.order_id);
           result = { success: true, order: response.data };
         }
@@ -2679,7 +2731,7 @@ Deno.serve(async (req) => {
           await supabase.from('vsco_brands').update({
             name: data.name,
             is_default: data.is_default,
-            synced_at: asTimestamptz(new Date()),
+            synced_at: new Date().toISOString(),
           }).eq('vsco_id', data.brand_id);
           result = { success: true, brand: response.data };
         }
@@ -3146,7 +3198,7 @@ Deno.serve(async (req) => {
             cost: data.cost,
             description: data.description,
             is_active: data.is_active,
-            synced_at: asTimestamptz(new Date()),
+            synced_at: new Date().toISOString(),
           }).eq('vsco_id', data.product_id);
           result = { success: true, product: response.data };
         }
@@ -3186,7 +3238,7 @@ Deno.serve(async (req) => {
           success: true,
           status: 'healthy',
           api_configured: !!VSCO_API_KEY,
-          timestamp: asTimestamptz(new Date()),
+          timestamp: new Date().toISOString(),
           version: '2.0.0',
           total_actions: 89,
         };
@@ -3256,7 +3308,7 @@ Deno.serve(async (req) => {
           base_url: BASE_URL,
           key_test_status: keyTest.status,
           diagnostics,
-          timestamp: asTimestamptz(new Date()),
+          timestamp: new Date().toISOString(),
           total_endpoints_tested: endpoints.length,
         };
         break;

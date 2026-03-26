@@ -81,8 +81,8 @@ export async function executeToolCall(
     // Provide tool-specific expected schema in error messages
     const expectedSchemas: Record<string, string> = {
       'execute_python': '{ "code": "python_code_string", "purpose": "description_of_what_code_does" }',
-      'assign_task': '{ "title": "string", "description": "string", "category": "code|infra|research|governance|mining|device|ops|other", "assignee_agent_id": "agent-xxx", "stage": "DISCUSS|PLAN|EXECUTE|VERIFY|INTEGRATE" }',
-      'update_task_status': '{ "task_id": "uuid", "status": "PENDING|CLAIMED|IN_PROGRESS|BLOCKED|DONE|CANCELLED|COMPLETED|FAILED", "stage": "DISCUSS|PLAN|EXECUTE|VERIFY|INTEGRATE" }',
+      'assign_task': '{ "title": "string", "description": "string", "category": "code|infra|research|governance|mining|device|ops|other", "assignee_agent_id": "agent-xxx", "stage": "DISCUSS|PLAN|EXECUTE|VERIFY|INTEGRATE", "expected_deliverables": "optional: description of expected outputs", "notification_recipients": ["email@example.com"] }',
+      'update_task_status': '{ "task_id": "uuid", "status": "PENDING|CLAIMED|IN_PROGRESS|BLOCKED|DONE|CANCELLED|COMPLETED|FAILED", "stage": "DISCUSS|PLAN|EXECUTE|VERIFY|INTEGRATE", "proof_of_work_link": "url-to-deliverable (required on COMPLETED)", "outcome_summary": "what was accomplished (required on COMPLETED)" }',
       'update_agent_status': '{ "agent_id": "agent-xxx", "status": "IDLE|BUSY|ARCHIVED|ERROR|OFFLINE" }',
       'createGitHubIssue': '{ "title": "string", "body": "string", "repo": "XMRT-Ecosystem", "labels": ["bug"], "assignees": ["Antigravity"] }',
       'invoke_edge_function': '{ "function_name": "string", "payload": {} }',
@@ -1027,15 +1027,16 @@ export async function executeToolCall(
 
       case 'closeGitHubIssue':
         console.log(`❌ [${executiveName}] Close Issue: #${parsedArgs.issue_number}`);
+        const closingComment = parsedArgs.body ?? parsedArgs.comment;
         // If comment provided, add it first
-        if (parsedArgs.comment) {
+        if (closingComment) {
           await supabase.functions.invoke('github-integration', {
             body: {
               action: 'comment_on_issue',
               data: {
                 repo: parsedArgs.repo || 'XMRT-Ecosystem',
                 issue_number: parsedArgs.issue_number,
-                comment: parsedArgs.comment
+                comment: closingComment
               },
               session_credentials
             }
@@ -2323,35 +2324,36 @@ export async function getVscoToolHandler(name: string, parsedArgs: any, supabase
       }).then((res: any) => res.error ? { success: false, error: res.error.message } : { success: true, result: res.data });
 
     // ====================================================================
-    // GOOGLE CLOUD SERVICES (Dedicated Functions: google-gmail, google-drive, google-sheets, google-calendar)
+    // GOOGLE CLOUD SERVICES (Unified via google-cloud-auth)
     // ====================================================================
     case 'google_gmail':
-      console.log(`📧 [${executiveName}] Google Gmail: ${parsedArgs.action}`);
-      return supabase.functions.invoke('google-gmail', {
+    case 'google_cloud_auth':
+      console.log(`☁️ [${executiveName}] Google Cloud Auth: ${parsedArgs.action || 'status'}`);
+      return supabase.functions.invoke('google-cloud-auth', {
         body: parsedArgs
       }).then((res: any) => res.error
         ? { success: false, error: res.error.message, credential_required: true }
         : res.data);
 
     case 'google_drive':
-      console.log(`📁 [${executiveName}] Google Drive: ${parsedArgs.action}`);
-      return supabase.functions.invoke('google-drive', {
+      console.log(`📁 [${executiveName}] Google Drive via google-cloud-auth: ${parsedArgs.action}`);
+      return supabase.functions.invoke('google-cloud-auth', {
         body: parsedArgs
       }).then((res: any) => res.error
         ? { success: false, error: res.error.message, credential_required: true }
         : res.data);
 
     case 'google_sheets':
-      console.log(`📊 [${executiveName}] Google Sheets: ${parsedArgs.action}`);
-      return supabase.functions.invoke('google-sheets', {
+      console.log(`📊 [${executiveName}] Google Sheets via google-cloud-auth: ${parsedArgs.action}`);
+      return supabase.functions.invoke('google-cloud-auth', {
         body: parsedArgs
       }).then((res: any) => res.error
         ? { success: false, error: res.error.message, credential_required: true }
         : res.data);
 
     case 'google_calendar':
-      console.log(`📅 [${executiveName}] Google Calendar: ${parsedArgs.action}`);
-      return supabase.functions.invoke('google-calendar', {
+      console.log(`📅 [${executiveName}] Google Calendar via google-cloud-auth: ${parsedArgs.action}`);
+      return supabase.functions.invoke('google-cloud-auth', {
         body: parsedArgs
       }).then((res: any) => res.error
         ? { success: false, error: res.error.message, credential_required: true }

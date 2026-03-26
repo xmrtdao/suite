@@ -497,6 +497,8 @@ async function invokeExecutiveFunction(toolCall, attempt = 1) {
     if (requestType === 'chat') {
       // Use Vertex AI API directly with the OAuth token
       const messages = toolCall.parameters?.messages || [];
+      const images = toolCall.parameters?.images || [];
+      const isLiveCameraFeed = Boolean(toolCall.parameters?.isLiveCameraFeed);
       const systemPrompt = getExecutiveSystemPrompt();
 
       const tools = [
@@ -554,6 +556,51 @@ async function invokeExecutiveFunction(toolCall, attempt = 1) {
         role: msg.role === 'assistant' || msg.role === 'model' ? 'model' : 'user',
         parts: [{ text: String(msg.content || msg.text || '') }]
       }));
+
+      if (Array.isArray(images) && images.length > 0) {
+        const imageParts = images
+          .map((raw: string) => {
+            if (typeof raw !== 'string' || !raw.trim()) return null;
+            const dataUrlMatch = raw.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+            if (dataUrlMatch) {
+              return { inlineData: { mimeType: dataUrlMatch[1], data: dataUrlMatch[2] } };
+            }
+            return { inlineData: { mimeType: 'image/jpeg', data: raw } };
+          })
+          .filter(Boolean);
+
+        const lastUserIdxFromEnd = [...contents].reverse().findIndex((entry: any) => entry.role === 'user');
+        const targetIndex = lastUserIdxFromEnd >= 0 ? contents.length - 1 - lastUserIdxFromEnd : contents.length - 1;
+        if (targetIndex >= 0) {
+          contents[targetIndex].parts.push(...(imageParts as any[]));
+        }
+
+        try {
+          const { data: visionData, error: visionError } = await supabaseAdmin.functions.invoke('vertex-ai-image-gen', {
+            body: {
+              action: 'analyze_image',
+              image: images[0],
+              features: ['LABEL_DETECTION', 'TEXT_DETECTION', 'SAFE_SEARCH_DETECTION', 'OBJECT_LOCALIZATION']
+            }
+          });
+
+          if (visionError) {
+            console.warn('⚠️ [vertex-ai-chat] Vision API analysis failed:', visionError.message);
+          } else if (visionData?.success && targetIndex >= 0) {
+            const labels = (visionData.labels || []).slice(0, 5).map((l: any) => l.description).join(', ') || 'none';
+            const text = (visionData.textDetections || []).slice(0, 2).map((t: any) => t.description).join(' | ') || 'none';
+            contents[targetIndex].parts.unshift({
+              text: `[GOOGLE_VISION_CONTEXT]
+source=${isLiveCameraFeed ? 'live_camera_feed' : 'image_attachment'}
+labels=${labels}
+detected_text=${text}
+[/GOOGLE_VISION_CONTEXT]`
+            });
+          }
+        } catch (visionErr: any) {
+          console.warn('⚠️ [vertex-ai-chat] Vision analysis exception:', visionErr?.message || visionErr);
+        }
+      }
 
       // Gemini requires at least one content item
       if (contents.length === 0) {
@@ -945,7 +992,9 @@ async function handleExecutiveRequest(request: Request) {
               ? [{ role: 'user', content: body.prompt || body.message }]
               : []
           ),
-          options: body.options || {}
+          options: body.options || {},
+          images: body.images || [],
+          isLiveCameraFeed: body.isLiveCameraFeed || false
         }
       };
 

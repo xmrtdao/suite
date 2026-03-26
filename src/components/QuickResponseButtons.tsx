@@ -10,8 +10,10 @@ interface QuickResponseButtonsProps {
   disabled?: boolean;
   lastMessageRole?: 'user' | 'assistant' | null;
   hasUserEngaged?: boolean;
+  hasPastConversations?: boolean;
   lastMessageContent?: string;
   lastExecutive?: string;
+  turnCount?: number;
 }
 
 // Number emoji mapping for detected options
@@ -135,6 +137,13 @@ const emptyConversationResponses: ButtonConfig[] = [
   { label: "Hello! What can you do?", emoji: "👋" },
   { label: "Show me system status", emoji: "📊" },
   { label: "Help me get started", emoji: "🎯" }
+];
+
+// Buttons shown for returning users who already have conversation history
+const returningUserResponses: ButtonConfig[] = [
+  { label: "Where were we?", emoji: "🧠" },
+  { label: "What's new?", emoji: "✨" },
+  { label: "Get my email", emoji: "📧" }
 ];
 
 // Buttons shown after user sends (while waiting for AI)
@@ -275,26 +284,47 @@ const topicButtons: Record<string, ButtonConfig[]> = {
   ]
 };
 
+const GO_SURFING_BUTTON: ButtonConfig = {
+  label: "Go Surfing",
+  emoji: "🏄‍♀️",
+};
+
+const GO_SURFING_PROMPT =
+  "Go Surfing 🏄‍♀️ — Eliza, use browse_web to follow your curiosity and engage your imagination for a series of 3 chained tool calls based on your own whims. Don't bother telling me what you're going to surf, just explore and return with your summarized synthesis of what you explored and what you learned.";
+
 const getContextualButtons = (
   lastMessageContent: string | undefined,
   lastExecutive: string | undefined,
   hasUserEngaged: boolean,
-  lastMessageRole: 'user' | 'assistant' | null | undefined
+  lastMessageRole: 'user' | 'assistant' | null | undefined,
+  hasPastConversations: boolean,
+  turnCount: number
 ): ButtonConfig[] => {
   // Welcome state - show intro buttons
   if (!hasUserEngaged) {
-    return emptyConversationResponses;
+    if (hasPastConversations) {
+      return turnCount >= 3
+        ? [...returningUserResponses, GO_SURFING_BUTTON]
+        : returningUserResponses;
+    }
+    return turnCount >= 3
+      ? [...emptyConversationResponses, GO_SURFING_BUTTON]
+      : emptyConversationResponses;
   }
   
   // While waiting for AI response
   if (lastMessageRole === 'user') {
-    return afterUserResponses;
+    return turnCount >= 3
+      ? [...afterUserResponses, GO_SURFING_BUTTON]
+      : afterUserResponses;
   }
   
   // Check for numbered options, but ONLY if it's a user choice list (not planned steps)
   const numberedOptions = extractNumberedOptions(lastMessageContent || '');
   if (numberedOptions && isUserChoiceList(lastMessageContent || '')) {
-    return numberedOptions;
+    return turnCount >= 3
+      ? [...numberedOptions, GO_SURFING_BUTTON]
+      : numberedOptions;
   }
   
   // After AI response - build dynamic buttons
@@ -334,6 +364,10 @@ const getContextualButtons = (
     }
   }
   
+  if (turnCount >= 3 && !buttons.some((button) => button.label === GO_SURFING_BUTTON.label)) {
+    buttons.push(GO_SURFING_BUTTON);
+  }
+
   return buttons;
 };
 
@@ -342,14 +376,18 @@ export const QuickResponseButtons = ({
   disabled,
   lastMessageRole,
   hasUserEngaged = false,
+  hasPastConversations = false,
   lastMessageContent,
-  lastExecutive
+  lastExecutive,
+  turnCount = 0
 }: QuickResponseButtonsProps) => {
   const responses = getContextualButtons(
     lastMessageContent,
     lastExecutive,
     hasUserEngaged,
-    lastMessageRole
+    lastMessageRole,
+    hasPastConversations,
+    turnCount
   );
 
   return (
@@ -359,7 +397,13 @@ export const QuickResponseButtons = ({
           key={response.label}
           variant="outline"
           size="sm"
-          onClick={() => onQuickResponse(response.label)}
+          onClick={() =>
+            onQuickResponse(
+              response.label === GO_SURFING_BUTTON.label
+                ? GO_SURFING_PROMPT
+                : response.label
+            )
+          }
           disabled={disabled}
           className="text-xs h-7 px-2 text-muted-foreground hover:text-foreground"
         >

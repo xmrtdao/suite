@@ -949,6 +949,14 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
     example_use: 'Get comprehensive mining data including pool stats and individual worker performance'
   },
   {
+    name: 'executive-swarm',
+    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/executive-swarm',
+    description: 'Swarm-intelligence decision engine for XMRT-DAO executive council consensus and weight optimization',
+    capabilities: ['Executive decision analysis', 'Consensus generation', 'Dynamic executive weighting', 'Outcome tracking', 'Scenario simulation'],
+    category: 'ai',
+    example_use: '{"action":"analyze_decision","decision_type":"financial","decision_score":0.64,"historical_decisions":[{"predicted_score":0.7,"actual_score":0.62}]}'
+  },
+  {
     name: 'mobile-miner-config',
     url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/mobile-miner-config',
     description: 'Configuration management for mobile mining devices',

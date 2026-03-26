@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Card } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -10,10 +10,12 @@ import { useAuth } from '@/contexts/AuthContext';
 import { ReasoningSteps, type ReasoningStep } from './ReasoningSteps';
 // 🎤 TTS is now language-aware: English (en) / Spanish (es)
 import { GitHubPATInput } from './GitHubContributorRegistration';
-import { GitHubTokenStatus } from './GitHubTokenStatus';
 import { mobilePermissionService } from '@/services/mobilePermissionService';
 import { formatTime } from '@/utils/dateFormatter';
-import { Send, Volume2, VolumeX, Trash2, Key, Wifi, Users, Vote, Paperclip, X, Mic, MicOff, Video, VideoOff } from 'lucide-react';
+import { Send, Volume2, VolumeX, Trash2, Wifi, Users, Vote, Paperclip, X, Mic, MicOff, Video, VideoOff, Copy, Check } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { AttachmentPreview, type AttachmentFile } from './AttachmentPreview';
 import { QuickResponseButtons } from './QuickResponseButtons';
 import { ExecutiveCouncilChat } from './ExecutiveCouncilChat';
@@ -91,10 +93,399 @@ interface UnifiedChatProps {
   apiKey?: string;
   className?: string;
   miningStats?: MiningStats;
+  enableMiningStats?: boolean;
   selectedExecutive?: ExecutiveName; // Target specific executive (bypasses intelligent routing)
   defaultCouncilMode?: boolean; // Start in council mode
   onBack?: () => void; // Callback to return to directory view
 }
+
+
+interface ProcessingStickyTemplate {
+  id: string;
+  text: string;
+  accentClassName: string;
+  rotationClassName: string;
+}
+
+interface ProcessingStickyNote extends ProcessingStickyTemplate {
+  createdAt: number;
+  isFallingAway?: boolean;
+  variant?: 'default' | 'error';
+}
+
+const PROCESSING_STICKY_TEMPLATES: ProcessingStickyTemplate[] = [
+  {
+    id: 'tool-routing',
+    text: 'Routing tools',
+    accentClassName: 'from-amber-200/90 via-yellow-200 to-yellow-100',
+    rotationClassName: '-rotate-3',
+  },
+  {
+    id: 'researching',
+    text: 'Checking context',
+    accentClassName: 'from-yellow-200/95 via-amber-100 to-yellow-50',
+    rotationClassName: 'rotate-2',
+  },
+  {
+    id: 'drafting',
+    text: 'Drafting answer',
+    accentClassName: 'from-yellow-100 via-amber-50 to-yellow-50',
+    rotationClassName: '-rotate-1',
+  },
+];
+
+const ProcessingStickyNotes = React.memo(({ notes }: { notes: ProcessingStickyNote[] }) => {
+  const visibleNotes = notes.filter((note) => !note.isFallingAway).slice(-3).reverse();
+  if (visibleNotes.length === 0) return null;
+
+  const stackOffsets = [
+    { top: 0, right: 0, floatDelay: 0, zIndex: 30 },
+    { top: 86, right: 42, floatDelay: 160, zIndex: 20 },
+    { top: 168, right: 84, floatDelay: 300, zIndex: 10 },
+  ];
+
+  return (
+    <div className="pointer-events-none fixed right-2 top-24 z-40 sm:absolute sm:right-6 sm:top-36 sm:z-30">
+      <div className="relative h-[248px] w-[152px] sm:h-[286px] sm:w-[220px]">
+        {visibleNotes.map((note, index) => {
+          const offset = stackOffsets[index] ?? {
+            top: index * 86,
+            right: Math.min(index * 42, 96),
+            floatDelay: index * 180,
+            zIndex: Math.max(30 - index * 10, 1),
+          };
+
+          return (
+          <div
+            key={note.id}
+            className={`absolute right-0 w-[88px] rounded-[2px] border bg-gradient-to-br p-2 shadow-[0_14px_32px_rgba(120,93,10,0.18)] transition-all duration-700 sm:w-[116px] sm:p-2.5 ${note.rotationClassName} ${
+              note.variant === 'error'
+                ? 'border-rose-400/80 from-rose-200/95 via-red-100 to-rose-50 shadow-[0_14px_32px_rgba(127,29,29,0.22)]'
+                : `border-amber-300/70 ${note.accentClassName}`
+            } ${
+              note.isFallingAway
+                ? 'translate-y-[52vh] rotate-[16deg] opacity-0'
+                : 'opacity-100'
+            }`}
+            style={{
+              top: `${offset.top}px`,
+              right: `${offset.right}px`,
+              zIndex: offset.zIndex,
+              animation: note.isFallingAway
+                ? undefined
+                : `sticky-note-float 3.2s ease-in-out ${offset.floatDelay}ms infinite`,
+              transitionDelay: `${index * 70}ms`,
+              transitionTimingFunction: 'cubic-bezier(0.22, 1, 0.36, 1)',
+            }}
+            aria-hidden="true"
+          >
+            <div className={`absolute left-1/2 top-1.5 h-3 w-3 -translate-x-1/2 rounded-full shadow-[inset_0_1px_0_rgba(255,255,255,0.8),0_1px_3px_rgba(120,93,10,0.18)] sm:h-3.5 sm:w-3.5 ${note.variant === 'error' ? 'bg-rose-100/90' : 'bg-amber-50/80'}`} />
+            <div className={`mt-3 border-t pt-2 ${note.variant === 'error' ? 'border-rose-500/20' : 'border-amber-500/15'}`}>
+              <p className={`text-[8px] font-semibold uppercase tracking-[0.14em] sm:text-[9px] sm:tracking-[0.16em] ${note.variant === 'error' ? 'text-rose-900/70' : 'text-amber-900/70'}`}>
+                {note.variant === 'error' ? 'System error' : 'Eliza note'}
+              </p>
+              <p className={`mt-1 text-[10px] font-medium leading-snug sm:mt-1.5 sm:text-[11px] ${note.variant === 'error' ? 'text-rose-950/90' : 'text-amber-950/90'}`}>
+                {note.text}
+              </p>
+            </div>
+          </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+});
+
+const normalizeStickyText = (value?: string | null) =>
+  value?.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+const getToolStickyText = (functionName: string) => {
+  const readable = normalizeStickyText(functionName) || 'this tool';
+  const lower = readable.toLowerCase();
+
+  if (lower.includes('browse') || lower.includes('search') || lower.includes('duckduckgo')) {
+    return `Looking up details using DuckDuckGo (${readable})`;
+  }
+  if (lower.includes('memory') || lower.includes('knowledge')) {
+    return `Checking memory context: ${readable}`;
+  }
+  if (lower.includes('github')) {
+    return `Reviewing GitHub changes via ${readable}`;
+  }
+  if (lower.includes('edge') || lower.includes('function')) {
+    return `Calling edge function: ${readable}`;
+  }
+  return `Working on: ${readable}`;
+};
+
+const getActivityStickyText = (activity: Record<string, any>) => {
+  const metadata = activity.metadata || {};
+  const functionName = normalizeStickyText(metadata.function_name || metadata.tool_name);
+  const description = normalizeStickyText(activity.description);
+  const title = normalizeStickyText(activity.title);
+  const activityType = normalizeStickyText(activity.activity_type)?.toLowerCase() || '';
+
+  if (functionName) return getToolStickyText(functionName);
+  if (activityType.includes('memory')) return `Trying to remember: ${description || title || 'recent context'}`;
+  if (activityType.includes('web') || activityType.includes('search')) return `Looking up: ${description || title || 'web context'}`;
+  if (activityType.includes('python')) return `Running Python task: ${title || description || 'execution'}`;
+  if (title) return title;
+  return description || 'Handling your request';
+};
+
+const MessageCopyButton = React.memo(({ content }: { content: string }) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+      onClick={handleCopy}
+    >
+      {copied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+    </Button>
+  );
+});
+
+const MessageCodeBlock = React.memo(({ code, language, ...props }: { code: string; language: string }) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(code);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="relative group my-4">
+      <div className="absolute right-2 top-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+        <Button
+          size="icon"
+          variant="secondary"
+          className="h-8 w-8 bg-background/80 backdrop-blur-sm"
+          onClick={handleCopy}
+        >
+          {copied ? <Check className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+        </Button>
+      </div>
+      <SyntaxHighlighter
+        style={vscDarkPlus}
+        language={language}
+        PreTag="div"
+        className="rounded-md !mt-0"
+        {...props}
+      >
+        {code}
+      </SyntaxHighlighter>
+    </div>
+  );
+});
+
+const markdownComponents = {
+  a({ href, children, ...props }: any) {
+    return (
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-blue-700 underline decoration-blue-500/60 underline-offset-2 hover:text-blue-800"
+        {...props}
+      >
+        {children}
+      </a>
+    );
+  },
+  code({ inline, className, children, ...props }: any) {
+    const match = /language-(\w+)/.exec(className || '');
+    const codeString = String(children).replace(/\n$/, '');
+    const language = match?.[1] || 'text';
+    const isIdentifierLike = /^[a-zA-Z_][\w.-]*$/.test(codeString.trim());
+    const shouldRenderAsSubtleInlineTag =
+      !inline &&
+      !match?.[1] &&
+      !codeString.includes('\n') &&
+      codeString.trim().length <= 40 &&
+      isIdentifierLike;
+
+    if (shouldRenderAsSubtleInlineTag) {
+      return (
+        <code
+          className={`${className} text-muted-foreground bg-muted/40 px-1.5 py-0.5 rounded-md font-mono text-xs`}
+          {...props}
+        >
+          {children}
+        </code>
+      );
+    }
+
+    if (!inline) {
+      return <MessageCodeBlock code={codeString} language={language} {...props} />;
+    }
+
+    return (
+      <code className={`${className} bg-muted px-1.5 py-0.5 rounded-md font-mono text-xs`} {...props}>
+        {children}
+      </code>
+    );
+  }
+};
+
+const ChatMessage = React.memo(({ message }: { message: UnifiedMessage }) => {
+  return (
+    <div
+      className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'} flex-col gap-2 animate-fade-in`}
+    >
+      {message.sender === 'assistant' && message.isCouncilDeliberation && message.councilDeliberation && (
+        <div className="max-w-[95%]">
+          <ExecutiveCouncilChat deliberation={message.councilDeliberation} />
+        </div>
+      )}
+
+      {message.sender === 'assistant' && message.reasoning && message.reasoning.length > 0 && (
+        <div className="max-w-[85%]">
+          <ReasoningSteps steps={message.reasoning} />
+        </div>
+      )}
+
+      {!message.isCouncilDeliberation && (
+        <div className="max-w-[80%] sm:max-w-[75%]">
+          <div
+            className={`group p-3 rounded-xl ${message.sender === 'user'
+              ? 'bg-white text-gray-900 rounded-br-sm border border-gray-300 shadow-sm'
+              : 'bg-gray-50 text-gray-900 rounded-bl-sm border border-gray-300'
+              }`}
+          >
+            {message.attachments?.images && message.attachments.images.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-2">
+                {message.attachments.images.map((img, idx) => (
+                  <img
+                    key={idx}
+                    src={img}
+                    alt={`Attachment ${idx + 1}`}
+                    className="max-w-[200px] max-h-[150px] rounded-lg object-cover border border-border/30"
+                  />
+                ))}
+              </div>
+            )}
+
+            {message.generatedImages && message.generatedImages.length > 0 && (
+              <div className="space-y-2 mb-2">
+                {message.generatedImages.map((img, idx) => (
+                  <ImageResponsePreview
+                    key={`gen-${idx}`}
+                    imageData={img}
+                    alt={`Generated Image ${idx + 1}`}
+                    className="max-w-full"
+                  />
+                ))}
+              </div>
+            )}
+
+            {message.generatedVideos && message.generatedVideos.length > 0 && (
+              <div className="space-y-3 mb-2">
+                {message.generatedVideos.map((url, idx) => (
+                  <GeneratedVideoPreview key={`vid-${idx}`} url={url} index={idx} />
+                ))}
+              </div>
+            )}
+
+            <div className="text-sm leading-relaxed prose prose-sm max-w-none text-gray-900 prose-headings:text-gray-900 prose-p:text-gray-900 prose-strong:text-gray-900 prose-li:text-gray-900 prose-code:text-gray-900 prose-a:text-blue-700">
+              <ReactMarkdown components={markdownComponents}>
+                {message.content}
+              </ReactMarkdown>
+            </div>
+
+            {message.sender === 'assistant' && (
+              <div className="mt-2 flex justify-end">
+                <MessageCopyButton content={message.content} />
+              </div>
+            )}
+
+            {message.tool_calls && message.tool_calls.length > 0 && (
+              <div className="mt-2 space-y-1">
+                {message.tool_calls.map((tool) => (
+                  <div key={tool.id} className="text-xs flex items-center gap-1.5 opacity-70">
+                    <span className="text-muted-foreground">🔧</span>
+                    <span className="font-medium">{tool.function_name}</span>
+                    {tool.status === 'success' && <span className="text-green-600">✓</span>}
+                    {tool.status === 'failed' && <span className="text-red-600">✗</span>}
+                    {tool.status === 'pending' && <span className="animate-pulse">⋯</span>}
+                    {tool.execution_time_ms && (
+                      <span className="text-muted-foreground">({tool.execution_time_ms}ms)</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="text-xs opacity-60 mt-2 flex items-center justify-between gap-2">
+              <span>{formatTime(message.timestamp)}</span>
+              {message.sender === 'assistant' && message.providerUsed && (
+                <span className="text-[10px] text-muted-foreground/70 font-medium">
+                  via {message.providerUsed}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+});
+
+const GeneratedVideoPreview = React.memo(({ url, index }: { url: string; index: number }) => {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  return (
+    <div className="rounded-xl overflow-hidden border border-border/40 bg-black/20">
+      <video
+        ref={videoRef}
+        controls
+        preload="metadata"
+        className="w-full max-h-64 rounded-xl cursor-pointer"
+        src={url}
+        aria-label={`Generated Video ${index + 1}`}
+        onDoubleClick={() => {
+          const el = videoRef.current;
+          if (el?.requestFullscreen) el.requestFullscreen();
+        }}
+        title="Double-click to enter fullscreen"
+      >
+        <p className="text-xs text-muted-foreground p-2">
+          Your browser doesn't support video playback.
+          <a href={url} download className="underline ml-1">Download video</a>
+        </p>
+      </video>
+      <div className="flex items-center justify-between px-3 py-1.5 bg-muted/30">
+        <span className="text-xs text-muted-foreground">🎬 AI Generated Video</span>
+        <div className="flex items-center gap-3">
+          <a
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs text-primary hover:underline flex items-center gap-1"
+          >
+            ↗ Open in new tab
+          </a>
+          <a
+            href={url}
+            download
+            className="text-xs text-primary hover:underline flex items-center gap-1"
+          >
+            ⬇ Download
+          </a>
+        </div>
+      </div>
+    </div>
+  );
+});
 
 // Internal component using ElevenLabs and Gemini
 
@@ -102,6 +493,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   apiKey = import.meta.env.VITE_GEMINI_API_KEY || "",
   className = '',
   miningStats: externalMiningStats,
+  enableMiningStats = true,
   selectedExecutive,
   defaultCouncilMode = false,
   onBack
@@ -119,6 +511,8 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   const [isConnected, setIsConnected] = useState(true); // Always connected for text/TTS mode
   const [realtimeConnected, setRealtimeConnected] = useState(false);
   const [hasUserEngaged, setHasUserEngaged] = useState(false); // Track if user has sent first message
+  const [processingNotes, setProcessingNotes] = useState<ProcessingStickyNote[]>([]);
+  const pendingNoteTimeoutsRef = useRef<number[]>([]);
 
   // Office Clerk loading progress
   const [officeClerkProgress, setOfficeClerkProgress] = useState<{
@@ -218,8 +612,70 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const liveProcessorRef = useRef<any>(null);
 
+  const clearPendingNoteTimeouts = useCallback(() => {
+    pendingNoteTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
+    pendingNoteTimeoutsRef.current = [];
+  }, []);
+
+  const enqueueProcessingNote = useCallback((text: string, variant: ProcessingStickyNote['variant'] = 'default') => {
+    const normalizedText = normalizeStickyText(text);
+    if (!normalizedText) return;
+
+    let noteToRemoveId: string | null = null;
+
+    setProcessingNotes((prev) => {
+      const template = PROCESSING_STICKY_TEMPLATES[prev.length % PROCESSING_STICKY_TEMPLATES.length];
+      const activeNotes = prev.filter((note) => !note.isFallingAway);
+      const oldestActive = activeNotes[0];
+      const newNote: ProcessingStickyNote = {
+        ...template,
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        text: normalizedText,
+        createdAt: Date.now(),
+        variant,
+      };
+
+      let nextNotes = [...prev, newNote];
+
+      if (activeNotes.length >= 3 && oldestActive) {
+        noteToRemoveId = oldestActive.id;
+        nextNotes = nextNotes.map((note) =>
+          note.id === oldestActive.id ? { ...note, isFallingAway: true } : note
+        );
+      }
+
+      return nextNotes.slice(-6);
+    });
+
+    if (!noteToRemoveId) return;
+    const timeout = window.setTimeout(() => {
+      setProcessingNotes((prev) => prev.filter((note) => note.id !== noteToRemoveId));
+    }, 900);
+    pendingNoteTimeoutsRef.current.push(timeout);
+  }, []);
+
+  const dropOldestProcessingNote = useCallback(() => {
+    let noteToRemoveId: string | null = null;
+
+    setProcessingNotes((prev) => {
+      const firstActive = prev.find((note) => !note.isFallingAway);
+      if (!firstActive) return prev;
+      noteToRemoveId = firstActive.id;
+      return prev.map((note) =>
+        note.id === firstActive.id ? { ...note, isFallingAway: true } : note
+      );
+    });
+
+    if (!noteToRemoveId) return;
+
+    const timeout = window.setTimeout(() => {
+      setProcessingNotes((prev) => prev.filter((note) => note.id !== noteToRemoveId));
+    }, 900);
+    pendingNoteTimeoutsRef.current.push(timeout);
+  }, []);
+
   // Input Mode State
-  const [inputMode, setInputMode] = useState<'text' | 'voice' | 'multimodal'>('text');
+  const [inputMode, setInputMode] = useState<'text' | 'voice' | 'multimodal'>('multimodal');
   const [isRecording, setIsRecording] = useState(false);
   const [liveVideoActive, setLiveVideoActive] = useState(false);
 
@@ -236,7 +692,10 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
     for (const file of files.slice(0, MAX_FILES - attachments.length)) {
       if (file.size > MAX_SIZE) {
         console.warn(`File ${file.name} exceeds 6MB limit`);
-        // Optional: Add a toast notification here
+        // Show a toast if available
+        try {
+          (window as any).__toast?.(`⚠️ ${file.name} exceeds 6MB limit - skipped`);
+        } catch (_) {}
         continue;
       }
 
@@ -362,11 +821,13 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       try {
         const [userCtx, miningData] = await Promise.all([
           unifiedDataService.getUserContext(),
-          externalMiningStats || unifiedDataService.getMiningStats()
+          (enableMiningStats || externalMiningStats)
+            ? (externalMiningStats || unifiedDataService.getMiningStats())
+            : Promise.resolve(null)
         ]);
 
         setUserContext(userCtx);
-        if (!externalMiningStats) {
+        if (enableMiningStats && !externalMiningStats) {
           setMiningStats(miningData);
         }
 
@@ -409,7 +870,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
         }
 
         // Periodic refresh for mining stats
-        if (!externalMiningStats) {
+        if (enableMiningStats && !externalMiningStats) {
           const interval = setInterval(async () => {
             const freshStats = await unifiedDataService.getMiningStats();
             setMiningStats(freshStats);
@@ -422,7 +883,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
     };
 
     initialize();
-  }, []);
+  }, [enableMiningStats, externalMiningStats]);
 
   // Fetch organization context when profile changes
   useEffect(() => {
@@ -490,6 +951,13 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       'eliza_activity_log',
       (payload) => {
         const activity = payload.new as Record<string, any>;
+        const isFailedActivity = activity.status === 'failed' || activity.status === 'error';
+        enqueueProcessingNote(getActivityStickyText(activity), isFailedActivity ? 'error' : 'default');
+
+        if (activity.status === 'completed' || activity.status === 'failed') {
+          dropOldestProcessingNote();
+        }
+
         if (activity.activity_type === 'agent_spawned') {
           console.log('🤖 Agent spawned:', activity.title);
         }
@@ -500,7 +968,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
 
     setRealtimeConnected(true);
     return () => unsubscribers.forEach(unsub => unsub());
-  }, [userContext?.ip]);
+  }, [userContext?.ip, enqueueProcessingNote, dropOldestProcessingNote]);
 
   // Subscribe to Office Clerk loading progress
   useEffect(() => {
@@ -534,6 +1002,33 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       if (autoAdvanceTimerRef.current) clearInterval(autoAdvanceTimerRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (isProcessing) {
+      clearPendingNoteTimeouts();
+
+      const activeNoteCount = processingNotes.filter((note) => !note.isFallingAway).length;
+      if (activeNoteCount === 0) {
+        enqueueProcessingNote('Organizing tool calls for your request');
+      }
+      if (activeNoteCount < 3) {
+        enqueueProcessingNote('Cross-checking context before responding');
+      }
+      return;
+    }
+
+    if (processingNotes.length > 0) {
+      clearPendingNoteTimeouts();
+      processingNotes.forEach((_, index) => {
+        const timeout = window.setTimeout(() => {
+          dropOldestProcessingNote();
+        }, index * 320);
+        pendingNoteTimeoutsRef.current.push(timeout);
+      });
+    }
+  }, [isProcessing, processingNotes, enqueueProcessingNote, dropOldestProcessingNote, clearPendingNoteTimeouts]);
+
+  useEffect(() => () => clearPendingNoteTimeouts(), [clearPendingNoteTimeouts]);
 
   // Keep handleSendMessageRef always pointing to the latest closure (no stale captures in setInterval)
   // This runs after every render, so the ref is always fresh when the timer fires.
@@ -689,10 +1184,14 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
 
     setLoadingMoreMessages(true);
     try {
-      // Load recent messages from the database (this replaces the current empty state)
-      const recentMessages = await conversationPersistence.getRecentConversationHistory(20);
-      if (recentMessages.length > 0) {
-        const convertedMessages: UnifiedMessage[] = recentMessages.map(msg => ({
+      // Calculate how many messages we already have (excluding greeting)
+      const currentMessageCount = messages.filter(m => m.id !== 'greeting').length;
+      
+      // Load next batch of messages from the database
+      const olderMessages = await conversationPersistence.getConversationHistory(20, currentMessageCount);
+      
+      if (olderMessages.length > 0) {
+        const convertedMessages: UnifiedMessage[] = olderMessages.map(msg => ({
           id: msg.id,
           content: msg.content,
           sender: msg.sender,
@@ -700,16 +1199,25 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
           ...msg.metadata
         }));
 
-        // Replace the greeting with actual conversation history
-        setMessages(prev => {
-          // Keep the greeting if it exists, then add the history
-          const greeting = prev.find(msg => msg.id === 'greeting');
-          return greeting ? [greeting, ...convertedMessages] : convertedMessages;
-        });
-      }
+        // Compute unique messages up-front for reliable pagination state updates
+        const existingIds = new Set(messages.filter(m => m.id !== 'greeting').map(m => m.id));
+        const uniqueNewMessages = convertedMessages.filter(m => !existingIds.has(m.id));
 
-      // After loading first batch, enable normal pagination
-      setHasMoreMessages(recentMessages.length >= 20 && recentMessages.length < totalMessageCount);
+        // Prepend the older messages to the current message list
+        setMessages(prev => {
+          const greeting = prev.find(msg => msg.id === 'greeting');
+          const existingMessages = prev.filter(msg => msg.id !== 'greeting');
+
+          const combined = [...uniqueNewMessages, ...existingMessages];
+          return greeting ? [greeting, ...combined] : combined;
+        });
+
+        // Update pagination state
+        const newMessageCount = currentMessageCount + uniqueNewMessages.length;
+        setHasMoreMessages(newMessageCount < totalMessageCount);
+      } else {
+        setHasMoreMessages(false);
+      }
     } catch (error) {
       console.error('Failed to load more messages:', error);
     } finally {
@@ -1437,6 +1945,14 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       const toolCalls = (window as any).__lastElizaToolCalls || [];
       const executiveTitle = (window as any).__lastElizaExecutiveTitle || '';
 
+      if (toolCalls.length > 0) {
+        toolCalls.forEach((tool: { function_name?: string }) => {
+          if (tool.function_name) {
+            enqueueProcessingNote(getToolStickyText(tool.function_name));
+          }
+        });
+      }
+
       const elizaMessage: UnifiedMessage = {
         id: `eliza-${Date.now()}`,
         content: typeof displayContent === 'string'
@@ -1622,7 +2138,9 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   };
 
   return (
-    <Card className={`bg-card border-border/60 flex flex-col h-[500px] sm:h-[600px] ${className}`}>
+    <div className="relative overflow-visible">
+      <ProcessingStickyNotes notes={processingNotes} />
+      <Card className={`bg-card border-border/60 flex flex-col h-[500px] sm:h-[600px] ${className}`}>
       {/* Voice Intelligence Toggle */}
       {/* Voice Intelligence Toggle Removed */}
 
@@ -1674,31 +2192,14 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
             </div>
           </div>
 
-          {/* Mode Switcher */}
+          {/* Unified Input Mode */}
           <div className="flex bg-muted/30 rounded-lg p-1 gap-1">
             <Button
-              variant={inputMode === 'text' ? 'secondary' : 'ghost'}
+              variant="secondary"
               size="sm"
-              onClick={() => handleModeChange('text')}
-              className="h-6 px-2 text-[10px] sm:text-xs"
+              className="h-6 px-2 text-[10px] sm:text-xs pointer-events-none"
             >
-              Text
-            </Button>
-            <Button
-              variant={inputMode === 'voice' ? 'secondary' : 'ghost'}
-              size="sm"
-              onClick={() => handleModeChange('voice')}
-              className="h-6 px-2 text-[10px] sm:text-xs"
-            >
-              Voice
-            </Button>
-            <Button
-              variant={inputMode === 'multimodal' ? 'secondary' : 'ghost'}
-              size="sm"
-              onClick={() => handleModeChange('multimodal')}
-              className="h-6 px-2 text-[10px] sm:text-xs"
-            >
-              Full
+              Unified
             </Button>
           </div>
 
@@ -1714,12 +2215,12 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
                     className="text-xs h-7 px-1.5 sm:px-2 flex-shrink-0"
                   >
                     <Users className="h-3 w-3 sm:mr-1" />
-                    <span className="hidden sm:inline">{councilMode ? 'Multi-AI' : 'Single'}</span>
+                    <span className="hidden sm:inline">{councilMode ? 'Council' : 'Eliza'}</span>
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" className="max-w-xs">
                   <p className="font-medium text-sm mb-1">
-                    {councilMode ? 'Multi-AI Mode Active' : 'Single Executive Mode'}
+                    {councilMode ? 'Council Mode Active' : 'Eliza Mode Active'}
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {councilMode
@@ -1740,22 +2241,6 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
                 <span>Live</span>
               </Badge>
             )}
-
-            {/* GitHub Token Status Indicator */}
-            <div className="hidden md:block">
-              <GitHubTokenStatus onRequestPAT={() => setShowAPIKeyInput(true)} />
-            </div>
-
-            {/* API Key Button */}
-            <Button
-              onClick={() => setShowAPIKeyInput(true)}
-              variant="ghost"
-              size="sm"
-              className={`hidden sm:flex h-7 w-7 sm:h-8 sm:w-8 p-0 ${needsAPIKey ? 'text-orange-500 animate-pulse' : 'text-muted-foreground'}`}
-              title="Add or update Gemini API key"
-            >
-              <Key className="h-4 w-4" />
-            </Button>
 
             {/* Clear Conversation Button */}
             {totalMessageCount > 0 && (
@@ -1790,7 +2275,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       {/* Clean Messages Area */}
       <div className="flex-1 overflow-hidden">
         <ScrollArea className="h-full">
-          <div className="p-4 space-y-4">
+          <div className="space-y-4 p-4 xl:pr-40">
             {/* Live Camera for Multimodal Mode */}
             {inputMode === 'multimodal' && (
               <div className="mb-4">
@@ -1868,146 +2353,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
             )}
 
             {messages.map((message) => (
-              <div
-                key={message.id}
-                className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'} flex-col gap-2 animate-fade-in`}
-              >
-                {/* Show Council Deliberation for council messages */}
-                {message.sender === 'assistant' && message.isCouncilDeliberation && message.councilDeliberation && (
-                  <div className="max-w-[95%]">
-                    <ExecutiveCouncilChat deliberation={message.councilDeliberation} />
-                  </div>
-                )}
-
-                {/* Show Reasoning Steps for assistant messages */}
-                {message.sender === 'assistant' && message.reasoning && message.reasoning.length > 0 && (
-                  <div className="max-w-[85%]">
-                    <ReasoningSteps steps={message.reasoning} />
-                  </div>
-                )}
-
-                {/* Standard message bubble (skip if council deliberation) */}
-                {!(message.isCouncilDeliberation) && (
-                  <div className="max-w-[80%] sm:max-w-[75%]">
-                    <div
-                      className={`p-3 rounded-xl ${message.sender === 'user'
-                        ? 'bg-primary text-primary-foreground rounded-br-sm'
-                        : 'bg-muted/50 text-foreground rounded-bl-sm border border-border/40'
-                        }`}
-                    >
-                      {/* Show attached images */}
-                      {message.attachments?.images && message.attachments.images.length > 0 && (
-                        <div className="flex flex-wrap gap-2 mb-2">
-                          {message.attachments.images.map((img, idx) => (
-                            <img
-                              key={idx}
-                              src={img}
-                              alt={`Attachment ${idx + 1}`}
-                              className="max-w-[200px] max-h-[150px] rounded-lg object-cover border border-border/30"
-                            />
-                          ))}
-                        </div>
-                      )}
-
-                      {/* Show AI-generated images with lazy loading to prevent freeze */}
-                      {message.generatedImages && message.generatedImages.length > 0 && (
-                        <div className="space-y-2 mb-2">
-                          {message.generatedImages.map((img, idx) => (
-                            <ImageResponsePreview
-                              key={`gen-${idx}`}
-                              imageData={img}
-                              alt={`Generated Image ${idx + 1}`}
-                              className="max-w-full"
-                            />
-                          ))}
-                        </div>
-                      )}
-
-                      {/* 🎬 Show AI-generated videos as playable players */}
-                      {message.generatedVideos && message.generatedVideos.length > 0 && (
-                        <div className="space-y-3 mb-2">
-                          {message.generatedVideos.map((url, idx) => {
-                            const videoRef = React.createRef<HTMLVideoElement>();
-                            return (
-                              <div key={`vid-${idx}`} className="rounded-xl overflow-hidden border border-border/40 bg-black/20">
-                                <video
-                                  ref={videoRef}
-                                  controls
-                                  preload="metadata"
-                                  className="w-full max-h-64 rounded-xl cursor-pointer"
-                                  src={url}
-                                  aria-label={`Generated Video ${idx + 1}`}
-                                  onDoubleClick={() => {
-                                    const el = videoRef.current;
-                                    if (el) {
-                                      if (el.requestFullscreen) el.requestFullscreen();
-                                    }
-                                  }}
-                                  title="Double-click to enter fullscreen"
-                                >
-                                  <p className="text-xs text-muted-foreground p-2">
-                                    Your browser doesn't support video playback.
-                                    <a href={url} download className="underline ml-1">Download video</a>
-                                  </p>
-                                </video>
-                                <div className="flex items-center justify-between px-3 py-1.5 bg-muted/30">
-                                  <span className="text-xs text-muted-foreground">🎬 AI Generated Video</span>
-                                  <div className="flex items-center gap-3">
-                                    <a
-                                      href={url}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="text-xs text-primary hover:underline flex items-center gap-1"
-                                    >
-                                      ↗ Open in new tab
-                                    </a>
-                                    <a
-                                      href={url}
-                                      download
-                                      className="text-xs text-primary hover:underline flex items-center gap-1"
-                                    >
-                                      ⬇ Download
-                                    </a>
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
-
-                      <div className="text-sm leading-relaxed whitespace-pre-wrap">{message.content}</div>
-
-                      {/* Tool Call Indicators */}
-                      {message.tool_calls && message.tool_calls.length > 0 && (
-                        <div className="mt-2 space-y-1">
-                          {message.tool_calls.map((tool) => (
-                            <div key={tool.id} className="text-xs flex items-center gap-1.5 opacity-70">
-                              <span className="text-muted-foreground">🔧</span>
-                              <span className="font-medium">{tool.function_name}</span>
-                              {tool.status === 'success' && <span className="text-green-600">✓</span>}
-                              {tool.status === 'failed' && <span className="text-red-600">✗</span>}
-                              {tool.status === 'pending' && <span className="animate-pulse">⋯</span>}
-                              {tool.execution_time_ms && (
-                                <span className="text-muted-foreground">({tool.execution_time_ms}ms)</span>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-
-                      <div className="text-xs opacity-60 mt-2 flex items-center justify-between gap-2">
-                        <span>{formatTime(message.timestamp)}</span>
-                        {message.sender === 'assistant' && message.providerUsed && (
-                          <span className="text-[10px] text-muted-foreground/70 font-medium">
-                            via {message.providerUsed}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
+              <ChatMessage key={message.id} message={message} />
             ))}
 
             {/* 🚀 Auto-Advance Banner — shown during council countdown */}
@@ -2061,13 +2407,18 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
             {isProcessing && (
               <div className="flex justify-start animate-fade-in">
                 <div className="bg-muted/50 text-foreground p-3 rounded-xl rounded-bl-sm border border-border/40">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-3">
                     <div className="flex space-x-1">
                       <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce"></div>
                       <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
                       <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
                     </div>
-                    <span className="text-xs text-muted-foreground">Processing...</span>
+                    <div>
+                      <span className="text-xs text-muted-foreground">Processing...</span>
+                      <p className="mt-1 hidden text-[11px] text-muted-foreground/80 xl:block">
+                        Check the sticky notes on the right for Eliza's progress.
+                      </p>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2109,7 +2460,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
               type="file"
               ref={fileInputRef}
               onChange={handleFileSelect}
-              accept="image/*,audio/*,video/*,.pdf,.doc,.docx"
+              accept="image/*,audio/*,video/*,.pdf,.doc,.docx,.txt,.md,.csv,.json,.yaml,.yml,.js,.ts,.jsx,.tsx,.py,.java,.cpp,.c,.h,.go,.rs,.rb,.php,.sol,.html,.css,.xml,.toml,.ini,.sh,.bat,.ps1"
               multiple
               className="hidden"
             />
@@ -2180,12 +2531,15 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
             disabled={isProcessing}
             lastMessageRole={messages.length === 0 ? null : messages[messages.length - 1].sender === 'user' ? 'user' : 'assistant'}
             hasUserEngaged={hasUserEngaged}
+            hasPastConversations={conversationSummaries.length > 0 || totalMessageCount > 0}
             lastMessageContent={messages.length > 0 ? messages[messages.length - 1].content : undefined}
             lastExecutive={messages.length > 0 ? (messages[messages.length - 1] as any).executive : undefined}
+            turnCount={messages.length}
           />
         </div>
       </div>
     </Card>
+    </div>
   );
 };
 

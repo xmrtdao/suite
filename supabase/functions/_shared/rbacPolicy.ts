@@ -60,7 +60,8 @@ export const TOOL_PERMISSIONS: Record<string, MembershipTier> = {
     // Advanced / Dangerous
     'invoke_edge_function': MembershipTier.SUPER_ADMIN, // Raw invocation
     'execute_workflow_template': MembershipTier.ADMIN,
-    'google_gmail': MembershipTier.ADMIN, // Privacy sensitive
+    'google_cloud_auth': MembershipTier.ADMIN, // Privacy sensitive
+    'google_gmail': MembershipTier.ADMIN, // Deprecated alias
     'browse_web': MembershipTier.USER,
     'analyze_attachment': MembershipTier.USER
 };

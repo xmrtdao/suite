@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { getGoogleAccessToken, isGoogleConfigured, corsHeaders } from "../_shared/googleAuthHelper.ts";
+import { getGoogleAccessToken, isGoogleConfigured, corsHeaders, extractUserContext, UserTokenInfo } from "../_shared/googleAuthHelper.ts";
 import { startUsageTrackingWithRequest } from "../_shared/edgeFunctionUsageLogger.ts";
 
 const FUNCTION_NAME = 'google-sheets';
@@ -81,13 +81,15 @@ serve(async (req) => {
   const usageTracker = startUsageTrackingWithRequest(FUNCTION_NAME, req, body);
 
   try {
-    if (!(await isGoogleConfigured())) {
+    const userContext = extractUserContext(req, body);
+
+    if (!(await isGoogleConfigured(userContext))) {
       await usageTracker.failure('Google Cloud not configured', 401);
       return new Response(JSON.stringify({
         success: false,
         error: 'Google Cloud not configured',
         credential_required: true,
-        message: 'Please configure Google OAuth credentials and authorize via OAuth flow'
+        message: 'Please configure Google OAuth credentials and authorize via OAuth flow for your user account.'
       }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
@@ -95,15 +97,19 @@ serve(async (req) => {
 
     console.log(`📊 google-sheets: action=${action}`);
 
-    const accessToken = await getGoogleAccessToken();
-    if (!accessToken) {
-      await usageTracker.failure('Failed to get access token', 401);
+    const tokenOrErr = await getGoogleAccessToken(userContext);
+    if ('error' in tokenOrErr) {
+      await usageTracker.failure(tokenOrErr.error, tokenOrErr.code);
       return new Response(JSON.stringify({
         success: false,
-        error: 'Failed to get access token',
+        error: tokenOrErr.error,
+        reason: tokenOrErr.reason,
         credential_required: true
-      }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }), { status: tokenOrErr.code, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
+    const tokenInfo = tokenOrErr as UserTokenInfo;
+    usageTracker.setUserInfo(tokenInfo.userEmail, tokenInfo.userId);
+    const accessToken = tokenInfo.accessToken;
 
     let result;
 

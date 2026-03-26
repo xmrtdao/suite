@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Card } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
@@ -14,31 +14,16 @@ interface GoogleCloudConnectProps {
 export const GoogleCloudConnect: React.FC<GoogleCloudConnectProps> = ({ className }) => {
   const [status, setStatus] = useState<'checking' | 'connected' | 'disconnected' | 'error'>('checking');
   const [loading, setLoading] = useState(false);
+  const [refreshingStatus, setRefreshingStatus] = useState(false);
   const [authUrl, setAuthUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [connectedEmail, setConnectedEmail] = useState<string | null>(null);
   const { user } = useAuth();
 
-  // Check for OAuth callback in URL
-  useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const code = urlParams.get('code');
-    const state = urlParams.get('state');
-    
-    if (code && state === 'google_cloud_oauth') {
-      handleOAuthCallback(code);
-      // Clean up URL
-      window.history.replaceState({}, document.title, window.location.pathname);
+  const checkStatus = useCallback(async (showChecking = true) => {
+    if (showChecking) {
+      setStatus('checking');
     }
-  }, []);
-
-  // Check connection status on mount and when user changes
-  useEffect(() => {
-    checkStatus();
-  }, [user]);
-
-  const checkStatus = async () => {
-    setStatus('checking');
     try {
       // First check if connected via unified login (oauth_connections table)
       if (user) {
@@ -74,7 +59,28 @@ export const GoogleCloudConnect: React.FC<GoogleCloudConnectProps> = ({ classNam
       console.error('Failed to check Google Cloud status:', error);
       setStatus('disconnected');
     }
-  };
+  }, [user]);
+
+  useEffect(() => {
+    const handleOAuthMessage = (event: MessageEvent) => {
+      if (event.data?.type !== 'google-cloud-oauth-complete') return;
+      if (event.data?.success) {
+        toast.success('Google Cloud connected!');
+        setAuthUrl(null);
+        void checkStatus(false);
+      } else {
+        toast.error(event.data?.error || 'Google Cloud authorization failed');
+      }
+    };
+
+    window.addEventListener('message', handleOAuthMessage);
+    return () => window.removeEventListener('message', handleOAuthMessage);
+  }, [checkStatus]);
+
+  // Check connection status on mount and when user changes
+  useEffect(() => {
+    checkStatus();
+  }, [checkStatus]);
 
   const handleConnect = async () => {
     setLoading(true);
@@ -84,70 +90,41 @@ export const GoogleCloudConnect: React.FC<GoogleCloudConnectProps> = ({ classNam
       const { data, error } = await supabase.functions.invoke('google-cloud-auth', {
         body: { 
           action: 'get_authorization_url',
-          redirect_uri: redirectUri
+          redirect_uri: redirectUri,
+          return_to: `${window.location.origin}/dashboard`
         }
       });
 
       if (error) throw error;
 
       if (data?.success && data?.authorization_url) {
+        const isMobile = /Android|iPhone|iPad|iPod|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
+        if (isMobile) {
+          window.location.assign(data.authorization_url);
+          return;
+        }
+
         const authWindow = window.open(data.authorization_url, 'google_oauth', 'width=600,height=700');
-        
-        if (!authWindow) {
+
+        if (authWindow) {
+          const pollWindowClosed = window.setInterval(() => {
+            if (authWindow.closed) {
+              window.clearInterval(pollWindowClosed);
+              void checkStatus(false);
+            }
+          }, 500);
+        } else {
           setAuthUrl(data.authorization_url);
           toast.info('Popup blocked - click the link below to connect');
         }
       } else {
         throw new Error(data?.error || 'Failed to get authorization URL');
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
       console.error('Failed to initiate Google OAuth:', error);
-      toast.error('Failed to connect: ' + (error.message || 'Unknown error'));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleOAuthCallback = async (code: string) => {
-    setLoading(true);
-    try {
-      const redirectUri = `${window.location.origin}/credentials`;
-      
-      const { data, error } = await supabase.functions.invoke('google-cloud-auth', {
-        body: { 
-          action: 'callback',
-          code,
-          redirect_uri: redirectUri
-        }
-      });
-
-      if (error) throw error;
-
-      if (data?.success && data?.refresh_token) {
-        toast.success('Google Cloud connected!');
-        setAuthUrl(null);
-        setStatus('connected');
-        
-        // If user is logged in, also store to oauth_connections
-        if (user) {
-          await supabase.from('oauth_connections').upsert({
-            user_id: user.id,
-            provider: 'google_cloud',
-            account_email: user.email,
-            refresh_token: data.refresh_token,
-            scopes: ['gmail', 'drive', 'sheets', 'calendar'],
-            connected_at: new Date().toISOString(),
-            is_active: true
-          }, { onConflict: 'user_id,provider' });
-          setConnectedEmail(user.email || null);
-        }
-      } else {
-        throw new Error(data?.error || 'OAuth callback failed');
-      }
-    } catch (error: any) {
-      console.error('OAuth callback failed:', error);
-      toast.error('OAuth failed: ' + (error.message || 'Unknown error'));
-      setStatus('error');
+      toast.error('Failed to connect: ' + message);
     } finally {
       setLoading(false);
     }
@@ -299,10 +276,22 @@ export const GoogleCloudConnect: React.FC<GoogleCloudConnectProps> = ({ classNam
           <Button
             variant="outline"
             size="sm"
-            onClick={checkStatus}
+            disabled={refreshingStatus}
+            onClick={async () => {
+              setRefreshingStatus(true);
+              await checkStatus(false);
+              setRefreshingStatus(false);
+            }}
             className="w-full"
           >
-            Refresh Status
+            {refreshingStatus ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Refreshing...
+              </>
+            ) : (
+              'Refresh Status'
+            )}
           </Button>
         </div>
       )}

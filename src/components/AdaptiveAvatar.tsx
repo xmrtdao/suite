@@ -1,11 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
 import { realTimeProcessingService } from '@/services/RealTimeProcessingService';
-import { emotionalIntelligenceService } from '@/services/EmotionalIntelligenceService';
 import { contextAwarenessService } from '@/services/ContextAwarenessService';
-import { geminiImageService } from '@/services/geminiImageService';
 import { Button } from '@/components/ui/button';
-import { Eye, EyeOff, Volume2, VolumeX, Sparkles } from 'lucide-react';
+import { Eye, EyeOff, Volume2, VolumeX } from 'lucide-react';
 
 interface AdaptiveAvatarProps {
   apiKey?: string;
@@ -16,14 +14,13 @@ interface AdaptiveAvatarProps {
 }
 
 export const AdaptiveAvatar: React.FC<AdaptiveAvatarProps> = ({
-  apiKey,
+  apiKey: _apiKey,
   className = '',
   size = 'lg',
   enableVoice = true,
   enableVisualMode = true
 }) => {
-  const [currentAvatar, setCurrentAvatar] = useState<string>('');
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [currentAvatar] = useState<string>('');
   const [currentMood, setCurrentMood] = useState('neutral');
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'processing' | 'idle'>('idle');
   const [voiceEnabled, setVoiceEnabled] = useState(enableVoice);
@@ -50,9 +47,6 @@ export const AdaptiveAvatar: React.FC<AdaptiveAvatarProps> = ({
   };
 
   useEffect(() => {
-    // Generate initial avatar
-    generateAdaptiveAvatar('neutral', 'idle');
-
     // Subscribe to real-time updates
     const unsubscribeEmotion = realTimeProcessingService.subscribe('emotion_detected', (data) => {
       handleEmotionChange(data.emotion, data.confidence);
@@ -79,12 +73,6 @@ export const AdaptiveAvatar: React.FC<AdaptiveAvatarProps> = ({
     setCurrentMood(emotion);
     setConnectionStatus('processing');
 
-    // Generate new avatar based on emotion with adaptive timing
-    const shouldRegenerate = shouldRegenerateAvatar(emotion, confidence);
-    if (shouldRegenerate) {
-      await generateAdaptiveAvatar(emotion, 'responsive');
-    }
-
     setConnectionStatus('connected');
   };
 
@@ -99,7 +87,7 @@ export const AdaptiveAvatar: React.FC<AdaptiveAvatarProps> = ({
     }
   };
 
-  const handleContextUpdate = (context: any) => {
+  const handleContextUpdate = (_context: unknown) => {
     // Adjust reactivity based on context
     const contextData = contextAwarenessService.getContext();
     
@@ -109,65 +97,6 @@ export const AdaptiveAvatar: React.FC<AdaptiveAvatarProps> = ({
       setReactivityLevel('low');
     } else {
       setReactivityLevel('medium');
-    }
-  };
-
-  const shouldRegenerateAvatar = (emotion: string, confidence: number): boolean => {
-    switch (reactivityLevel) {
-      case 'high':
-        return confidence > 0.4; // Very responsive
-      case 'medium':
-        return confidence > 0.6; // Moderately responsive
-      case 'low':
-        return confidence > 0.8; // Only respond to very confident emotions
-      default:
-        return confidence > 0.6;
-    }
-  };
-
-  const generateAdaptiveAvatar = async (emotion: string, context: string = 'idle') => {
-    if (!apiKey || isGenerating) return;
-
-    setIsGenerating(true);
-
-    try {
-      // Build context-aware prompt
-      const contextData = contextAwarenessService.getContext();
-      const emotionalProfile = emotionalIntelligenceService.getEmotionalProfile();
-      const insights = contextAwarenessService.getRecentInsights(2);
-
-      const prompt = `
-Create a digital avatar of Eliza, an AI assistant, showing ${emotion} emotion with ${context} energy level.
-
-Current context:
-- User mood: ${contextData.userMood}
-- Conversation tone: ${contextData.conversationTone}
-- Emotional stability: ${emotionalProfile.emotionalStability.toFixed(2)}
-- Recent insights: ${insights.join(', ')}
-
-Avatar should be:
-- Professional yet warm and approachable
-- Showing ${emotion} emotion subtly in facial expression
-- High quality digital art style
-- Suitable for AI assistant representation
-- ${context === 'responsive' ? 'More animated and expressive' : 'Calm and composed'}
-- Ultra high resolution
-      `.trim();
-
-      const params = {
-        prompt,
-        style: 'digital-art' as const,
-        mood: emotion,
-        lighting: context === 'responsive' ? 'dynamic lighting' : 'soft professional lighting'
-      };
-      
-      const generatedImage = await geminiImageService.generateImage(params);
-      setCurrentAvatar(generatedImage.url);
-
-    } catch (error) {
-      console.error('Failed to generate adaptive avatar:', error);
-    } finally {
-      setIsGenerating(false);
     }
   };
 
@@ -211,10 +140,6 @@ Avatar should be:
   const getCurrentBorderClass = () => {
     const baseClass = borderClasses[currentMood as keyof typeof borderClasses] || borderClasses.neutral;
     
-    if (isGenerating) {
-      return `${baseClass} animate-spin`;
-    }
-    
     if (connectionStatus === 'processing') {
       return `${baseClass} animate-pulse`;
     }
@@ -239,17 +164,11 @@ Avatar should be:
 
         {/* Status Indicators */}
         <div className="absolute -bottom-1 -right-1 flex space-x-1">
-          {isGenerating && (
-            <div className="w-4 h-4 bg-primary rounded-full flex items-center justify-center animate-spin">
-              <Sparkles className="w-2 h-2 text-primary-foreground" />
-            </div>
-          )}
-          
-          {connectionStatus === 'processing' && !isGenerating && (
+          {connectionStatus === 'processing' && (
             <div className="w-3 h-3 bg-yellow-400 rounded-full animate-pulse" />
           )}
           
-          {connectionStatus === 'connected' && !isGenerating && (
+          {connectionStatus === 'connected' && (
             <div className="w-3 h-3 bg-green-400 rounded-full" />
           )}
         </div>
@@ -282,16 +201,6 @@ Avatar should be:
             ) : (
               <EyeOff className="w-4 h-4 text-muted-foreground" />
             )}
-          </Button>
-
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => generateAdaptiveAvatar(currentMood, 'refresh')}
-            disabled={isGenerating}
-            className="w-8 h-8 p-0"
-          >
-            <Sparkles className={`w-4 h-4 ${isGenerating ? 'animate-spin' : ''}`} />
           </Button>
         </div>
       )}

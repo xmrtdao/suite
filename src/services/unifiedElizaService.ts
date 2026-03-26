@@ -209,7 +209,7 @@ export class UnifiedElizaService {
     // Ensure we have a valid array
     const safeExecutives = Array.isArray(healthyExecutives) && healthyExecutives.length > 0
       ? healthyExecutives
-      : ['ai-chat', 'deepseek-chat', 'gemini-chat'];
+      : ['ai-chat', 'vertex-ai-chat', 'deepseek-chat', 'gemini-chat'];
 
     console.log('🔒 Safe executives:', safeExecutives.length, 'available');
 
@@ -241,6 +241,16 @@ export class UnifiedElizaService {
           if (context.isLiveCameraFeed) {
             formData.append('isLiveCameraFeed', 'true');
           }
+
+          // ✅ FIXED: Pass user_id and session_id so backend can ingest to KB + Drive
+          try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user?.id) formData.append('user_id', user.id);
+            if (user?.email) formData.append('user_email', user.email);
+          } catch (_) {}
+          // Pass any stored session ID for memory continuity
+          const storedSession = localStorage.getItem('eliza_session_id');
+          if (storedSession) formData.append('session_id', storedSession);
 
           // Append all files
           context.attachments.forEach(file => {
@@ -351,6 +361,11 @@ export class UnifiedElizaService {
     try {
       const safeInput = (typeof userInput === 'string' && userInput.trim()) ? userInput.trim() : 'Hello';
       const safeContext = (context && typeof context === 'object') ? context : {};
+      const hasVisualOrAttachmentInput =
+        safeContext.inputMode === 'vision' ||
+        !!safeContext.isLiveCameraFeed ||
+        !!(safeContext.images && safeContext.images.length > 0) ||
+        !!(safeContext.attachments && safeContext.attachments.length > 0);
 
       console.log('📋 Safe input length:', safeInput.length);
 
@@ -358,7 +373,7 @@ export class UnifiedElizaService {
       // When targetExecutive is set (council page individual chats), skip the
       // health-check waterfall entirely and call that one function directly,
       // with the executive's character injected as a system message.
-      if (safeContext.targetExecutive && EXECUTIVE_PERSONA_PROMPTS[safeContext.targetExecutive]) {
+      if (safeContext.targetExecutive && EXECUTIVE_PERSONA_PROMPTS[safeContext.targetExecutive] && !hasVisualOrAttachmentInput) {
         console.log(`🎭 Persona-locked mode: routing to ${safeContext.targetExecutive}`);
         const personaResponse = await this.callSingleExecutive(
           safeContext.targetExecutive, safeInput, safeContext
@@ -366,6 +381,8 @@ export class UnifiedElizaService {
         if (personaResponse) return personaResponse;
         // If that function is down, fall through to waterfall below
         console.warn(`⚠️ ${safeContext.targetExecutive} unavailable, falling back to waterfall`);
+      } else if (safeContext.targetExecutive && hasVisualOrAttachmentInput) {
+        console.log(`📎 Attachment/vision input detected; bypassing persona-locked routing for ${safeContext.targetExecutive} so backend attachment analysis can run`);
       }
 
       // ── Vision / attachment override ───────────────────────────────────────
@@ -392,7 +409,9 @@ export class UnifiedElizaService {
       // (vercel-ai-chat, deepseek-chat, etc.) are emergency fallbacks only.
       // They answer as their specific persona and should NEVER be Eliza's voice.
       const executiveFallbacks = await this.getHealthyExecutives();
-      const elizaFirstRouting = ['ai-chat', ...executiveFallbacks.filter(e => e !== 'ai-chat')];
+      const elizaFirstRouting = hasVisualOrAttachmentInput
+        ? ['vertex-ai-chat', 'ai-chat', ...executiveFallbacks.filter(e => e !== 'ai-chat' && e !== 'vertex-ai-chat')]
+        : ['ai-chat', ...executiveFallbacks.filter(e => e !== 'ai-chat')];
       console.log('💚 Routing order (Eliza first):', elizaFirstRouting);
 
       const result = await this.routeToExecutive(safeInput, safeContext, elizaFirstRouting, language);
