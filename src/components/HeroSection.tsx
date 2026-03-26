@@ -24,7 +24,9 @@ export interface Stats {
   healthScore: number;
   healthStatus: 'healthy' | 'degraded' | 'critical';
   healthIssues: string[];
-  knowledgeEntities: number;
+  knowledgeEntitiesTotal: number;
+  userContextKnowledge: number;
+  userWorkflows: number;
   registeredEdgeFunctions: number;
 }
 
@@ -199,6 +201,24 @@ export const HeroSection = ({ stats }: HeroSectionProps) => {
 
   const banner = marketingBanners[currentBanner];
   const registeredEdgeFunctions = stats.registeredEdgeFunctions;
+  const pipelineStages = [
+    { id: 'capture', label: 'Capture', value: stats.activeTasks },
+    {
+      id: 'context',
+      label: 'Context',
+      value: stats.userContextKnowledge,
+    },
+    {
+      id: 'orchestrate',
+      label: 'Orchestrate',
+      value: stats.userWorkflows,
+    },
+    {
+      id: 'execute',
+      label: 'Execute',
+      value: stats.totalExecutions,
+    },
+  ];
 
   const heroDataPoints: HeroDataPoint[] = [
     {
@@ -246,11 +266,25 @@ export const HeroSection = ({ stats }: HeroSectionProps) => {
       value: registeredEdgeFunctions,
     },
     {
-      id: 'knowledge-entities',
-      label: 'Knowledge entities',
+      id: 'knowledge-entities-total',
+      label: 'Total knowledge entities',
       kind: 'stat',
       icon: <BrainCircuit className="h-3 w-3 text-violet-500" />,
-      value: stats.knowledgeEntities,
+      value: stats.knowledgeEntitiesTotal,
+    },
+    {
+      id: 'knowledge-entities-user-context',
+      label: 'User context knowledge',
+      kind: 'stat',
+      icon: <BrainCircuit className="h-3 w-3 text-violet-500" />,
+      value: stats.userContextKnowledge,
+    },
+    {
+      id: 'user-workflows',
+      label: 'User workflows',
+      kind: 'stat',
+      icon: <Workflow className="h-3 w-3 text-sky-500" />,
+      value: stats.userWorkflows,
     },
     ...ecosystemEndpoints.map((endpoint) => ({
       id: endpoint.id,
@@ -337,7 +371,7 @@ export const HeroSection = ({ stats }: HeroSectionProps) => {
           </button>
         </div>
 
-        <div className="glass-card rounded-xl border border-primary/15 bg-background/65 p-2 shadow-lg shadow-primary/5">
+        <div className="glass-card rounded-xl border border-primary/15 bg-background/65 p-1.5 shadow-lg shadow-primary/5">
           <div className="mb-1.5 flex items-center justify-between gap-2">
             <div>
               <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
@@ -354,6 +388,26 @@ export const HeroSection = ({ stats }: HeroSectionProps) => {
             {heroDataPoints.map((point) => (
               <DataPointCard key={point.id} point={point} />
             ))}
+          </div>
+
+          <div className="mt-1 rounded-md border border-border/50 bg-background/45 px-1.5 py-1">
+            <div className="mb-1 flex items-center justify-between">
+              <p className="text-[9px] font-medium text-foreground">Task pipeline</p>
+              <p className="text-[8px] text-muted-foreground">Live miniature view</p>
+            </div>
+            <div className="grid grid-cols-4 gap-1">
+              {pipelineStages.map((stage, index) => (
+                <div key={stage.id} className="relative rounded-sm border border-border/50 bg-background/70 px-1 py-0.5">
+                  <div className="truncate text-[8px] text-muted-foreground">{stage.label}</div>
+                  <div className="text-[10px] font-semibold text-foreground">
+                    <AnimatedCounter end={stage.value} />
+                  </div>
+                  {index < pipelineStages.length - 1 && (
+                    <div className="pointer-events-none absolute -right-1.5 top-1/2 h-px w-2 -translate-y-1/2 bg-primary/50" />
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>

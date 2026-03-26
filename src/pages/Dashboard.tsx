@@ -21,7 +21,9 @@ const Index = () => {
     healthScore: 100,
     healthStatus: 'healthy',
     healthIssues: [],
-    knowledgeEntities: 0,
+    knowledgeEntitiesTotal: 0,
+    userContextKnowledge: 0,
+    userWorkflows: 0,
     registeredEdgeFunctions: DASHBOARD_EDGE_FUNCTION_TOTAL,
   });
 
@@ -39,7 +41,9 @@ const Index = () => {
         superduperLogs,
         agents,
         tasks,
-        knowledgeEntities,
+        knowledgeEntitiesTotal,
+        userContextKnowledge,
+        userWorkflows,
         latestHealth,
       ] = await Promise.all([
         supabase
@@ -59,6 +63,14 @@ const Index = () => {
         supabase
           .from('knowledge_entities')
           .select('*', { count: 'exact', head: true }),
+        supabase
+          .from('knowledge_entities')
+          .select('*', { count: 'exact', head: true })
+          .or('entity_type.ilike.%user%,metadata->>source.ilike.%user%'),
+        supabase
+          .from('workflow_templates')
+          .select('*', { count: 'exact', head: true })
+          .eq('is_active', true),
         // Get cached health from latest system_health_check activity log entry
         supabase
           .from('eliza_activity_log')
@@ -100,7 +112,9 @@ const Index = () => {
         healthScore,
         healthStatus,
         healthIssues,
-        knowledgeEntities: knowledgeEntities.count || 0,
+        knowledgeEntitiesTotal: knowledgeEntitiesTotal.count || 0,
+        userContextKnowledge: userContextKnowledge.count || 0,
+        userWorkflows: userWorkflows.count || 0,
         registeredEdgeFunctions: DASHBOARD_EDGE_FUNCTION_TOTAL,
       });
     };
