@@ -20,6 +20,7 @@ import { ChargerSessionsList } from "@/components/ChargerSessionsList";
 import { ClaimedDevicesSection } from "@/components/ClaimedDevicesSection";
 import { OrganizationProfile } from "@/components/OrganizationProfile";
 import { GoogleCloudConnect } from "@/components/GoogleCloudConnect";
+import { GitHubConnect } from "@/components/GitHubConnect";
 
 interface UserEarnings {
   github_xmrt: number;
@@ -302,7 +303,18 @@ const Profile = () => {
 
 
           {/* Service Integrations */}
-          <GoogleCloudConnect />
+          <Card>
+            <CardHeader>
+              <CardTitle>Integrations</CardTitle>
+              <CardDescription>
+                Connect your personal cloud and source control accounts for AI-powered workflows.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <GoogleCloudConnect />
+              <GitHubConnect />
+            </CardContent>
+          </Card>
 
           {/* Business & Organizations Section */}
           <OrganizationProfile />
