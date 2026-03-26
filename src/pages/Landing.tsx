@@ -113,7 +113,7 @@ const heroStickyNotes = [
     mobileRotation: '6deg',
     accentClassName: 'from-yellow-100 via-amber-50 to-yellow-50',
     style: { top: '18%', right: '2%' },
-    mobileStyle: { top: '24%', right: '-6%' },
+    mobileStyle: { top: '21%', right: '-6%' },
   },
   {
     id: 'right-draft',
@@ -124,7 +124,7 @@ const heroStickyNotes = [
     mobileRotation: '-3deg',
     accentClassName: 'from-amber-200 via-yellow-100 to-yellow-50',
     style: { top: '54%', right: '8%' },
-    mobileStyle: { top: '58%', right: '-3%' },
+    mobileStyle: { top: '62%', right: '-3%' },
   },
 ] as const;
 
