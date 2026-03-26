@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=Permanent+Marker&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -332,10 +333,10 @@ input[type="number"] {
 }
 
 .sticky-note-handwriting {
-  font-family: 'Bradley Hand', 'Segoe Print', 'Comic Sans MS', 'Marker Felt', 'Chalkboard SE', cursive;
+  font-family: 'Permanent Marker', 'Marker Felt', 'Chalkboard SE', 'Segoe Print', cursive;
   font-weight: 400;
-  letter-spacing: 0.01em;
-  text-shadow: 0.15px 0 currentColor;
+  letter-spacing: 0.012em;
+  text-shadow: 0.3px 0 currentColor;
 }
 
 @keyframes sticky-note-float {
