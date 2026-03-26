@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { getGoogleAccessToken, isGoogleConfigured, corsHeaders, extractUserContext, UserTokenInfo } from "../_shared/googleAuthHelper.ts";
-import { startUsageTrackingWithRequest } from "../_shared/edgeFunctionUsageLogger.ts";
+import { startUsageTrackingWithRequest } from "../_shared/functionUsageLogger.ts";
 
 const FUNCTION_NAME = 'google-drive';
 

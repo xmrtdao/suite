@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.58.0";
-import { startUsageTrackingWithRequest, detectExecutionSource } from "../_shared/edgeFunctionUsageLogger.ts";
+import { startUsageTrackingWithRequest, detectExecutionSource } from "../_shared/functionUsageLogger.ts";
 
 const FUNCTION_NAME = 'get-cron-registry';
 

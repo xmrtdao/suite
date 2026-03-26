@@ -1,5 +1,5 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.58.0';
-import { startUsageTrackingWithRequest } from '../_shared/edgeFunctionUsageLogger.ts';
+import { startUsageTrackingWithRequest } from '../_shared/functionUsageLogger.ts';
 import { FUNCTION_KNOWLEDGE, getFunctionActions, getKnownFunctionNames, searchFunctionKnowledge } from '../_shared/edgeFunctionKnowledge.ts';
 
 const FUNCTION_NAME = 'get-function-actions';

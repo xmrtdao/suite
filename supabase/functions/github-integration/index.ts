@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { corsHeaders } from "../_shared/cors.ts";
 import { getGitHubCredential, createCredentialRequiredResponse } from "../_shared/credentialCascade.ts";
 import { applyExecutiveAttribution, isValidExecutive } from "../_shared/executiveAttribution.ts";
-import { startUsageTracking } from '../_shared/edgeFunctionUsageLogger.ts';
+import { startUsageTracking } from '../_shared/functionUsageLogger.ts';
 import { resolveGitHubAssignee } from "../_shared/githubPersonas.ts";
 
 const FUNCTION_NAME = 'github-integration';

@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.58.0";
-import { startUsageTrackingWithRequest } from "../_shared/edgeFunctionUsageLogger.ts";
+import { startUsageTrackingWithRequest } from "../_shared/functionUsageLogger.ts";
 
 const FUNCTION_NAME = 'vsco-webhook-handler';
 

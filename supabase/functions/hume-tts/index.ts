@@ -1,6 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { encode as base64Encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
-import { startUsageTrackingWithRequest } from "../_shared/edgeFunctionUsageLogger.ts";
+import { startUsageTrackingWithRequest } from "../_shared/functionUsageLogger.ts";
 
 const FUNCTION_NAME = 'hume-tts';
 
