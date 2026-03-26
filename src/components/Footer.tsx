@@ -6,8 +6,8 @@ import { useLanguage } from "@/contexts/LanguageContext";
 export function Footer() {
   const { t } = useLanguage();
   const openEmail = () => {
-    const subject = "XMRT-DAO Inquiry";
-    const body = "Hello,\n\nI'm interested in learning more about XMRT-DAO and Suite.\n\nBest regards,";
+    const subject = "Suite AI Inquiry";
+    const body = "Hello,\n\nI'm interested in learning more about Suite AI.\n\nBest regards,";
     const encodedSubject = encodeURIComponent(subject);
     const encodedBody = encodeURIComponent(body);
     window.location.href = `mailto:xmrtsolutions@gmail.com?subject=${encodedSubject}&body=${encodedBody}`;
