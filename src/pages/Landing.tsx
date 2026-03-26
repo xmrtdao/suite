@@ -77,18 +77,18 @@ const benefits = [
 const steps = [
   {
     number: '01',
-    title: 'Sign Up',
-    description: 'Create your account in seconds with Google',
+    title: 'Connect Your Stack',
+    description: 'Link Google, GitHub, Supabase, Drive, and your preferred cloud tools.',
   },
   {
     number: '02',
-    title: 'Chat with Executives',
-    description: 'Describe your needs to AI council members',
+    title: 'Set Outcomes',
+    description: 'Give Suite objectives, constraints, and brand context once.',
   },
   {
     number: '03',
-    title: 'Watch It Work',
-    description: 'Autonomous agents execute tasks in real-time',
+    title: 'Review and Publish',
+    description: 'Approve and ship campaigns, updates, and workflows across channels.',
   },
 ];
 
@@ -96,7 +96,7 @@ const heroStickyNotes = [
   {
     id: 'left-strategy',
     title: 'Planning',
-    text: 'Researching the competition',
+    text: 'Mapping Q2 campaign goals',
     position: 'left',
     rotation: '-9deg',
     mobileRotation: '-7deg',
@@ -107,7 +107,7 @@ const heroStickyNotes = [
   {
     id: 'right-ops',
     title: 'Operations',
-    text: 'Reviewing TPS reports',
+    text: 'Syncing GitHub and Supabase',
     position: 'right',
     rotation: '8deg',
     mobileRotation: '6deg',
@@ -118,7 +118,7 @@ const heroStickyNotes = [
   {
     id: 'right-draft',
     title: 'Admin',
-    text: 'Checking emails',
+    text: 'Scheduling social posts',
     position: 'right',
     rotation: '-4deg',
     mobileRotation: '-3deg',
@@ -133,7 +133,7 @@ const sectionStickyNotes = [
     id: 'exec-left',
     section: 'executives',
     title: 'Hiring',
-    text: 'Vetting top candidates',
+    text: 'Briefing executive agents',
     rotation: '-6deg',
     accentClassName: 'from-yellow-200 via-amber-100 to-yellow-50',
     style: { top: '10%', left: '2%' },
@@ -142,7 +142,7 @@ const sectionStickyNotes = [
     id: 'exec-right',
     section: 'executives',
     title: 'Growth',
-    text: 'Planning global launch',
+    text: 'Planning multi-channel launch',
     rotation: '7deg',
     accentClassName: 'from-yellow-100 via-amber-50 to-yellow-50',
     style: { bottom: '8%', right: '2%' },
@@ -151,7 +151,7 @@ const sectionStickyNotes = [
     id: 'benefits-right',
     section: 'benefits',
     title: 'Savings',
-    text: 'Tracking cost wins',
+    text: 'Tracking forecast impact',
     rotation: '6deg',
     accentClassName: 'from-amber-200 via-yellow-100 to-yellow-50',
     style: { top: '16%', right: '2%' },
@@ -160,7 +160,7 @@ const sectionStickyNotes = [
     id: 'how-left',
     section: 'how-it-works',
     title: 'Process',
-    text: 'Automating daily flow',
+    text: 'Automating recurring ops',
     rotation: '-5deg',
     accentClassName: 'from-yellow-200 via-amber-100 to-yellow-50',
     style: { bottom: '10%', left: '3%' },
@@ -169,7 +169,7 @@ const sectionStickyNotes = [
     id: 'cta-right',
     section: 'cta',
     title: 'Action',
-    text: 'Book kickoff today',
+    text: 'Start your free trial',
     rotation: '8deg',
     accentClassName: 'from-yellow-100 via-amber-50 to-yellow-50',
     style: { top: '10%', right: '4%' },
@@ -380,6 +380,9 @@ export default function Landing() {
               </div>
             ))}
           </div>
+          <p className="mt-4 text-xs text-muted-foreground">
+            * Forecast metrics are generated from Suite AI forecasts and executive swarm predictive analysis.
+          </p>
         </div>
       </section>
 
