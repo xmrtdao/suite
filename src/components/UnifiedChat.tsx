@@ -86,6 +86,9 @@ interface UnifiedMessage {
   councilDeliberation?: any;
 }
 
+const normalizeMessageContent = (content: string): string =>
+  (content || '').replace(/\s+/g, ' ').trim();
+
 // MiningStats imported from unifiedDataService
 import { ExecutiveName, EXECUTIVE_PROFILES } from './ExecutiveBio';
 
@@ -958,6 +961,8 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       (payload) => {
         const msg = payload.new;
         if (msg && msg.message_type === 'assistant') {
+          const incomingContent = normalizeMessageContent(msg.content || '');
+          const incomingTimestamp = new Date(msg.timestamp).getTime();
           const newMessage: UnifiedMessage = {
             id: msg.id,
             content: msg.content,
@@ -968,6 +973,28 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
             // Avoid duplicate intro/greeting rendering:
             // 1) Ignore if realtime message ID already exists.
             if (prev.some((existing) => String(existing.id) === String(newMessage.id))) {
+              return prev;
+            }
+
+            // 1b) Ignore duplicated assistant payloads that were already rendered
+            // optimistically by local state updates (same content, same sender, very close timestamp).
+            const duplicateByContent = prev.some((existing) => {
+              if (existing.sender !== 'assistant') return false;
+
+              const existingContent = normalizeMessageContent(existing.content);
+              if (!existingContent || existingContent !== incomingContent) return false;
+
+              const existingTimestamp = existing.timestamp instanceof Date
+                ? existing.timestamp.getTime()
+                : new Date(existing.timestamp).getTime();
+
+              // Allow a generous window to account for network latency and DB persistence lag.
+              return Number.isFinite(existingTimestamp)
+                && Number.isFinite(incomingTimestamp)
+                && Math.abs(existingTimestamp - incomingTimestamp) < 15000;
+            });
+
+            if (duplicateByContent) {
               return prev;
             }
 
