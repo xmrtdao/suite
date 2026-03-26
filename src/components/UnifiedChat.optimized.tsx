@@ -71,6 +71,7 @@ const UnifiedChatOptimized: React.FC<UnifiedChatProps> = ({
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const userId = useRef<string>('');
+  const hasInitializedConversation = useRef(false);
 
   // Initialize user ID
   useEffect(() => {
@@ -116,6 +117,9 @@ const UnifiedChatOptimized: React.FC<UnifiedChatProps> = ({
   // Initialize conversation persistence
   useEffect(() => {
     const initialize = async () => {
+      if (hasInitializedConversation.current) return;
+      hasInitializedConversation.current = true;
+
       try {
         // Load mining stats if not provided
         if (!externalMiningStats) {
@@ -393,4 +397,3 @@ Be helpful, concise, and knowledgeable about cryptocurrency mining and the XMRT 
 
 // Export with lazy loading wrapper
 export default UnifiedChatOptimized;
-
