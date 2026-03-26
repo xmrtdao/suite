@@ -202,6 +202,45 @@ export default function Landing() {
           ))}
         </div>
 
+        <div className="mx-auto mb-10 grid max-w-md grid-cols-2 gap-4 px-1 sm:max-w-xl xl:hidden" aria-hidden="true">
+          {heroStickyNotes.map((note, index) => (
+            <div
+              key={`mobile-${note.id}`}
+              className={`sticky-note-hero relative w-full ${index === heroStickyNotes.length - 1 ? 'col-span-2 mx-auto max-w-[210px]' : ''}`}
+              style={{
+                ['--sticky-rotate' as string]: note.rotation,
+                ['--sticky-duration' as string]: `${3.1 + index * 0.35}s`,
+                ['--sticky-delay' as string]: `${index * 220}ms`,
+              }}
+            >
+              <div className="sticky-note-hero__shadow" />
+              <div className={`sticky-note-hero__paper bg-gradient-to-br ${note.accentClassName} !min-h-[180px] !p-4`}>
+                <div className="sticky-note-hero__tape" />
+                <div className="sticky-note-hero__pin" />
+                <div className="sticky-note-hero__fold" />
+                <div className="mt-7 text-left">
+                  <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-amber-950/55">
+                    <Sparkles className="h-3.5 w-3.5 text-amber-900/55" />
+                    {note.title}
+                  </div>
+                  <p className="sticky-note-handwriting mt-3 text-[21px] leading-[1.06] text-black/88">
+                    {note.text}
+                  </p>
+                  <div className="mt-3.5 space-y-2">
+                    <div className="h-px w-[84%] bg-black/10" />
+                    <div className="h-px w-[68%] bg-black/10" />
+                    <div className="h-px w-[74%] bg-black/10" />
+                  </div>
+                  <div className="mt-3.5 flex items-center gap-2 text-[11px] text-black/55">
+                    <PencilLine className="h-3.5 w-3.5" />
+                    <span className="sticky-note-handwriting text-xs tracking-[0.02em] text-black/70">handwritten update</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
         <div className="container mx-auto text-center max-w-5xl">
           <h1 className="text-4xl md:text-6xl lg:text-7xl font-bold mb-6 leading-tight">
             {t('landing.hero.title.part1')}{' '}
