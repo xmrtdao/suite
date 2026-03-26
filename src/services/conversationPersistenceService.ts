@@ -23,7 +23,9 @@ export interface ConversationSession {
 export class ConversationPersistenceService {
   private static instance: ConversationPersistenceService;
   private currentSessionId: string | null = null;
-  private userIP: string | null = null;
+  private currentSessionKey: string | null = null;
+  private currentUserId: string | null = null;
+  private currentUserEmail: string | null = null;
 
   public static getInstance(): ConversationPersistenceService {
     if (!ConversationPersistenceService.instance) {
@@ -67,26 +69,55 @@ export class ConversationPersistenceService {
     return this.sessionIdToUUID(sessionId);
   }
 
-  // Get user's IP address
-  private async getUserIP(): Promise<string> {
-    if (this.userIP) return this.userIP;
-
-    try {
-      const response = await fetch('https://api.ipify.org?format=json');
-      const data = await response.json();
-      this.userIP = data.ip;
-      return this.userIP;
-    } catch (error) {
-      console.warn('Failed to get IP, using fallback:', error);
-      this.userIP = `local-${Date.now()}`;
-      return this.userIP;
+  private getAnonymousSessionKey(): string {
+    const storageKey = 'xmrt-anon-session-key';
+    const existingKey = localStorage.getItem(storageKey);
+    if (existingKey && existingKey.trim()) {
+      return existingKey;
     }
+
+    const newKey = `anon-${crypto.randomUUID()}`;
+    localStorage.setItem(storageKey, newKey);
+    return newKey;
   }
 
-  // Initialize or resume session for current IP
+  private async resolveAuthContext(): Promise<{
+    userId: string | null;
+    userEmail: string | null;
+    sessionKey: string;
+  }> {
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (user?.id) {
+        this.currentUserId = user.id;
+        this.currentUserEmail = user.email || null;
+        this.currentSessionKey = `user-${user.id}`;
+        return {
+          userId: user.id,
+          userEmail: user.email || null,
+          sessionKey: this.currentSessionKey,
+        };
+      }
+    } catch (error) {
+      console.warn('Failed to resolve authenticated user, falling back to anonymous session:', error);
+    }
+
+    this.currentUserId = null;
+    this.currentUserEmail = null;
+    this.currentSessionKey = this.getAnonymousSessionKey();
+    return {
+      userId: null,
+      userEmail: null,
+      sessionKey: this.currentSessionKey,
+    };
+  }
+
+  // Initialize or resume session for current authenticated user (fallback: anonymous local session)
   public async initializeSession(): Promise<string> {
-    const userIP = await this.getUserIP();
-    const sessionKey = `ip-${userIP}`;
+    const { userId, userEmail, sessionKey } = await this.resolveAuthContext();
 
     try {
       // Use secure edge function to get session
@@ -96,6 +127,8 @@ export class ConversationPersistenceService {
           body: {
             action: 'get_session',
             sessionKey,
+            userId,
+            userEmail,
           },
         }
       );
@@ -108,8 +141,9 @@ export class ConversationPersistenceService {
       if (data.session) {
         // Resume existing session
         this.currentSessionId = data.session.id;
+        this.currentSessionKey = data.session.session_key || sessionKey;
         console.log(
-          `Resumed session ${this.currentSessionId} for IP ${userIP}`
+          `Resumed session ${this.currentSessionId} for ${userId ? `user ${userId}` : `anonymous key ${sessionKey}`}`
         );
         return this.currentSessionId;
       }
@@ -124,14 +158,19 @@ export class ConversationPersistenceService {
               session_key: sessionKey,
               title: `Conversation - ${new Date().toLocaleDateString()}`,
               is_active: true,
+              user_profile_id: userId,
               metadata: {
-                userIP,
+                sessionType: userId ? 'authenticated' : 'anonymous',
+                userId,
+                userEmail,
                 startedAt: new Date().toISOString(),
                 platform: navigator.userAgent.includes('Mobile')
                   ? 'mobile'
                   : 'desktop',
               },
             },
+            userId,
+            userEmail,
           },
         });
 
@@ -141,15 +180,16 @@ export class ConversationPersistenceService {
       }
 
       this.currentSessionId = createData.session.id;
+      this.currentSessionKey = createData.session.session_key || sessionKey;
       console.log(
-        `Created new session ${this.currentSessionId} for IP ${userIP}`
+        `Created new session ${this.currentSessionId} for ${userId ? `user ${userId}` : `anonymous key ${sessionKey}`}`
       );
       return this.currentSessionId;
     } catch (error) {
       console.error('Failed to initialize session:', error);
       // Fallback to deterministic UUID derived from local session identifier
       this.currentSessionId = await this.sessionIdToUUID(
-        `local-${userIP}-${Date.now()}`
+        `local-${sessionKey}-${Date.now()}`
       );
       return this.currentSessionId;
     }
@@ -171,8 +211,7 @@ export class ConversationPersistenceService {
       await this.initializeSession();
     }
 
-    const userIP = await this.getUserIP();
-    const sessionKey = `ip-${userIP}`;
+    const { userId, userEmail, sessionKey } = await this.resolveAuthContext();
 
     try {
       // Use secure edge function to store message
@@ -182,6 +221,8 @@ export class ConversationPersistenceService {
           body: {
             action: 'add_message',
             sessionKey,
+            userId,
+            userEmail,
             sessionId: this.currentSessionId,
             session_id: this.currentSessionId,
             message_type: sender,
@@ -193,6 +234,8 @@ export class ConversationPersistenceService {
                 ...metadata,
                 timestamp: new Date().toISOString(),
                 userAgent: navigator.userAgent,
+                userId,
+                userEmail,
               },
             },
           },
@@ -211,6 +254,8 @@ export class ConversationPersistenceService {
         body: {
           action: 'update_session',
           sessionKey,
+          userId,
+          userEmail,
           sessionId: this.currentSessionId,
           session_id: this.currentSessionId,
           messageData: {
@@ -230,7 +275,7 @@ export class ConversationPersistenceService {
       ) {
         const importanceScore = sender === 'user' ? 0.7 : 0.6;
         await enhancedMemoryService.storeMemory(
-          userIP,
+          userId || sessionKey,
           this.currentSessionId!,
           normalizedContent,
           sender === 'user' ? 'user_query' : 'assistant_response',
@@ -306,8 +351,7 @@ export class ConversationPersistenceService {
       return [];
     }
 
-    const userIP = await this.getUserIP();
-    const sessionKey = `ip-${userIP}`;
+    const { userId, userEmail, sessionKey } = await this.resolveAuthContext();
 
     try {
       // Use secure edge function to get messages
@@ -317,6 +361,8 @@ export class ConversationPersistenceService {
           body: {
             action: 'get_messages',
             sessionKey,
+            userId,
+            userEmail,
             sessionId: this.currentSessionId,
             session_id: this.currentSessionId,
             limit,
@@ -361,8 +407,7 @@ export class ConversationPersistenceService {
       return [];
     }
 
-    const userIP = await this.getUserIP();
-    const sessionKey = `ip-${userIP}`;
+    const { userId, userEmail, sessionKey } = await this.resolveAuthContext();
 
     try {
       // Use secure edge function
@@ -372,6 +417,8 @@ export class ConversationPersistenceService {
           body: {
             action: 'get_messages',
             sessionKey,
+            userId,
+            userEmail,
             sessionId: this.currentSessionId,
             session_id: this.currentSessionId,
             limit,
@@ -437,8 +484,7 @@ export class ConversationPersistenceService {
       };
     }
 
-    const userIP = await this.getUserIP();
-    const sessionKey = `ip-${userIP}`;
+    const { userId, userEmail, sessionKey } = await this.resolveAuthContext();
 
     try {
       // Get conversation summaries using secure edge function
@@ -447,6 +493,8 @@ export class ConversationPersistenceService {
           body: {
             action: 'get_summaries',
             sessionKey,
+            userId,
+            userEmail,
             sessionId: this.currentSessionId,
             session_id: this.currentSessionId,
           },
@@ -521,8 +569,7 @@ export class ConversationPersistenceService {
     confidenceScore: number = 0.5
   ): Promise<void> {
     try {
-      const userIP = await this.getUserIP();
-      const sessionKey = `ip-${userIP}`;
+      const { userId, sessionKey } = await this.resolveAuthContext();
 
       // Check if pattern exists
       const { data: existing, error: fetchError } = await supabase
@@ -558,7 +605,7 @@ export class ConversationPersistenceService {
           confidence_score: confidenceScore,
           metadata: {
             firstSeen: new Date().toISOString(),
-            userIP,
+            userId,
           },
         });
       }
@@ -570,8 +617,7 @@ export class ConversationPersistenceService {
   // Get user preferences
   public async getUserPreferences(): Promise<Record<string, any>> {
     try {
-      const userIP = await this.getUserIP();
-      const sessionKey = `ip-${userIP}`;
+      const { sessionKey } = await this.resolveAuthContext();
 
       const { data: preferences, error } = await supabase
         .from('user_preferences')
@@ -601,8 +647,7 @@ export class ConversationPersistenceService {
   // Update user preference
   public async updateUserPreference(key: string, value: any): Promise<void> {
     try {
-      const userIP = await this.getUserIP();
-      const sessionKey = `ip-${userIP}`;
+      const { sessionKey } = await this.resolveAuthContext();
 
       const { error } = await supabase.from('user_preferences').upsert(
         {
@@ -705,7 +750,7 @@ export class ConversationPersistenceService {
         supabase
           .from('interaction_patterns')
           .select('pattern_name, frequency, confidence_score')
-          .eq('session_key', `ip-${await this.getUserIP()}`)
+          .eq('session_key', (await this.resolveAuthContext()).sessionKey)
           .order('last_occurrence', { ascending: false })
           .limit(10),
 

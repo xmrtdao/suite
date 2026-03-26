@@ -17,15 +17,31 @@ serve(async (req) => {
   }
 
   try {
+    const supabaseUrl = Deno.env.get('SUPABASE_URL') ?? '';
+    const supabaseServiceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? '';
+
     const supabase = createClient(
-      Deno.env.get('SUPABASE_URL') ?? '',
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''
+      supabaseUrl,
+      supabaseServiceRoleKey
     );
+
+    const authHeader = req.headers.get('Authorization');
+    let authenticatedUser: { id: string; email?: string } | null = null;
+    if (authHeader && supabaseAnonKey) {
+      const authClient = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: authHeader } }
+      });
+      const { data: { user } } = await authClient.auth.getUser();
+      if (user) {
+        authenticatedUser = { id: user.id, email: user.email };
+      }
+    }
 
     const { 
       function_name,
       description,
-      proposed_by, // CSO, CTO, CIO, CAO, or 'eliza'
+      proposed_by, // CSO, CTO, CIO, CAO, or 'eliza' (optional for authenticated users)
       category,
       rationale,
       use_cases,
@@ -33,10 +49,12 @@ serve(async (req) => {
       auto_vote // If true, automatically trigger executive voting
     } = await req.json();
 
+    const resolvedProposedBy = proposed_by || authenticatedUser?.email || authenticatedUser?.id || null;
+
     // Validate required fields
-    if (!function_name || !description || !proposed_by || !category || !rationale || !use_cases) {
+    if (!function_name || !description || !resolvedProposedBy || !category || !rationale || !use_cases) {
       return new Response(
-        JSON.stringify({ error: 'Missing required fields', suggestion: 'Provide function_name, description, proposed_by, category, rationale, and use_cases' }),
+        JSON.stringify({ error: 'Missing required fields', suggestion: 'Provide function_name, description, category, rationale, use_cases, and either proposed_by or an authenticated user context.' }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
       );
     }
@@ -92,7 +110,7 @@ serve(async (req) => {
       .insert({
         function_name,
         description,
-        proposed_by,
+        proposed_by: resolvedProposedBy,
         category,
         rationale,
         use_cases: Array.isArray(use_cases) ? use_cases : [use_cases],
@@ -104,18 +122,18 @@ serve(async (req) => {
 
     if (insertError) throw insertError;
 
-    console.log(`📋 Proposal created: ${proposal.id} by ${proposed_by}`);
+    console.log(`📋 Proposal created: ${proposal.id} by ${resolvedProposedBy}`);
 
     // Notify all executives via activity feed
     const executives = ['CSO', 'CTO', 'CIO', 'CAO', 'COO'];
     const notifications = executives.map(exec => ({
       type: 'function_proposal',
       title: `New Edge Function Proposed: ${function_name}`,
-      description: `${proposed_by} proposes: ${description}`,
+      description: `${resolvedProposedBy} proposes: ${description}`,
       data: {
         proposal_id: proposal.id,
         function_name,
-        proposed_by,
+        proposed_by: resolvedProposedBy,
         category
       }
     }));
@@ -166,11 +184,12 @@ serve(async (req) => {
       }
     );
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Proposal error:', error);
-    await usageTracker.failure(error.message, 500);
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    await usageTracker.failure(errorMessage, 500);
     return new Response(
-      JSON.stringify({ error: error.message }),
+      JSON.stringify({ error: errorMessage }),
       { 
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         status: 500 

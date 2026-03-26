@@ -81,6 +81,28 @@ async function resolveSession(
   return data;
 }
 
+async function getAuthenticatedUser(
+  req: Request,
+  supabaseUrl: string,
+  supabaseAnonKey: string
+): Promise<{ id: string; email?: string } | null> {
+  const authHeader = req.headers.get('Authorization');
+  if (!authHeader) return null;
+
+  const authClient = createClient(supabaseUrl, supabaseAnonKey, {
+    global: {
+      headers: { Authorization: authHeader },
+    },
+  });
+
+  const {
+    data: { user },
+  } = await authClient.auth.getUser();
+
+  if (!user) return null;
+  return { id: user.id, email: user.email };
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -99,13 +121,23 @@ serve(async (req) => {
     } = requestBody;
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY')!;
 
     // Create admin client with service role
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
+    const authenticatedUser = await getAuthenticatedUser(
+      req,
+      supabaseUrl,
+      supabaseAnonKey
+    );
+    const requestedUserId =
+      typeof requestBody.userId === 'string' ? requestBody.userId : null;
+    const effectiveUserId = authenticatedUser?.id || requestedUserId;
 
     console.log('Conversation access request:', {
       action,
       sessionKey,
+      effectiveUserId,
       sessionId: rawSessionId,
       isValidUUID: rawSessionId ? isValidUUID(rawSessionId) : null,
     });
@@ -126,14 +158,21 @@ serve(async (req) => {
 
     switch (action) {
       case 'get_session': {
-        // Get or create session for this session_key
-        const { data: sessions, error } = await supabase
+        let sessionQuery = supabase
           .from('conversation_sessions')
           .select('*')
-          .eq('session_key', sessionKey)
           .eq('is_active', true)
           .order('updated_at', { ascending: false })
           .limit(1);
+
+        // Authenticated users are scoped by user_profile_id to prevent IP/session confusion.
+        if (effectiveUserId) {
+          sessionQuery = sessionQuery.eq('user_profile_id', effectiveUserId);
+        } else {
+          sessionQuery = sessionQuery.eq('session_key', sessionKey);
+        }
+
+        const { data: sessions, error } = await sessionQuery;
 
         if (error) throw error;
 
@@ -144,10 +183,22 @@ serve(async (req) => {
       }
 
       case 'create_session': {
+        const sessionPayload = {
+          ...sessionData,
+          session_key:
+            sessionData?.session_key || sessionKey || `anon-${crypto.randomUUID()}`,
+          user_profile_id: effectiveUserId || sessionData?.user_profile_id || null,
+          metadata: {
+            ...(sessionData?.metadata || {}),
+            auth_context: effectiveUserId ? 'authenticated' : 'anonymous',
+            authenticated_user_id: effectiveUserId || null,
+          },
+        };
+
         // Create new session
         const { data, error } = await supabase
           .from('conversation_sessions')
-          .insert(sessionData)
+          .insert(sessionPayload)
           .select()
           .single();
 
@@ -172,7 +223,34 @@ serve(async (req) => {
         // Verify session ownership - handle both UUID and session_key formats
         const session = await resolveSession(supabase, sessionId);
 
-        if (!session || session.session_key !== sessionKey) {
+        if (!session) {
+          return new Response(
+            JSON.stringify({ error: 'Unauthorized access to this session' }),
+            {
+              status: 403,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            }
+          );
+        }
+
+        if (effectiveUserId) {
+          const { data: scopedSession } = await supabase
+            .from('conversation_sessions')
+            .select('id')
+            .eq('id', session.id)
+            .eq('user_profile_id', effectiveUserId)
+            .maybeSingle();
+
+          if (!scopedSession) {
+            return new Response(
+              JSON.stringify({ error: 'Unauthorized access to this session' }),
+              {
+                status: 403,
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+              }
+            );
+          }
+        } else if (session.session_key !== sessionKey) {
           return new Response(
             JSON.stringify({ error: 'Unauthorized access to this session' }),
             {
@@ -213,7 +291,34 @@ serve(async (req) => {
         // Verify session ownership - handle both UUID and session_key formats
         const session = await resolveSession(supabase, sessionId);
 
-        if (!session || session.session_key !== sessionKey) {
+        if (!session) {
+          return new Response(
+            JSON.stringify({ error: 'Unauthorized access to this session' }),
+            {
+              status: 403,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            }
+          );
+        }
+
+        if (effectiveUserId) {
+          const { data: scopedSession } = await supabase
+            .from('conversation_sessions')
+            .select('id')
+            .eq('id', session.id)
+            .eq('user_profile_id', effectiveUserId)
+            .maybeSingle();
+
+          if (!scopedSession) {
+            return new Response(
+              JSON.stringify({ error: 'Unauthorized access to this session' }),
+              {
+                status: 403,
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+              }
+            );
+          }
+        } else if (session.session_key !== sessionKey) {
           return new Response(
             JSON.stringify({ error: 'Unauthorized access to this session' }),
             {
@@ -266,7 +371,34 @@ serve(async (req) => {
         // Verify session ownership - handle both UUID and session_key formats
         const session = await resolveSession(supabase, sessionId);
 
-        if (!session || session.session_key !== sessionKey) {
+        if (!session) {
+          return new Response(
+            JSON.stringify({ error: 'Unauthorized access to this session' }),
+            {
+              status: 403,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            }
+          );
+        }
+
+        if (effectiveUserId) {
+          const { data: scopedSession } = await supabase
+            .from('conversation_sessions')
+            .select('id')
+            .eq('id', session.id)
+            .eq('user_profile_id', effectiveUserId)
+            .maybeSingle();
+
+          if (!scopedSession) {
+            return new Response(
+              JSON.stringify({ error: 'Unauthorized access to this session' }),
+              {
+                status: 403,
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+              }
+            );
+          }
+        } else if (session.session_key !== sessionKey) {
           return new Response(
             JSON.stringify({ error: 'Unauthorized access to this session' }),
             {
@@ -308,7 +440,34 @@ serve(async (req) => {
         // Verify session ownership - handle both UUID and session_key formats
         const session = await resolveSession(supabase, sessionId);
 
-        if (!session || session.session_key !== sessionKey) {
+        if (!session) {
+          return new Response(
+            JSON.stringify({ error: 'Unauthorized access to this session' }),
+            {
+              status: 403,
+              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            }
+          );
+        }
+
+        if (effectiveUserId) {
+          const { data: scopedSession } = await supabase
+            .from('conversation_sessions')
+            .select('id')
+            .eq('id', session.id)
+            .eq('user_profile_id', effectiveUserId)
+            .maybeSingle();
+
+          if (!scopedSession) {
+            return new Response(
+              JSON.stringify({ error: 'Unauthorized access to this session' }),
+              {
+                status: 403,
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+              }
+            );
+          }
+        } else if (session.session_key !== sessionKey) {
           return new Response(
             JSON.stringify({ error: 'Unauthorized access to this session' }),
             {
