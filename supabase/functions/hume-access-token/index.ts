@@ -1,5 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { startUsageTrackingWithRequest } from "../_shared/edgeFunctionUsageLogger.ts";
+import { startUsageTrackingWithRequest } from "../_shared/functionUsageLogger.ts";
 
 const FUNCTION_NAME = 'hume-access-token';
 

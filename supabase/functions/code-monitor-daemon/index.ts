@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.58.0";
-import { startUsageTracking } from '../_shared/edgeFunctionUsageLogger.ts';
+import { startUsageTracking } from '../_shared/functionUsageLogger.ts';
 
 const FUNCTION_NAME = 'code-monitor-daemon';
 

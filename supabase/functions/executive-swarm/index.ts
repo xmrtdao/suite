@@ -1,4 +1,4 @@
-import { startUsageTracking } from '../_shared/edgeFunctionUsageLogger.ts';
+import { startUsageTracking } from '../_shared/functionUsageLogger.ts';
 
 const FUNCTION_NAME = 'executive-swarm';
 

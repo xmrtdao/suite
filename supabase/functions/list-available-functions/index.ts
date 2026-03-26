@@ -1,6 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { EDGE_FUNCTIONS_REGISTRY } from '../_shared/edgeFunctionRegistry.ts';
-import { startUsageTracking } from '../_shared/edgeFunctionUsageLogger.ts';
+import { startUsageTracking } from '../_shared/functionUsageLogger.ts';
 
 const FUNCTION_NAME = 'list-available-functions';
 

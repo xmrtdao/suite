@@ -4,7 +4,7 @@ import { callLovableAIGateway } from '../_shared/unifiedAIFallback.ts';
 import { generateExecutiveSystemPrompt } from '../_shared/elizaSystemPrompt.ts';
 import { buildContextualPrompt } from '../_shared/contextBuilder.ts';
 import { EdgeFunctionLogger } from "../_shared/logging.ts";
-import { startUsageTracking } from '../_shared/edgeFunctionUsageLogger.ts';
+import { startUsageTracking } from '../_shared/functionUsageLogger.ts';
 
 const logger = EdgeFunctionLogger('cso-executive');
 const FUNCTION_NAME = 'vercel-ai-chat-stream';

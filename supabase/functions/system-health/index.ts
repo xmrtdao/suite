@@ -4,7 +4,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.58.0';
 import { EdgeFunctionLogger } from "../_shared/logging.ts";
 import { formatSystemReport, SystemReport } from "../_shared/reportFormatter.ts";
 import { calculateUnifiedHealthScore, extractCronMetrics, buildHealthMetrics, ESSENTIAL_API_SERVICES } from '../_shared/healthScoring.ts';
-import { startUsageTracking } from '../_shared/edgeFunctionUsageLogger.ts';
+import { startUsageTracking } from '../_shared/functionUsageLogger.ts';
 
 const FUNCTION_NAME = 'system-health';
 const logger = EdgeFunctionLogger(FUNCTION_NAME);
