@@ -76,8 +76,17 @@ const UnifiedChatOptimized: React.FC<UnifiedChatProps> = ({
   // Initialize user ID
   useEffect(() => {
     const initUserId = async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (user?.id) {
+        userId.current = user.id;
+        return;
+      }
+
       const userCtx = await unifiedDataService.getUserContext();
-      userId.current = userCtx.ip || 'anonymous';
+      userId.current = userCtx.ip || `anonymous-${crypto.randomUUID()}`;
     };
     initUserId();
   }, []);
