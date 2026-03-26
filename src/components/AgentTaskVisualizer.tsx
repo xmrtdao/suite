@@ -71,6 +71,12 @@ interface Agent {
   current_workload: number | null;
 }
 
+const getPrimaryName = (name: string | null | undefined, fallback: string) => {
+  if (!name || typeof name !== 'string') return fallback;
+  const primary = name.split(' - ')[0]?.split(' ')[0]?.trim();
+  return primary || fallback;
+};
+
 const STAGES = [
   { key: 'PENDING', label: 'Pending', icon: Circle },
   { key: 'CLAIMED', label: 'Claimed', icon: UserCheck },
@@ -156,7 +162,7 @@ interface AgentCardProps {
 
 function AgentCard({ agent, taskCount, assignedTasks, onAgentClick, onTaskDropToAgent, isDragOverAgent, hasDraggedTask }: AgentCardProps) {
   const isActive = agent.status === 'BUSY';
-  const shortName = agent.name.split(' - ')[0].split(' ')[0];
+  const shortName = getPrimaryName(agent.name, 'Agent');
 
   // Find most urgent task
   const urgentTask = assignedTasks.reduce<Task | null>((urgent, task) => {
@@ -225,6 +231,10 @@ function TaskCard({ task, agentName, onDragStart, onDragEnd, isDragging, onTaskC
   const progressPercentage = Math.min(100, Math.max(0, task.progress_percentage || 0));
   const isUrgent = progressPercentage >= 75;
 
+  const statusLabel = typeof task.status === 'string' && task.status.length > 0
+    ? task.status.replace('_', ' ')
+    : 'UNKNOWN';
+
   const handleClick = (e: React.MouseEvent) => {
     // Only trigger click if not dragging
     if (!isDragging) {
@@ -268,12 +278,12 @@ function TaskCard({ task, agentName, onDragStart, onDragEnd, isDragging, onTaskC
         {agentName && (
           <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5 gap-1">
             <User className="w-2.5 h-2.5" />
-            {agentName.split(' - ')[0].split(' ')[0]}
+            {getPrimaryName(agentName, 'Agent')}
           </Badge>
         )}
 
         <Badge variant="secondary" className={`text-[10px] px-1.5 py-0 h-5 ${statusStyle.text}`}>
-          {task.status.replace('_', ' ')}
+          {statusLabel}
         </Badge>
 
         {task.priority >= 8 && (
@@ -1352,7 +1362,7 @@ export function AgentTaskVisualizer() {
                       <div className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${agent.status === 'BUSY' ? 'bg-green-500' : 'bg-blue-400'
                         }`} />
                       <div className="flex-1 text-left">
-                        <div className="font-medium text-sm">{agent.name.split(' - ')[0]}</div>
+                        <div className="font-medium text-sm">{getPrimaryName(agent.name, 'Agent')}</div>
                         <div className="text-xs text-muted-foreground">
                           {agent.status} • {getAgentTaskCount(agent.id)} tasks
                         </div>

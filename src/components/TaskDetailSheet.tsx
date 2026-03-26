@@ -295,10 +295,16 @@ export function TaskDetailSheet({
   if (!task) return null;
 
   const displayTask = fullTask || task;
-  const statusStyle = STATUS_STYLES[displayTask.status] || STATUS_STYLES.PENDING;
-  const StageIcon = STAGE_ICONS[displayTask.stage] || Circle;
+  const normalizedStatus = typeof displayTask.status === 'string' && displayTask.status.length > 0
+    ? displayTask.status
+    : 'UNKNOWN';
+  const normalizedStage = typeof displayTask.stage === 'string' && displayTask.stage.length > 0
+    ? displayTask.stage
+    : 'UNKNOWN';
+  const statusStyle = STATUS_STYLES[normalizedStatus] || STATUS_STYLES.PENDING;
+  const StageIcon = STAGE_ICONS[normalizedStage] || Circle;
   const timeProgress = Math.min(100, Math.max(0, displayTask.progress_percentage || 0));
-  const isCompleted = ['COMPLETED', 'DONE'].includes(displayTask.status);
+  const isCompleted = ['COMPLETED', 'DONE'].includes(normalizedStatus);
   const rawWorkProgress = checklist.length > 0 ? Math.round((completedItems.length / checklist.length) * 100) : 0;
   // Only show 100% when task is officially COMPLETED/DONE — checklist alone isn't enough
   const workProgress = isCompleted ? Math.min(100, rawWorkProgress) : Math.min(99, rawWorkProgress);
@@ -329,11 +335,11 @@ export function TaskDetailSheet({
           <SheetDescription asChild>
             <div className="flex flex-wrap gap-2 mt-2">
               <Badge className={`${statusStyle.bg} ${statusStyle.text} border-0`}>
-                {displayTask.status.replace('_', ' ')}
+                {normalizedStatus.replace('_', ' ')}
               </Badge>
               <Badge variant="outline" className="gap-1">
                 <StageIcon className="w-3 h-3" />
-                {displayTask.stage}
+                {normalizedStage}
               </Badge>
               {displayTask.priority >= 8 && (
                 <Badge variant="destructive">P{displayTask.priority}</Badge>

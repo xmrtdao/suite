@@ -191,6 +191,9 @@ export const AgentDetailSheet: React.FC<AgentDetailSheetProps> = ({
   };
 
   if (!agent) return null;
+  const agentName = (agent.name || '').trim() || 'Agent';
+  const agentStatus = (agent.status || '').trim() || 'UNKNOWN';
+  const agentRole = (agent.role || '').trim() || 'No role set';
 
   return (
     <Sheet open={isOpen} onOpenChange={onClose}>
@@ -217,16 +220,16 @@ export const AgentDetailSheet: React.FC<AgentDetailSheetProps> = ({
             <div className="p-2 rounded-lg bg-primary/10 flex-shrink-0">
               <User className="h-4 w-4 text-primary" />
             </div>
-            <SheetTitle className="text-foreground text-base flex-1 min-w-0 truncate">{agent.name}</SheetTitle>
-            <Badge className={`${STATUS_COLORS[agent.status] || STATUS_COLORS.IDLE} text-xs`}>
-              {agent.status}
+            <SheetTitle className="text-foreground text-base flex-1 min-w-0 truncate">{agentName}</SheetTitle>
+            <Badge className={`${STATUS_COLORS[agentStatus] || STATUS_COLORS.IDLE} text-xs`}>
+              {agentStatus}
             </Badge>
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/50 px-2 py-1 rounded-full">
               <Briefcase className="h-3 w-3" />
               <span className="font-medium">{agent.current_workload}/{agent.max_concurrent_tasks || 5}</span>
             </div>
           </div>
-          <SheetDescription className="sr-only">{agent.role}</SheetDescription>
+          <SheetDescription className="sr-only">{agentRole}</SheetDescription>
         </SheetHeader>
 
         <ScrollArea className={`flex-1 ${isMobile ? '-mx-4 px-4' : '-mx-6 px-6'} mt-3`}>
@@ -308,7 +311,7 @@ export const AgentDetailSheet: React.FC<AgentDetailSheetProps> = ({
                 <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${isAboutOpen ? 'rotate-180' : ''}`} />
               </CollapsibleTrigger>
               <CollapsibleContent className="pt-2">
-                <p className="text-sm text-muted-foreground leading-relaxed">{agent.role}</p>
+                <p className="text-sm text-muted-foreground leading-relaxed">{agentRole}</p>
               </CollapsibleContent>
             </Collapsible>
 
