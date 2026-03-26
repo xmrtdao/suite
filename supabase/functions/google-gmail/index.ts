@@ -588,6 +588,18 @@ async function createDraft(
 
 // ============= HANDLER =============
 
+
+function normalizeAction(action: unknown): string {
+  const normalized = String(action || '').toLowerCase().trim();
+  const aliases: Record<string, string> = {
+    list_messages: 'list_emails',
+    list: 'list_emails',
+    get_message: 'get_email'
+  };
+
+  return aliases[normalized] || normalized;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -617,7 +629,7 @@ serve(async (req) => {
       }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
 
-    const action = body.action;
+    const action = normalizeAction(body.action);
     console.log(`📧 google-gmail: action=${action}`);
 
     const tokenOrErr = await getGoogleAccessToken(userContext);
@@ -652,11 +664,11 @@ serve(async (req) => {
         break;
 
       case 'list_emails':
-        result = await listEmails(accessToken, body.query, body.max_results);
+        result = await listEmails(accessToken, body.query ?? body.q, body.max_results);
         break;
 
       case 'get_email':
-        result = await getEmail(accessToken, body.message_id);
+        result = await getEmail(accessToken, body.message_id ?? body.id);
         break;
 
       case 'create_draft':
@@ -675,9 +687,9 @@ serve(async (req) => {
       case 'modify_message':
         result = await modifyMessage(
           accessToken,
-          body.message_id,
-          body.add_labels ?? [],
-          body.remove_labels ?? []
+          body.message_id ?? body.id,
+          body.add_labels ?? body.addLabelIds ?? [],
+          body.remove_labels ?? body.removeLabelIds ?? []
         );
         break;
 
@@ -731,10 +743,10 @@ serve(async (req) => {
         break;
 
       default:
-        await usageTracker.failure(`Unknown action: ${action}`, 400);
+        await usageTracker.failure(`Unknown action: ${body.action}`, 400);
         return new Response(JSON.stringify({
           success: false,
-          error: `Unknown action: ${action}`,
+          error: `Unknown action: ${body.action}`,
           available_actions: ['send_email', 'list_emails', 'get_email', 'create_draft', 'modify_message', 'list_actions']
         }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }

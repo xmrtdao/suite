@@ -6,6 +6,31 @@ const corsHeaders = {
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+type GoogleInvokeResult<T> = {
+    success?: boolean;
+    result?: T;
+    error?: string;
+    [key: string]: unknown;
+};
+
+async function invokeGoogleGmail<T>(
+    supabase: ReturnType<typeof createClient>,
+    body: Record<string, unknown>
+): Promise<T> {
+    const { data, error } = await supabase.functions.invoke('google-gmail', { body });
+
+    if (error) {
+        throw error;
+    }
+
+    const payload = (data ?? {}) as GoogleInvokeResult<T>;
+    if (payload.success === false) {
+        throw new Error(payload.error || 'google-gmail returned success=false');
+    }
+
+    return (payload.result ?? (payload as unknown)) as T;
+}
+
 /**
  * sync-gmail-v2 — Edge function to sync email replies back to the Suite inbox.
  */
@@ -28,36 +53,28 @@ serve(async (req) => {
         console.log('[sync-gmail-v2] 🔄 Starting Gmail sync...');
 
         // Step 1: List unread messages
-        const { data: listData, error: listError } = await supabase.functions.invoke('google-gmail', {
-            body: { 
-                action: 'list_messages',
-                q: 'is:unread' 
-            }
+        const listData = await invokeGoogleGmail<{ messages?: Array<{ id: string }> }>(supabase, {
+            action: 'list_emails',
+            query: 'is:unread'
         });
-
-        if (listError) throw listError;
 
         const messages = listData?.messages || [];
         console.log(`[sync-gmail-v2] Found ${messages.length} unread messages.`);
 
-        const processed = [];
+        const processed: string[] = [];
 
         for (const msg of messages) {
             try {
                 // Step 2: Get message details
-                const { data: detailData, error: detailError } = await supabase.functions.invoke('google-gmail', {
-                    body: { 
-                        action: 'get_message',
-                        id: msg.id
-                    }
+                const detailData = await invokeGoogleGmail<any>(supabase, {
+                    action: 'get_email',
+                    message_id: msg.id
                 });
-
-                if (detailError) throw detailError;
 
                 const headers = detailData.payload?.headers || [];
                 const fromHeader = headers.find((h: any) => h.name.toLowerCase() === 'from')?.value || '';
                 const subjectHeader = headers.find((h: any) => h.name.toLowerCase() === 'subject')?.value || '';
-                
+
                 const emailMatch = fromHeader.match(/<(.+)>|(\S+@\S+)/);
                 const senderEmail = emailMatch ? (emailMatch[1] || emailMatch[2]) : fromHeader;
 
@@ -65,8 +82,6 @@ serve(async (req) => {
 
                 console.log(`[sync-gmail-v2] Processing message from: ${senderEmail}`);
 
-                // Simple heuristic: attribute to executive_user_id for now
-                // but store sender email in metadata.
                 const { error: insertError } = await supabase
                     .from('inbox_messages')
                     .insert({
@@ -86,17 +101,15 @@ serve(async (req) => {
                 if (insertError) throw insertError;
 
                 // Step 5: Mark as read
-                await supabase.functions.invoke('google-gmail', {
-                    body: {
-                        action: 'modify_message',
-                        id: msg.id,
-                        removeLabelIds: ['UNREAD']
-                    }
+                await invokeGoogleGmail(supabase, {
+                    action: 'modify_message',
+                    message_id: msg.id,
+                    remove_labels: ['UNREAD']
                 });
 
                 processed.push(msg.id);
             } catch (msgErr: any) {
-                console.error(`[sync-gmail-v2] ❌ Error processing message ${msg.id}:`, msgErr.message);
+                console.error(`[sync-gmail-v2] ❌ Error processing message ${msg.id}:`, msgErr.message || msgErr);
             }
         }
 
