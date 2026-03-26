@@ -2,8 +2,6 @@ name: Deploy Supabase
 
 on:
   push:
-    branches:
-      - main
     paths:
       - 'supabase/**'
       - '.github/workflows/deploy-edge-functions.yml'
