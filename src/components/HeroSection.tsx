@@ -6,7 +6,9 @@ import {
   Bot,
   Activity,
   ChevronLeft,
+  ChevronDown,
   ChevronRight,
+  ChevronUp,
   Workflow,
   BrainCircuit,
   Network,
@@ -58,6 +60,7 @@ export const HeroSection = ({ stats }: HeroSectionProps) => {
   const { t } = useLanguage();
   const [currentBanner, setCurrentBanner] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
+  const [isUnifiedDataMinimized, setIsUnifiedDataMinimized] = useState(true);
   const [ecosystemEndpoints, setEcosystemEndpoints] = useState<EcosystemEndpoint[]>([
     {
       id: 'system-status',
@@ -382,33 +385,60 @@ export const HeroSection = ({ stats }: HeroSectionProps) => {
                 Core hero metrics and ecosystem endpoint telemetry.
               </p>
             </div>
+            <button
+              type="button"
+              onClick={() => setIsUnifiedDataMinimized((prev) => !prev)}
+              className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-background/70 px-2 py-1 text-[10px] font-medium text-foreground transition-colors hover:bg-background"
+              aria-expanded={!isUnifiedDataMinimized}
+              aria-label={isUnifiedDataMinimized ? 'Expand unified data module' : 'Minimize unified data module'}
+            >
+              {isUnifiedDataMinimized ? (
+                <>
+                  <ChevronDown className="h-3 w-3" />
+                  Expand
+                </>
+              ) : (
+                <>
+                  <ChevronUp className="h-3 w-3" />
+                  Minimize
+                </>
+              )}
+            </button>
           </div>
 
-          <div className="grid grid-cols-2 gap-1 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
-            {heroDataPoints.map((point) => (
-              <DataPointCard key={point.id} point={point} />
-            ))}
-          </div>
-
-          <div className="mt-1 rounded-md border border-border/50 bg-background/45 px-1.5 py-1">
-            <div className="mb-1 flex items-center justify-between">
-              <p className="text-[9px] font-medium text-foreground">Task pipeline</p>
-              <p className="text-[8px] text-muted-foreground">Live miniature view</p>
+          {isUnifiedDataMinimized ? (
+            <div className="rounded-md border border-dashed border-border/60 bg-background/40 px-2 py-1.5 text-[10px] text-muted-foreground">
+              Module minimized to preserve dashboard space. Expand to view live telemetry and pipeline metrics.
             </div>
-            <div className="grid grid-cols-4 gap-1">
-              {pipelineStages.map((stage, index) => (
-                <div key={stage.id} className="relative rounded-sm border border-border/50 bg-background/70 px-1 py-0.5">
-                  <div className="truncate text-[8px] text-muted-foreground">{stage.label}</div>
-                  <div className="text-[10px] font-semibold text-foreground">
-                    <AnimatedCounter end={stage.value} />
-                  </div>
-                  {index < pipelineStages.length - 1 && (
-                    <div className="pointer-events-none absolute -right-1.5 top-1/2 h-px w-2 -translate-y-1/2 bg-primary/50" />
-                  )}
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-1 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+                {heroDataPoints.map((point) => (
+                  <DataPointCard key={point.id} point={point} />
+                ))}
+              </div>
+
+              <div className="mt-1 rounded-md border border-border/50 bg-background/45 px-1.5 py-1">
+                <div className="mb-1 flex items-center justify-between">
+                  <p className="text-[9px] font-medium text-foreground">Task pipeline</p>
+                  <p className="text-[8px] text-muted-foreground">Live miniature view</p>
                 </div>
-              ))}
-            </div>
-          </div>
+                <div className="grid grid-cols-4 gap-1">
+                  {pipelineStages.map((stage, index) => (
+                    <div key={stage.id} className="relative rounded-sm border border-border/50 bg-background/70 px-1 py-0.5">
+                      <div className="truncate text-[8px] text-muted-foreground">{stage.label}</div>
+                      <div className="text-[10px] font-semibold text-foreground">
+                        <AnimatedCounter end={stage.value} />
+                      </div>
+                      {index < pipelineStages.length - 1 && (
+                        <div className="pointer-events-none absolute -right-1.5 top-1/2 h-px w-2 -translate-y-1/2 bg-primary/50" />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </section>
