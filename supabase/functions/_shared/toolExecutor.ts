@@ -106,6 +106,28 @@ export async function executeToolCall(
     };
   }
 
+  const buildGoogleAuthPayload = (baseArgs: any, sourceTool: string) => {
+    const payload = { ...(baseArgs || {}) };
+
+    const inferredUserEmail =
+      payload.user_email ||
+      session_credentials?.user_email ||
+      session_credentials?.email ||
+      session_credentials?.user?.email;
+
+    const inferredUserId =
+      payload.user_id ||
+      session_credentials?.user_id ||
+      session_credentials?.sub ||
+      session_credentials?.user?.id;
+
+    if (inferredUserEmail && !payload.user_email) payload.user_email = inferredUserEmail;
+    if (inferredUserId && !payload.user_id) payload.user_id = inferredUserId;
+    if (!payload.requested_from) payload.requested_from = sourceTool;
+
+    return payload;
+  };
+
   // Validate execute_python specific requirements with syntax pre-checks
   if (name === 'execute_python') {
     if (!parsedArgs.code) {
@@ -2329,32 +2351,36 @@ export async function getVscoToolHandler(name: string, parsedArgs: any, supabase
     case 'google_gmail':
     case 'google_cloud_auth':
       console.log(`☁️ [${executiveName}] Google Cloud Auth: ${parsedArgs.action || 'status'}`);
+      const cloudAuthPayload = buildGoogleAuthPayload(parsedArgs, name);
       return supabase.functions.invoke('google-cloud-auth', {
-        body: parsedArgs
+        body: cloudAuthPayload
       }).then((res: any) => res.error
         ? { success: false, error: res.error.message, credential_required: true }
         : res.data);
 
     case 'google_drive':
       console.log(`📁 [${executiveName}] Google Drive via google-cloud-auth: ${parsedArgs.action}`);
+      const drivePayload = buildGoogleAuthPayload(parsedArgs, name);
       return supabase.functions.invoke('google-cloud-auth', {
-        body: parsedArgs
+        body: drivePayload
       }).then((res: any) => res.error
         ? { success: false, error: res.error.message, credential_required: true }
         : res.data);
 
     case 'google_sheets':
       console.log(`📊 [${executiveName}] Google Sheets via google-cloud-auth: ${parsedArgs.action}`);
+      const sheetsPayload = buildGoogleAuthPayload(parsedArgs, name);
       return supabase.functions.invoke('google-cloud-auth', {
-        body: parsedArgs
+        body: sheetsPayload
       }).then((res: any) => res.error
         ? { success: false, error: res.error.message, credential_required: true }
         : res.data);
 
     case 'google_calendar':
       console.log(`📅 [${executiveName}] Google Calendar via google-cloud-auth: ${parsedArgs.action}`);
+      const calendarPayload = buildGoogleAuthPayload(parsedArgs, name);
       return supabase.functions.invoke('google-cloud-auth', {
-        body: parsedArgs
+        body: calendarPayload
       }).then((res: any) => res.error
         ? { success: false, error: res.error.message, credential_required: true }
         : res.data);
