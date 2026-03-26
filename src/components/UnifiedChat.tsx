@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Card } from './ui/card';
 import { Button } from './ui/button';
-import { Input } from './ui/input';
+import { Textarea } from './ui/textarea';
 import { Badge } from './ui/badge';
 import { ScrollArea } from './ui/scroll-area';
 import { AdaptiveAvatar } from './AdaptiveAvatar';
@@ -198,6 +198,44 @@ const ProcessingStickyNotes = React.memo(({ notes }: { notes: ProcessingStickyNo
 
 const normalizeStickyText = (value?: string | null) =>
   value?.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+const CODE_KEYWORD_PATTERN = /\b(function|const|let|var|class|import|export|return|if|else|for|while|try|catch|def|async|await|SELECT|INSERT|UPDATE|DELETE|FROM|WHERE)\b/;
+const CODE_SYMBOL_PATTERN = /[{}[\]();=<>]|=>|::|#include|<\/?[a-z][\s\S]*?>/i;
+
+const isAlreadySingleFencedCodeBlock = (text: string) =>
+  /^```[\w-]*\n[\s\S]*\n```$/.test(text.trim());
+
+const looksLikeCodeSnippet = (text: string) => {
+  const lines = text.split('\n').map((line) => line.trimEnd());
+  if (lines.length < 2) return false;
+
+  const nonEmptyLines = lines.filter((line) => line.trim().length > 0);
+  if (nonEmptyLines.length < 2) return false;
+
+  const codeLikeLineCount = nonEmptyLines.filter((line) => {
+    const trimmed = line.trim();
+    return (
+      CODE_KEYWORD_PATTERN.test(trimmed) ||
+      CODE_SYMBOL_PATTERN.test(trimmed) ||
+      /^\s{2,}\S/.test(line) ||
+      /^[@$]/.test(trimmed) ||
+      /^[\w.-]+\(.*\)\s*[{:]?$/.test(trimmed)
+    );
+  }).length;
+
+  const likelyNaturalLanguageLines = nonEmptyLines.filter((line) =>
+    /[.!?]$/.test(line.trim()) && !CODE_SYMBOL_PATTERN.test(line)
+  ).length;
+
+  return codeLikeLineCount >= 2 && likelyNaturalLanguageLines < nonEmptyLines.length / 2;
+};
+
+const formatUserMessageForDisplayAndParsing = (text: string) => {
+  const normalized = text.trim();
+  if (!normalized || isAlreadySingleFencedCodeBlock(normalized)) return normalized;
+  if (!looksLikeCodeSnippet(normalized)) return normalized;
+  return `\`\`\`\n${normalized}\n\`\`\``;
+};
 
 const getToolStickyText = (functionName: string) => {
   const readable = normalizeStickyText(functionName) || 'this tool';
@@ -1615,8 +1653,10 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
 
   // Text message handler
   const handleSendMessage = async (quickMessage?: string) => {
-    const messageText = quickMessage || textInput.trim();
-    if (!messageText || isProcessing) return;
+    const rawInput = quickMessage ?? textInput;
+    const trimmedInput = rawInput.trim();
+    if (!trimmedInput || isProcessing) return;
+    const messageText = formatUserMessageForDisplayAndParsing(trimmedInput);
 
 
     // Mark that user has engaged with the chat
@@ -1625,10 +1665,10 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
     }
 
     // Check if user pasted a Gemini API key (starts with "AIza")
-    if (messageText.startsWith('AIza') && messageText.length > 30) {
+    if (trimmedInput.startsWith('AIza') && trimmedInput.length > 30) {
       setIsProcessing(true);
       try {
-        const apiKey = messageText;
+        const apiKey = trimmedInput;
         const result = await apiKeyManager.setUserApiKey(apiKey);
 
         if (result.success) {
@@ -2521,7 +2561,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
               {isRecording ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
             </Button>
 
-            <Input
+            <Textarea
               value={textInput}
               onChange={(e) => {
                 setTextInput(e.target.value);
@@ -2531,7 +2571,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
                   setIsSpeaking(false);
                 }
               }}
-              onKeyPress={handleKeyPress}
+              onKeyDown={handleKeyPress}
               placeholder={
                 needsAPIKey
                   ? "Configure API key to continue..."
@@ -2539,7 +2579,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
                     ? `${attachments.length} file${attachments.length > 1 ? 's' : ''} attached`
                     : "Ask anything..."
               }
-              className="flex-1 rounded-lg border-border/60 bg-background min-h-[44px] text-sm px-4"
+              className="flex-1 rounded-lg border-border/60 bg-background min-h-[44px] max-h-48 text-sm px-4 py-3 resize-y"
               disabled={isProcessing}
             />
             <Button
