@@ -95,30 +95,36 @@ const steps = [
 const heroStickyNotes = [
   {
     id: 'left-strategy',
-    title: 'Eliza note',
-    text: 'Syncing strategy with the council',
+    title: 'Planning',
+    text: 'Researching the competition',
     position: 'left',
     rotation: '-9deg',
+    mobileRotation: '-7deg',
     accentClassName: 'from-yellow-200 via-amber-100 to-yellow-50',
     style: { top: '6%', left: '4%' },
+    mobileStyle: { top: '2%', left: '4%' },
   },
   {
     id: 'right-ops',
-    title: 'Processing',
-    text: 'Routing ops tasks + live updates',
+    title: 'Operations',
+    text: 'Reviewing TPS reports',
     position: 'right',
     rotation: '8deg',
+    mobileRotation: '6deg',
     accentClassName: 'from-yellow-100 via-amber-50 to-yellow-50',
     style: { top: '18%', right: '2%' },
+    mobileStyle: { top: '5%', right: '4%' },
   },
   {
     id: 'right-draft',
-    title: 'Drafting',
-    text: 'Preparing answers before you log in',
+    title: 'Admin',
+    text: 'Checking emails',
     position: 'right',
     rotation: '-4deg',
+    mobileRotation: '-3deg',
     accentClassName: 'from-amber-200 via-yellow-100 to-yellow-50',
     style: { top: '54%', right: '8%' },
+    mobileStyle: { top: '42%', left: '50%', transform: 'translateX(-50%)' },
   },
 ] as const;
 
@@ -194,7 +200,7 @@ export default function Landing() {
                   </div>
                   <div className="mt-4 flex items-center gap-2 text-[11px] text-black/55">
                     <PencilLine className="h-3.5 w-3.5" />
-                    <span className="sticky-note-handwriting text-sm tracking-[0.02em] text-black/70">handwritten update</span>
+                    <span className="sticky-note-handwriting text-sm tracking-[0.02em] text-black/70">daily deliverable</span>
                   </div>
                 </div>
               </div>
@@ -202,38 +208,39 @@ export default function Landing() {
           ))}
         </div>
 
-        <div className="mx-auto mb-10 grid max-w-md grid-cols-2 gap-4 px-1 sm:max-w-xl xl:hidden" aria-hidden="true">
+        <div className="pointer-events-none absolute inset-x-0 top-24 mx-auto h-[250px] max-w-xl xl:hidden" aria-hidden="true">
           {heroStickyNotes.map((note, index) => (
             <div
               key={`mobile-${note.id}`}
-              className={`sticky-note-hero relative w-full ${index === heroStickyNotes.length - 1 ? 'col-span-2 mx-auto max-w-[210px]' : ''}`}
+              className="sticky-note-hero absolute w-[126px] sm:w-[140px]"
               style={{
-                ['--sticky-rotate' as string]: note.rotation,
+                ...note.mobileStyle,
+                ['--sticky-rotate' as string]: note.mobileRotation,
                 ['--sticky-duration' as string]: `${3.1 + index * 0.35}s`,
                 ['--sticky-delay' as string]: `${index * 220}ms`,
               }}
             >
               <div className="sticky-note-hero__shadow" />
-              <div className={`sticky-note-hero__paper bg-gradient-to-br ${note.accentClassName} !min-h-[180px] !p-4`}>
+              <div className={`sticky-note-hero__paper bg-gradient-to-br ${note.accentClassName} !min-h-[124px] !p-3 sm:!min-h-[134px] sm:!p-3.5`}>
                 <div className="sticky-note-hero__tape" />
                 <div className="sticky-note-hero__pin" />
                 <div className="sticky-note-hero__fold" />
-                <div className="mt-7 text-left">
-                  <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-amber-950/55">
-                    <Sparkles className="h-3.5 w-3.5 text-amber-900/55" />
+                <div className="mt-5 text-left sm:mt-6">
+                  <div className="flex items-center gap-1.5 text-[8px] font-semibold uppercase tracking-[0.2em] text-amber-950/55 sm:text-[9px]">
+                    <Sparkles className="h-3 w-3 text-amber-900/55 sm:h-3.5 sm:w-3.5" />
                     {note.title}
                   </div>
-                  <p className="sticky-note-handwriting mt-3 text-[21px] leading-[1.06] text-black/88">
+                  <p className="sticky-note-handwriting mt-2 text-[15px] leading-[1.08] text-black/88 sm:text-[17px]">
                     {note.text}
                   </p>
-                  <div className="mt-3.5 space-y-2">
+                  <div className="mt-2.5 space-y-1.5 sm:mt-3">
                     <div className="h-px w-[84%] bg-black/10" />
                     <div className="h-px w-[68%] bg-black/10" />
                     <div className="h-px w-[74%] bg-black/10" />
                   </div>
-                  <div className="mt-3.5 flex items-center gap-2 text-[11px] text-black/55">
-                    <PencilLine className="h-3.5 w-3.5" />
-                    <span className="sticky-note-handwriting text-xs tracking-[0.02em] text-black/70">handwritten update</span>
+                  <div className="mt-2.5 flex items-center gap-1.5 text-[10px] text-black/55 sm:mt-3">
+                    <PencilLine className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
+                    <span className="sticky-note-handwriting text-[10px] tracking-[0.02em] text-black/70 sm:text-xs">daily deliverable</span>
                   </div>
                 </div>
               </div>
@@ -241,7 +248,7 @@ export default function Landing() {
           ))}
         </div>
 
-        <div className="container mx-auto text-center max-w-5xl">
+        <div className="container mx-auto max-w-5xl pt-52 text-center sm:pt-44 xl:pt-0">
           <h1 className="text-4xl md:text-6xl lg:text-7xl font-bold mb-6 leading-tight">
             {t('landing.hero.title.part1')}{' '}
             <span className="bg-gradient-to-r from-primary via-primary/80 to-primary bg-clip-text text-transparent">
