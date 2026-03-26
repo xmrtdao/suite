@@ -33,7 +33,7 @@ export const GitHubOAuthIntegration: React.FC<GitHubOAuthIntegrationProps> = ({
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'github',
         options: {
-          redirectTo: window.location.origin + '/earn',
+          redirectTo: 'https://vawouugtzwmejxqkeqqj.supabase.co/auth/v1/callback',
           scopes: 'repo read:user user:email',
         },
       });
