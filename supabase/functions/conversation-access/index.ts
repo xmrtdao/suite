@@ -1,13 +1,6 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.58.0';
-import { startUsageTracking } from '../_shared/functionUsageLogger.ts';
-import {
-  EdgeFunctionLogger,
-  createRequestContext,
-} from '../_shared/logging.ts';
 
-const FUNCTION_NAME = 'conversation-access';
-const logger = EdgeFunctionLogger(FUNCTION_NAME);
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers':
@@ -89,10 +82,6 @@ async function resolveSession(
 }
 
 serve(async (req) => {
-  const usageTracker = startUsageTracking(FUNCTION_NAME);
-  const startedAt = Date.now();
-  const requestContext = createRequestContext(req);
-
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
@@ -108,14 +97,6 @@ serve(async (req) => {
       offset,
       sessionData,
     } = requestBody;
-    requestContext.action = action;
-    await logger.requestStart('Conversation access request received', {
-      ...requestContext,
-      operation: action,
-      has_session_key: Boolean(sessionKey),
-      session_id_present: Boolean(rawSessionId),
-    });
-
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
@@ -131,20 +112,6 @@ serve(async (req) => {
 
     // Validate session ownership based on session_key
     if (!sessionKey) {
-      await usageTracker.failure(
-        'Session key required for authentication',
-        401
-      );
-      await logger.requestComplete(
-        'Conversation access request rejected',
-        {
-          ...requestContext,
-          operation: action,
-          duration_ms: Date.now() - startedAt,
-          status: 401,
-        },
-        { reason: 'missing_session_key' }
-      );
       return new Response(
         JSON.stringify({ error: 'Session key required for authentication' }),
         {
@@ -169,17 +136,6 @@ serve(async (req) => {
           .limit(1);
 
         if (error) throw error;
-        await usageTracker.success({ result_summary: 'get_session completed' });
-        await logger.requestComplete(
-          'Conversation session retrieved',
-          {
-            ...requestContext,
-            operation: action,
-            duration_ms: Date.now() - startedAt,
-            status: 200,
-          },
-          { found: Boolean(sessions?.[0]) }
-        );
 
         return new Response(
           JSON.stringify({ success: true, session: sessions?.[0] || null }),
@@ -196,19 +152,6 @@ serve(async (req) => {
           .single();
 
         if (error) throw error;
-        await usageTracker.success({
-          result_summary: 'create_session completed',
-        });
-        await logger.requestComplete(
-          'Conversation session created',
-          {
-            ...requestContext,
-            operation: action,
-            duration_ms: Date.now() - startedAt,
-            status: 200,
-          },
-          { session_id: data?.id }
-        );
 
         return new Response(JSON.stringify({ success: true, session: data }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -217,7 +160,6 @@ serve(async (req) => {
 
       case 'get_messages': {
         if (!sessionId) {
-          await usageTracker.failure('Session ID required', 400);
           return new Response(
             JSON.stringify({ error: 'Session ID required' }),
             {
@@ -231,10 +173,6 @@ serve(async (req) => {
         const session = await resolveSession(supabase, sessionId);
 
         if (!session || session.session_key !== sessionKey) {
-          await usageTracker.failure(
-            'Unauthorized access to this session',
-            403
-          );
           return new Response(
             JSON.stringify({ error: 'Unauthorized access to this session' }),
             {
@@ -254,19 +192,6 @@ serve(async (req) => {
           .range(offset || 0, (offset || 0) + (limit || 49));
 
         if (error) throw error;
-        await usageTracker.success({
-          result_summary: 'get_messages completed',
-        });
-        await logger.requestComplete(
-          'Conversation messages retrieved',
-          {
-            ...requestContext,
-            operation: action,
-            duration_ms: Date.now() - startedAt,
-            status: 200,
-          },
-          { message_count: messages?.length || 0 }
-        );
 
         return new Response(
           JSON.stringify({ success: true, messages: messages || [] }),
@@ -276,7 +201,6 @@ serve(async (req) => {
 
       case 'get_summaries': {
         if (!sessionId) {
-          await usageTracker.failure('Session ID required', 400);
           return new Response(
             JSON.stringify({ error: 'Session ID required' }),
             {
@@ -290,10 +214,6 @@ serve(async (req) => {
         const session = await resolveSession(supabase, sessionId);
 
         if (!session || session.session_key !== sessionKey) {
-          await usageTracker.failure(
-            'Unauthorized access to this session',
-            403
-          );
           return new Response(
             JSON.stringify({ error: 'Unauthorized access to this session' }),
             {
@@ -312,19 +232,6 @@ serve(async (req) => {
           .order('created_at', { ascending: true });
 
         if (error) throw error;
-        await usageTracker.success({
-          result_summary: 'get_summaries completed',
-        });
-        await logger.requestComplete(
-          'Conversation summaries retrieved',
-          {
-            ...requestContext,
-            operation: action,
-            duration_ms: Date.now() - startedAt,
-            status: 200,
-          },
-          { summary_count: summaries?.length || 0 }
-        );
 
         return new Response(
           JSON.stringify({ success: true, summaries: summaries || [] }),
@@ -339,10 +246,6 @@ serve(async (req) => {
           messageData.content.trim().length > 0;
 
         if (!sessionId || !messageData || !hasMessageType || !hasContent) {
-          await usageTracker.failure(
-            'Session ID, message_type, and non-empty content are required',
-            400
-          );
           return new Response(
             JSON.stringify({
               error:
@@ -364,10 +267,6 @@ serve(async (req) => {
         const session = await resolveSession(supabase, sessionId);
 
         if (!session || session.session_key !== sessionKey) {
-          await usageTracker.failure(
-            'Unauthorized access to this session',
-            403
-          );
           return new Response(
             JSON.stringify({ error: 'Unauthorized access to this session' }),
             {
@@ -389,17 +288,6 @@ serve(async (req) => {
           .single();
 
         if (error) throw error;
-        await usageTracker.success({ result_summary: 'add_message completed' });
-        await logger.requestComplete(
-          'Conversation message stored',
-          {
-            ...requestContext,
-            operation: action,
-            duration_ms: Date.now() - startedAt,
-            status: 200,
-          },
-          { message_id: data?.id }
-        );
 
         return new Response(JSON.stringify({ success: true, message: data }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -408,7 +296,6 @@ serve(async (req) => {
 
       case 'update_session': {
         if (!sessionId) {
-          await usageTracker.failure('Session ID required', 400);
           return new Response(
             JSON.stringify({ error: 'Session ID required' }),
             {
@@ -422,10 +309,6 @@ serve(async (req) => {
         const session = await resolveSession(supabase, sessionId);
 
         if (!session || session.session_key !== sessionKey) {
-          await usageTracker.failure(
-            'Unauthorized access to this session',
-            403
-          );
           return new Response(
             JSON.stringify({ error: 'Unauthorized access to this session' }),
             {
@@ -445,19 +328,6 @@ serve(async (req) => {
           .single();
 
         if (error) throw error;
-        await usageTracker.success({
-          result_summary: 'update_session completed',
-        });
-        await logger.requestComplete(
-          'Conversation session updated',
-          {
-            ...requestContext,
-            operation: action,
-            duration_ms: Date.now() - startedAt,
-            status: 200,
-          },
-          { session_id: data?.id }
-        );
 
         return new Response(JSON.stringify({ success: true, session: data }), {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -465,7 +335,6 @@ serve(async (req) => {
       }
 
       default:
-        await usageTracker.failure('Invalid action', 400);
         return new Response(JSON.stringify({ error: 'Invalid action' }), {
           status: 400,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -473,20 +342,6 @@ serve(async (req) => {
     }
   } catch (error) {
     console.error('Conversation access error:', error);
-    await usageTracker.failure(
-      error instanceof Error ? error.message : 'Unknown error',
-      500
-    );
-    await logger.requestComplete(
-      'Conversation access request failed',
-      {
-        ...requestContext,
-        operation: requestContext.action as string | undefined,
-        duration_ms: Date.now() - startedAt,
-        status: 500,
-      },
-      { error: error instanceof Error ? error.message : 'Unknown error' }
-    );
     return new Response(
       JSON.stringify({
         error: error instanceof Error ? error.message : 'Unknown error',
