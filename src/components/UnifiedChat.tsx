@@ -926,7 +926,29 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
             sender: 'assistant',
             timestamp: new Date(msg.timestamp)
           };
-          setMessages(prev => [...prev, newMessage]);
+          setMessages(prev => {
+            // Avoid duplicate intro/greeting rendering:
+            // 1) Ignore if realtime message ID already exists.
+            if (prev.some((existing) => String(existing.id) === String(newMessage.id))) {
+              return prev;
+            }
+
+            // 2) If we already rendered an optimistic quick/fresh greeting with the same
+            // content, replace it with the persisted DB-backed message instead of appending.
+            const optimisticGreetingIndex = prev.findIndex((existing) =>
+              existing.sender === 'assistant' &&
+              (existing.id === 'quick-greeting' || existing.id === 'fresh-greeting') &&
+              existing.content === newMessage.content
+            );
+
+            if (optimisticGreetingIndex >= 0) {
+              const next = [...prev];
+              next[optimisticGreetingIndex] = newMessage;
+              return next;
+            }
+
+            return [...prev, newMessage];
+          });
         }
       },
       { event: 'INSERT', schema: 'public' }
