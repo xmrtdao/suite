@@ -31,6 +31,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        # Required before invoking local composite actions (e.g. ./.github/actions/*)
+        # so the runner has access to repository files.
 
       - name: Set up project
         uses: ./.github/actions/setup-node-install
