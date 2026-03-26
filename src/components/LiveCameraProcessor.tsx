@@ -197,7 +197,7 @@ export const LiveCameraProcessor: React.FC<LiveCameraProcessorProps> = ({
         ) : (
           <>
             <Camera className="w-4 h-4 mr-2" />
-            Start Camera
+            upgrade for multimodal features
           </>
         )}
       </Button>
