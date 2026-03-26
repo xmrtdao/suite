@@ -16,16 +16,16 @@ interface SEOHeadProps {
 const BASE_URL = 'https://suite-beta.vercel.app';
 
 export const SEOHead = ({ 
-  title = "Replace Your C-Suite, Not Your Workers | Suite",
-  description = "5 AI executives save companies $12.4M in executive costs - redistributed as 41% raises to every employee. Ethical AI that empowers workers, not replaces them.",
+  title = "Scale Your Operations With Suite AI | Suite",
+  description = "Suite combines persistent memory, AI executives, and deep Google, GitHub, and Supabase integrations to plan, execute, and publish work across your stack.",
   image = "/suite-social-card.svg",
-  url = "/licensing",
+  url = "/",
   type = "website",
-  keywords = "AI executives, executive replacement, ethical AI, employee raises, salary redistribution, C-suite automation",
-  twitterLabel1 = "💰 Average Savings",
-  twitterData1 = "$12.4M/year",
-  twitterLabel2 = "📈 Employee Raises",
-  twitterData2 = "41% per worker"
+  keywords = "AI operations platform, AI executives, workflow automation, persistent memory, Google integration, GitHub integration, Supabase integration",
+  twitterLabel1 = "⚙️ Workflow Coverage",
+  twitterData1 = "Plan → Execute → Publish",
+  twitterLabel2 = "🔗 Native Integrations",
+  twitterData2 = "Google, GitHub, Supabase"
 }: SEOHeadProps) => {
   const fullUrl = `${BASE_URL}${url}`;
   const fullImage = `${BASE_URL}${image}`;
