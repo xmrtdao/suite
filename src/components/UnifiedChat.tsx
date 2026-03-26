@@ -611,6 +611,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const liveProcessorRef = useRef<any>(null);
+  const hasGeneratedGreetingRef = useRef(false);
 
   const clearPendingNoteTimeouts = useCallback(() => {
     pendingNoteTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
@@ -1044,6 +1045,9 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
 
 
   const generateQuickGreeting = () => {
+    if (hasGeneratedGreetingRef.current || messages.length > 0) return;
+    hasGeneratedGreetingRef.current = true;
+
     // Show immediate greeting without waiting for AI
     const cachedSummary = quickGreetingService.getCachedConversationSummary();
 
@@ -1141,6 +1145,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
 
       // Reset local state
       setMessages([]);
+      hasGeneratedGreetingRef.current = false;
       setConversationSummaries([]);
       setHasMoreMessages(false);
       setTotalMessageCount(0);
