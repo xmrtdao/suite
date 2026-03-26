@@ -6,6 +6,7 @@ Deno.test("RBAC Policy - User Tier", () => {
     // User should access basic tools
     assertEquals(checkToolAccess('browse_web', MembershipTier.USER).allowed, true);
     assertEquals(checkToolAccess('analyze_attachment', MembershipTier.USER).allowed, true);
+    assertEquals(checkToolAccess('google_cloud_auth', MembershipTier.USER).allowed, true);
 
     // User should NOT access restricted tools
     assertEquals(checkToolAccess('delete_task', MembershipTier.USER).allowed, false);
