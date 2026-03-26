@@ -102,7 +102,7 @@ const heroStickyNotes = [
     mobileRotation: '-7deg',
     accentClassName: 'from-yellow-200 via-amber-100 to-yellow-50',
     style: { top: '6%', left: '4%' },
-    mobileStyle: { top: '8%', left: '-2%' },
+    mobileStyle: { top: '0%', left: '-2%' },
   },
   {
     id: 'right-ops',
@@ -113,7 +113,7 @@ const heroStickyNotes = [
     mobileRotation: '6deg',
     accentClassName: 'from-yellow-100 via-amber-50 to-yellow-50',
     style: { top: '18%', right: '2%' },
-    mobileStyle: { top: '6%', right: '-4%' },
+    mobileStyle: { top: '4%', right: '-4%' },
   },
   {
     id: 'right-draft',
@@ -124,7 +124,7 @@ const heroStickyNotes = [
     mobileRotation: '-3deg',
     accentClassName: 'from-amber-200 via-yellow-100 to-yellow-50',
     style: { top: '54%', right: '8%' },
-    mobileStyle: { bottom: '-10%', left: '50%', transform: 'translateX(-50%)' },
+    mobileStyle: { top: '36%', left: '50%', transform: 'translateX(-50%)' },
   },
 ] as const;
 
@@ -225,7 +225,7 @@ export default function Landing() {
           </p>
 
           <div className="relative mb-16 xl:hidden">
-            <div className="pointer-events-none absolute inset-0 mx-auto max-w-sm" aria-hidden="true">
+            <div className="pointer-events-none absolute inset-x-0 top-0 mx-auto h-52 max-w-sm" aria-hidden="true">
               {heroStickyNotes.map((note, index) => (
                 <div
                   key={`mobile-${note.id}`}
@@ -261,7 +261,7 @@ export default function Landing() {
               ))}
             </div>
 
-            <div className="mx-auto max-w-sm px-8 py-12">
+            <div className="mx-auto max-w-sm px-8 pb-12 pt-44">
               <div className="flex flex-col items-center justify-center gap-4 sm:flex-row">
                 <Button
                   size="lg"
