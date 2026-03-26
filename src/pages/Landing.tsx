@@ -124,7 +124,7 @@ const heroStickyNotes = [
     mobileRotation: '-3deg',
     accentClassName: 'from-amber-200 via-yellow-100 to-yellow-50',
     style: { top: '54%', right: '8%' },
-    mobileStyle: { top: '74%', right: '-4%' },
+    mobileStyle: { top: '58%', right: '-3%' },
   },
 ] as const;
 
@@ -273,7 +273,7 @@ export default function Landing() {
           </p>
 
           <div className="relative mb-16 xl:hidden">
-            <div className="pointer-events-none absolute inset-x-0 -top-3 mx-auto h-[30rem] max-w-sm" aria-hidden="true">
+            <div className="pointer-events-none absolute inset-x-0 -top-3 mx-auto h-[24rem] max-w-sm" aria-hidden="true">
               {heroStickyNotes.map((note, index) => (
                 <div
                   key={`mobile-${note.id}`}
@@ -309,7 +309,7 @@ export default function Landing() {
               ))}
             </div>
 
-            <div className="mx-auto max-w-sm px-8 pb-24 pt-44">
+            <div className="mx-auto max-w-sm px-8 pb-12 pt-44">
               <div className="flex flex-col items-center justify-center gap-4 sm:flex-row">
                 <Button
                   size="lg"
