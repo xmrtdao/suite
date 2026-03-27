@@ -25,6 +25,9 @@ env:
 jobs:
   analyze:
     name: Analyze JavaScript/TypeScript
+    # Dependabot pull_request runs cannot upload SARIF due read-only token permissions.
+    # Keep scans on push/schedule/workflow_dispatch and non-Dependabot pull requests.
+    if: github.event_name != 'pull_request' || github.actor != 'dependabot[bot]'
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
