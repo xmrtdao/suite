@@ -48,9 +48,12 @@ export const GoogleCloudConnect: React.FC<GoogleCloudConnectProps> = ({ classNam
 
       if (error) throw error;
       
-      if (data?.success && data?.ready === true) {
+      const hasUserRefreshToken = Boolean(data?.configured?.refresh_token);
+
+      if (data?.success && hasUserRefreshToken) {
         setStatus('connected');
       } else if (data?.success) {
+        setConnectedEmail(null);
         setStatus('disconnected');
       } else {
         setStatus('error');
@@ -233,7 +236,7 @@ export const GoogleCloudConnect: React.FC<GoogleCloudConnectProps> = ({ classNam
             ) : (
               <>
                 <Cloud className="h-4 w-4 mr-2" />
-                Connect Google Cloud
+                Sign in to Google Cloud
               </>
             )}
           </Button>
