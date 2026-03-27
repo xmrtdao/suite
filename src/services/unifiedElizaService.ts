@@ -213,18 +213,6 @@ export class UnifiedElizaService {
 
     console.log('🔒 Safe executives:', safeExecutives.length, 'available');
 
-    let activeUserId: string | null = null;
-    let activeUserEmail: string | null = null;
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      activeUserId = user?.id ?? null;
-      activeUserEmail = user?.email ?? null;
-    } catch (_) {}
-
-    const authHeaders: Record<string, string> = {};
-    if (activeUserEmail) authHeaders['x-user-email'] = activeUserEmail;
-    if (activeUserId) authHeaders['x-user-id'] = activeUserId;
-
     // Try executives in priority order
     for (const executive of safeExecutives) {
       try {
@@ -255,8 +243,11 @@ export class UnifiedElizaService {
           }
 
           // ✅ FIXED: Pass user_id and session_id so backend can ingest to KB + Drive
-          if (activeUserId) formData.append('user_id', activeUserId);
-          if (activeUserEmail) formData.append('user_email', activeUserEmail);
+          try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user?.id) formData.append('user_id', user.id);
+            if (user?.email) formData.append('user_email', user.email);
+          } catch (_) {}
           // Pass any stored session ID for memory continuity
           const storedSession = localStorage.getItem('eliza_session_id');
           if (storedSession) formData.append('session_id', storedSession);
@@ -268,8 +259,7 @@ export class UnifiedElizaService {
 
           // Execute request with FormData
           const response = await supabase.functions.invoke(executive, {
-            body: formData,
-            headers: authHeaders
+            body: formData
           });
           data = response.data;
           error = response.error;
@@ -284,16 +274,13 @@ export class UnifiedElizaService {
             }],
             organizationContext: context.organizationContext,
             timestamp: new Date().toISOString(),
-            user_id: activeUserId || undefined,
-            user_email: activeUserEmail || undefined,
             // ✅ CRITICAL FIX: Include images if they exist in the context
             images: context.images || undefined, // Pass the images array (Base64 strings)
             isLiveCameraFeed: context.isLiveCameraFeed || undefined // Pass the live camera feed flag
           };
 
           const response = await supabase.functions.invoke(executive, {
-            body: payload,
-            headers: authHeaders
+            body: payload
           });
           data = response.data;
           error = response.error;
@@ -339,14 +326,6 @@ export class UnifiedElizaService {
     userInput: string,
     context: ElizaContext
   ): Promise<string | null> {
-    let activeUserId: string | null = null;
-    let activeUserEmail: string | null = null;
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      activeUserId = user?.id ?? null;
-      activeUserEmail = user?.email ?? null;
-    } catch (_) {}
-
     const payload = {
       message: userInput,
       messages: [
@@ -354,21 +333,13 @@ export class UnifiedElizaService {
       ],
       organizationContext: context.organizationContext,
       timestamp: new Date().toISOString(),
-      user_id: activeUserId || undefined,
-      user_email: activeUserEmail || undefined,
       images: context.images || undefined,
       isLiveCameraFeed: context.isLiveCameraFeed || undefined,
     };
 
     try {
       console.log(`🎭 Calling ${functionId} (own persona)...`);
-      const { data, error } = await supabase.functions.invoke(functionId, {
-        body: payload,
-        headers: {
-          ...(activeUserEmail ? { 'x-user-email': activeUserEmail } : {}),
-          ...(activeUserId ? { 'x-user-id': activeUserId } : {}),
-        },
-      });
+      const { data, error } = await supabase.functions.invoke(functionId, { body: payload });
       if (error) { console.error(`❌ ${functionId} error:`, error); return null; }
       const content = this.extractResponseContent(data);
       if (content) { console.log(`✅ ${functionId} response (${content.length} chars)`); }
