@@ -27,6 +27,14 @@ export class ConversationPersistenceService {
   private currentUserId: string | null = null;
   private currentUserEmail: string | null = null;
 
+  private resetSessionState(reason: string): void {
+    if (this.currentSessionId) {
+      console.log(`🔄 Resetting conversation session: ${reason}`);
+    }
+    this.currentSessionId = null;
+    this.currentSessionKey = null;
+  }
+
   public static getInstance(): ConversationPersistenceService {
     if (!ConversationPersistenceService.instance) {
       ConversationPersistenceService.instance =
@@ -92,17 +100,34 @@ export class ConversationPersistenceService {
       } = await supabase.auth.getUser();
 
       if (user?.id) {
+        const nextUserId = user.id;
+        const nextUserEmail = user.email || null;
+        const hasUserChanged =
+          this.currentUserId !== null &&
+          (this.currentUserId !== nextUserId ||
+            this.currentUserEmail !== nextUserEmail);
+
+        if (hasUserChanged) {
+          this.resetSessionState(
+            `authenticated identity changed from ${this.currentUserEmail || this.currentUserId} to ${nextUserEmail || nextUserId}`
+          );
+        }
+
         this.currentUserId = user.id;
-        this.currentUserEmail = user.email || null;
+        this.currentUserEmail = nextUserEmail;
         this.currentSessionKey = `user-${user.id}`;
         return {
           userId: user.id,
-          userEmail: user.email || null,
+          userEmail: nextUserEmail,
           sessionKey: this.currentSessionKey,
         };
       }
     } catch (error) {
       console.warn('Failed to resolve authenticated user, falling back to anonymous session:', error);
+    }
+
+    if (this.currentUserId !== null || this.currentUserEmail !== null) {
+      this.resetSessionState('authenticated user signed out or session expired');
     }
 
     this.currentUserId = null;
@@ -113,6 +138,20 @@ export class ConversationPersistenceService {
       userEmail: null,
       sessionKey: this.currentSessionKey,
     };
+  }
+
+  private async ensureSessionForCurrentContext(): Promise<{
+    userId: string | null;
+    userEmail: string | null;
+    sessionKey: string;
+  }> {
+    const authContext = await this.resolveAuthContext();
+
+    if (!this.currentSessionId) {
+      await this.initializeSession();
+    }
+
+    return authContext;
   }
 
   // Initialize or resume session for current authenticated user (fallback: anonymous local session)
@@ -207,11 +246,8 @@ export class ConversationPersistenceService {
       return;
     }
 
-    if (!this.currentSessionId) {
-      await this.initializeSession();
-    }
-
-    const { userId, userEmail, sessionKey } = await this.resolveAuthContext();
+    const { userId, userEmail, sessionKey } =
+      await this.ensureSessionForCurrentContext();
 
     try {
       // Use secure edge function to store message
@@ -343,15 +379,12 @@ export class ConversationPersistenceService {
   public async getRecentConversationHistory(
     limit: number = 200
   ): Promise<ConversationMessage[]> {
-    if (!this.currentSessionId) {
-      await this.initializeSession();
-    }
+    const { userId, userEmail, sessionKey } =
+      await this.ensureSessionForCurrentContext();
 
     if (!this.currentSessionId) {
       return [];
     }
-
-    const { userId, userEmail, sessionKey } = await this.resolveAuthContext();
 
     try {
       // Use secure edge function to get messages
@@ -399,15 +432,12 @@ export class ConversationPersistenceService {
     limit: number = 500,
     offset: number = 0
   ): Promise<ConversationMessage[]> {
-    if (!this.currentSessionId) {
-      await this.initializeSession();
-    }
+    const { userId, userEmail, sessionKey } =
+      await this.ensureSessionForCurrentContext();
 
     if (!this.currentSessionId) {
       return [];
     }
-
-    const { userId, userEmail, sessionKey } = await this.resolveAuthContext();
 
     try {
       // Use secure edge function
@@ -471,9 +501,8 @@ export class ConversationPersistenceService {
     totalMessageCount: number;
     hasMoreMessages: boolean;
   }> {
-    if (!this.currentSessionId) {
-      await this.initializeSession();
-    }
+    const { userId, userEmail, sessionKey } =
+      await this.ensureSessionForCurrentContext();
 
     if (!this.currentSessionId) {
       return {
@@ -483,8 +512,6 @@ export class ConversationPersistenceService {
         hasMoreMessages: false,
       };
     }
-
-    const { userId, userEmail, sessionKey } = await this.resolveAuthContext();
 
     try {
       // Get conversation summaries using secure edge function
