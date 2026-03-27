@@ -329,9 +329,10 @@ async function executeChecklistItem(supabase: any, task: Task, item: string): Pr
         body: { query: item, limit: 5 }
       });
 
-      if (!searchError && searchData?.functions) {
+      const matchedFunctions = searchData?.functions ?? searchData?.results;
+      if (!searchError && Array.isArray(matchedFunctions)) {
         // Add unique tools from search
-        searchData.functions.forEach((t: any) => {
+        matchedFunctions.forEach((t: any) => {
           if (!availableTools.find(at => at.name === t.name)) {
             availableTools.push(t);
           }
@@ -401,7 +402,7 @@ Return ONLY the JSON object.
         // Let's assume 'extract-knowledge' is the one.
         if (functionName === 'search_knowledge') {
           // Map to knowledge-manager which handles search
-          functionName = 'knowledge-manager/store';
+          functionName = 'knowledge-manager';
           payload = {
             action: 'search_knowledge',
             data: {
@@ -414,10 +415,6 @@ Return ONLY the JSON object.
 
       // Invoke the function
       try {
-        if (functionName === 'knowledge-manager') {
-          functionName = 'knowledge-manager/store';
-        }
-
         const { data, error } = await supabase.functions.invoke(functionName, {
           body: payload
         });
@@ -512,4 +509,3 @@ async function callAI(prompt: string): Promise<string> {
     throw error;
   }
 }
-

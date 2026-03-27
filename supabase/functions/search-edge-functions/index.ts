@@ -1,4 +1,3 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.58.0';
 import { EDGE_FUNCTIONS_REGISTRY } from '../_shared/edgeFunctionRegistry.ts';
 import { startUsageTracking } from '../_shared/functionUsageLogger.ts';
 
@@ -17,7 +16,7 @@ Deno.serve(async (req) => {
   }
 
   try {
-    const { query, category } = await req.json();
+    const { query, category, limit } = await req.json();
 
     if (!query || typeof query !== 'string') {
       return new Response(
@@ -28,41 +27,54 @@ Deno.serve(async (req) => {
 
     console.log(`🔍 Searching edge functions for: "${query}"${category ? ` (category: ${category})` : ''}`);
 
-    // Import the registry
-    const { EDGE_FUNCTIONS_REGISTRY } = await import('../_shared/edgeFunctionRegistry.ts');
-    
     // Filter by category if provided
     let functions = category 
       ? EDGE_FUNCTIONS_REGISTRY.filter((f: any) => f.category === category)
       : EDGE_FUNCTIONS_REGISTRY;
 
     // Search across name, description, capabilities, and example_use
-    const queryLower = query.toLowerCase();
+    // Tokenize query so multi-word checklist items like "Execute plan" still match
+    // partial capabilities such as "execute", "plan", etc.
+    const queryLower = query.toLowerCase().trim();
+    const queryTokens = queryLower
+      .split(/\s+/)
+      .map((token: string) => token.trim())
+      .filter((token: string) => token.length >= 3);
+    const maxResults = typeof limit === 'number' && limit > 0
+      ? Math.min(limit, 25)
+      : 10;
+
+    const includesQueryOrToken = (value: string): boolean => {
+      const normalized = value.toLowerCase();
+      if (normalized.includes(queryLower)) return true;
+      return queryTokens.some((token: string) => normalized.includes(token));
+    };
+
     const results = functions
       .map((fn: any) => {
         let score = 0;
         
         // Exact name match gets highest score
         if (fn.name.toLowerCase() === queryLower) score += 100;
-        else if (fn.name.toLowerCase().includes(queryLower)) score += 50;
+        else if (includesQueryOrToken(fn.name)) score += 50;
         
         // Description matches
-        if (fn.description.toLowerCase().includes(queryLower)) score += 30;
+        if (includesQueryOrToken(fn.description)) score += 30;
         
         // Capability matches
         const capabilityMatch = fn.capabilities.some((cap: string) => 
-          cap.toLowerCase().includes(queryLower)
+          includesQueryOrToken(cap)
         );
         if (capabilityMatch) score += 40;
         
         // Example use matches
-        if (fn.example_use.toLowerCase().includes(queryLower)) score += 20;
+        if (includesQueryOrToken(fn.example_use)) score += 20;
         
         return { ...fn, relevance_score: score };
       })
       .filter((fn: any) => fn.relevance_score > 0)
       .sort((a: any, b: any) => b.relevance_score - a.relevance_score)
-      .slice(0, 10);
+      .slice(0, maxResults);
 
     console.log(`✅ Found ${results.length} matching functions`);
     await usageTracker.success({ query, results_count: results.length });
@@ -72,6 +84,8 @@ Deno.serve(async (req) => {
         query,
         category,
         results,
+        // Legacy alias for existing callers that expect `functions`
+        functions: results,
         total_functions_searched: functions.length
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
