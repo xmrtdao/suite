@@ -286,7 +286,7 @@ serve(async (req) => {
                         body: {
                             action: 'send_email',
                             to: recipient,
-                            subject: `✅ Task Completed: ${taskTitle}`,
+                            subject: `Task Completed: ${taskTitle}`,
                             body: htmlBody,
                             is_html: true,
                         }
