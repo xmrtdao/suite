@@ -157,7 +157,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Prompt paid users to connect Google Cloud if not already connected
   useEffect(() => {
     if (user && !isLoading && !hasGoogleCloudConnection && (roles.includes('contributor') || roles.includes('moderator') || roles.includes('admin') || roles.includes('superadmin'))) {
-      const hasSeenPrompt = localStorage.getItem(`google_cloud_prompt_${user.id}`);
+      const hasSeenPrompt = sessionStorage.getItem(`google_cloud_prompt_${user.id}`);
       if (!hasSeenPrompt) {
         toast({
           title: "Setup Google Integration",
@@ -165,7 +165,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           action: (
             <ToastAction altText="Connect" onClick={() => {
               connectGoogleCloud();
-              localStorage.setItem(`google_cloud_prompt_${user.id}`, 'true');
+              sessionStorage.setItem(`google_cloud_prompt_${user.id}`, 'true');
             }}>
               Connect
             </ToastAction>
@@ -178,7 +178,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Let's use session storage or just a simple check.
         // For better UX during dev, maybe just check if not connected.
         // But user might want to skip.
-        localStorage.setItem(`google_cloud_prompt_${user.id}`, 'true');
+        sessionStorage.setItem(`google_cloud_prompt_${user.id}`, 'true');
       }
     }
   }, [user, isLoading, hasGoogleCloudConnection, roles]);

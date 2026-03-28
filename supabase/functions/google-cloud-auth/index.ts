@@ -51,6 +51,55 @@ interface TokenResponse {
   refresh_token?: string;
 }
 
+interface OAuthStatePayload {
+  user_id?: string;
+  return_to?: string;
+}
+
+function encodeOAuthState(payload: OAuthStatePayload): string {
+  return btoa(JSON.stringify(payload));
+}
+
+function decodeOAuthState(rawState: string): OAuthStatePayload {
+  if (!rawState) return {};
+
+  // New state format: base64-encoded JSON
+  try {
+    const parsed = JSON.parse(atob(rawState));
+    if (parsed && typeof parsed === 'object') {
+      return {
+        user_id: typeof parsed.user_id === 'string' ? parsed.user_id : undefined,
+        return_to: typeof parsed.return_to === 'string' ? parsed.return_to : undefined,
+      };
+    }
+  } catch {
+    // Fallback to legacy parser below
+  }
+
+  // Legacy format support: google_cloud_oauth:<userId>[:<encodedReturnTo>]
+  const stateParts = rawState.split(':');
+  const hasLegacyPrefix = rawState.startsWith('google_cloud_oauth');
+
+  if (!hasLegacyPrefix) return {};
+
+  const stateUserId = rawState.startsWith('google_cloud_oauth:')
+    ? stateParts[1]
+    : undefined;
+  const stateReturnTo = stateParts.length > 2
+    ? decodeURIComponent(stateParts.slice(2).join(':'))
+    : undefined;
+
+  const normalizedUserId = stateUserId && /^https?:\/\//i.test(stateUserId)
+    ? undefined
+    : stateUserId;
+  const normalizedReturnTo = stateReturnTo || (/^https?:\/\//i.test(stateUserId || '') ? decodeURIComponent(stateUserId!) : undefined);
+
+  return {
+    user_id: normalizedUserId,
+    return_to: normalizedReturnTo,
+  };
+}
+
 // Helper to get fresh access token
 async function getAccessToken(userCtx?: { userId?: string; userEmail?: string }): Promise<string | null> {
   const clientId = Deno.env.get('GOOGLE_CLIENT_ID')?.trim();
@@ -588,10 +637,10 @@ serve(async (req) => {
         const returnTo = typeof body.return_to === 'string' && body.return_to.trim().length > 0
           ? body.return_to.trim()
           : null;
-        const encodedReturnTo = returnTo ? encodeURIComponent(returnTo) : null;
-        const oauthState = userContext.userId
-          ? `google_cloud_oauth:${userContext.userId}${encodedReturnTo ? `:${encodedReturnTo}` : ''}`
-          : `google_cloud_oauth${encodedReturnTo ? `:${encodedReturnTo}` : ''}`;
+        const oauthState = encodeOAuthState({
+          user_id: userContext.userId,
+          return_to: returnTo || undefined,
+        });
         authUrl.searchParams.set('state', oauthState);
 
         return new Response(JSON.stringify({
@@ -606,10 +655,8 @@ serve(async (req) => {
       case 'callback': {
         const code = url.searchParams.get('code') || body.code;
         const state = url.searchParams.get('state') || body.state || '';
-        const stateParts = state.split(':');
-        const stateUserId = state.startsWith('google_cloud_oauth:') ? stateParts[1] : undefined;
-        const stateReturnTo = stateParts.length > 2 ? decodeURIComponent(stateParts.slice(2).join(':')) : null;
-        const callbackUserId = stateUserId || userContext.userId;
+        const parsedState = decodeOAuthState(state);
+        const callbackUserId = parsedState.user_id || userContext.userId;
         if (!code) {
           return new Response(JSON.stringify({
             success: false,
@@ -719,8 +766,8 @@ serve(async (req) => {
         // Browser redirects from Google are GET requests.
         // Return an auto-close + redirect page to support popup (desktop) and full-page/mobile flows.
         if (req.method === 'GET') {
-          const safeReturnTo = stateReturnTo && /^https?:\/\//i.test(stateReturnTo)
-            ? stateReturnTo
+          const safeReturnTo = parsedState.return_to && /^https?:\/\//i.test(parsedState.return_to)
+            ? parsedState.return_to
             : null;
           const fallbackUrl = `${url.origin}/dashboard`;
           const redirectTarget = safeReturnTo || fallbackUrl;
