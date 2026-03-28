@@ -281,6 +281,14 @@ const GO_SURFING_BUTTON: ButtonConfig = {
 const GO_SURFING_PROMPT =
   "Go Surfing 🏄‍♀️ — Eliza, use browse_web to follow your curiosity and engage your imagination for a series of 3 chained tool calls based on your own whims. Don't bother telling me what you're going to surf, just explore and return with your summarized synthesis of what you explored and what you learned.";
 
+const GET_MY_EMAILS_BUTTON: ButtonConfig = {
+  label: "Get my emails",
+  emoji: "📥",
+};
+
+const GET_MY_EMAILS_PROMPT =
+  "Get my emails 📥 — Eliza, fetch my latest 10 emails first, then intelligently classify each email into one of: actionable, ads/promotions, spam/suspicious, and no-reply or automated failure notices. Prioritize actionable emails for me, and clearly mark ads, spam, and no-reply/failure notices as do-not-reply.";
+
 const GET_ER_DONE_BUTTON: ButtonConfig = {
   label: "Get 'er done",
   emoji: "🧰",
@@ -288,6 +296,9 @@ const GET_ER_DONE_BUTTON: ButtonConfig = {
 
 const GET_ER_DONE_PROMPT =
   "Get 'er done 🧰 — Eliza, in single-AI mode complete this in ONE turn by using tool chaining + your own curiosity: (1) pick one explicit operational purpose that would create concrete business value now, (2) randomly choose 4-7 edge functions from your full 293-function toolset that are relevant to that purpose and likely underused, (3) state the exact tool-call order before execution, (4) execute every planned call in sequence without asking follow-up questions, (5) after each call, use the result to decide the next best call while still finishing the full chain, and (6) deliver a final response with: purpose, exact tools used in order, key findings from each step, completed actions, and recommended next actions. Do not stop early; finish all actions and respond fully in this single turn.";
+
+const DRAFT_MY_EMAILS_PROMPT =
+  "Draft my emails 📧 — Eliza, fetch my latest 10 emails before drafting anything. Intelligently classify each message as actionable, ads/promotions, spam/suspicious, or no-reply/automated failure notice. Do NOT draft replies for ads, spam, no-reply senders, or failure notices; only draft concise, high-quality responses for truly actionable emails.";
 
 const normalizeSuggestedButtons = (buttons: ButtonConfig[]): ButtonConfig[] => {
   const normalized: ButtonConfig[] = [];
@@ -318,9 +329,10 @@ const getContextualButtons = (
   // Welcome state - show intro buttons
   if (!hasUserEngaged) {
     if (hasPastConversations) {
+      const firstTurnReturningButtons = [...returningUserResponses, GET_MY_EMAILS_BUTTON];
       return turnCount >= 3
-        ? normalizeSuggestedButtons([...returningUserResponses, GET_ER_DONE_BUTTON, GO_SURFING_BUTTON])
-        : returningUserResponses;
+        ? normalizeSuggestedButtons([...firstTurnReturningButtons, GET_ER_DONE_BUTTON, GO_SURFING_BUTTON])
+        : firstTurnReturningButtons;
     }
     return turnCount >= 3
       ? normalizeSuggestedButtons([...emptyConversationResponses, GO_SURFING_BUTTON])
@@ -415,7 +427,11 @@ export const QuickResponseButtons = ({
                 ? GO_SURFING_PROMPT
                 : response.label === GET_ER_DONE_BUTTON.label
                   ? GET_ER_DONE_PROMPT
-                : response.label
+                : response.label === GET_MY_EMAILS_BUTTON.label
+                  ? GET_MY_EMAILS_PROMPT
+                  : response.label === "Draft my emails"
+                    ? DRAFT_MY_EMAILS_PROMPT
+                    : response.label
             )
           }
           disabled={disabled}
