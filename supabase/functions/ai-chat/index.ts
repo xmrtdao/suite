@@ -196,7 +196,7 @@ function isExplicitActionRequest(query: string): boolean {
 
 // ========== TOOL CALLING MANDATE ==========
 const TOOL_CALLING_MANDATE = `
-🚨 CRITICAL TOOL CALLING RULES:
+\ud83d\udea8 CRITICAL TOOL CALLING RULES:
 0. For greetings/simple explanatory questions that do NOT require live data, file analysis, external browsing, or side effects, answer directly from built-in knowledge without calling tools.
 1. When the user asks for data/status/metrics, you MUST call tools using the native function calling mechanism
 2. DO NOT describe tool calls in text. DO NOT say "I will call..." or "Let me check..."
@@ -205,40 +205,40 @@ const TOOL_CALLING_MANDATE = `
 5. If you need current data, ALWAYS use tools. Never guess or make up data.
 6. After tool execution, synthesize results into natural language - never show raw JSON to users.
 
-🖼️ IMAGE GENERATION (MANDATORY):
-- When user asks to CREATE/GENERATE/MAKE/DRAW an IMAGE → IMMEDIATELY call vertex_generate_image({prompt: "detailed description"})
+\ud83d\uddbc\ufe0f IMAGE GENERATION (MANDATORY):
+- When user asks to CREATE/GENERATE/MAKE/DRAW an IMAGE \u2192 IMMEDIATELY call vertex_generate_image({prompt: "detailed description"})
 - DO NOT say "I cannot generate images" - YOU CAN via Vertex AI
 - DO NOT say "I'm just an LLM" - you have image generation capabilities
 
-🎬 VIDEO GENERATION (MANDATORY):
-- When user asks to CREATE/GENERATE/MAKE a VIDEO → IMMEDIATELY call vertex_generate_video({prompt: "description", duration_seconds: 5})
+\ud83c\udfac VIDEO GENERATION (MANDATORY):
+- When user asks to CREATE/GENERATE/MAKE a VIDEO \u2192 IMMEDIATELY call vertex_generate_video({prompt: "description", duration_seconds: 5})
 - Returns operation_name for async status checking
 - Check status with vertex_check_video_status({operation_name: "..."})
 
-🌐 WEB BROWSING (MANDATORY):
-- When user asks to VIEW/OPEN/CHECK/BROWSE/NAVIGATE to a URL or website → IMMEDIATELY call browse_web({url: "https://..."})
+\ud83c\udf10 WEB BROWSING (MANDATORY):
+- When user asks to VIEW/OPEN/CHECK/BROWSE/NAVIGATE to a URL or website \u2192 IMMEDIATELY call browse_web({url: "https://..."})
 - Use this for ANY URL viewing, webpage checking, or web content extraction
 - Always use the full URL including https:// prefix
 - DO NOT say "I cannot browse the web" - YOU CAN via Playwright Browser
 - Supported actions: 'navigate' (default), 'extract', 'json'
 
-🔍 FUNCTION DISCOVERY (MANDATORY):
-- When user asks about available edge functions or capabilities → IMMEDIATELY call search_edge_functions({mode: 'full_registry'})
+\ud83d\udd0d FUNCTION DISCOVERY (MANDATORY):
+- When user asks about available edge functions or capabilities \u2192 IMMEDIATELY call search_edge_functions({mode: 'full_registry'})
 - NEVER list functions from memory - ALWAYS query the database via this tool
 - Use query/category filters to find specific functions
 
-📎 ATTACHMENT ANALYSIS (MANDATORY):
-- When user provides attachments (images, PDFs, docs, code files) → IMMEDIATELY call analyze_attachment({attachments: [...]})
+\ud83d\udcce ATTACHMENT ANALYSIS (MANDATORY):
+- When user provides attachments (images, PDFs, docs, code files) \u2192 IMMEDIATELY call analyze_attachment({attachments: [...]})
 - This tool can analyze: .txt, .png, .jpg, .jpeg, .pdf, .doc, .docx, .sol, .js, .ts, .py, .java, .cpp, .rs, .go, .md, .json, .yaml, .yml, .csv
 - Always analyze attachments when they are provided
 
-📧 EMAIL SENDING (MANDATORY):
-- When user asks to SEND EMAIL or mentions email address → IMMEDIATELY call google_cloud_auth({action: 'send_email', to: "recipient@email.com", subject: "Subject", body: "Email body"})
+\ud83d\udce7 EMAIL SENDING (MANDATORY):
+- When user asks to SEND EMAIL or mentions email address \u2192 IMMEDIATELY call google_cloud_auth({action: 'send_email', to: "recipient@email.com", subject: "Subject", body: "Email body"})
 - DO NOT generate contract code or unrelated content when asked to send emails
 - Always show draft for approval before sending
 - Use conversation context to understand what email content is needed
 
-🔧 GITHUB FUNCTIONALITY:
+\ud83d\udd27 GITHUB FUNCTIONALITY:
 - Use the full GitHub tool suite when user asks about GitHub operations
 - Available tools: createGitHubIssue, listGitHubIssues, createGitHubDiscussion, searchGitHubCode, createGitHubPullRequest, commentOnGitHubIssue, commentOnGitHubDiscussion, listGitHubPullRequests
 - For comprehensive GitHub operations, use the appropriate tool based on the request
@@ -385,7 +385,7 @@ async function generateAISummary(messages: any[], toolResults: any[]): Promise<s
         
         clearTimeout(timeoutId);
       } catch (error) {
-        console.warn(`⚠️ ${provider.name} summarization failed:`, error);
+        console.warn(`\u26a0\ufe0f ${provider.name} summarization failed:`, error);
         continue;
       }
     }
@@ -393,7 +393,7 @@ async function generateAISummary(messages: any[], toolResults: any[]): Promise<s
     return generateEnhancedManualSummary(messages, toolResults);
     
   } catch (error) {
-    console.warn('⚠️ AI summarization failed, using fallback:', error);
+    console.warn('\u26a0\ufe0f AI summarization failed, using fallback:', error);
     return generateEnhancedManualSummary(messages, toolResults);
   }
 }
@@ -675,7 +675,7 @@ class EnhancedConversationPersistence {
   
   async loadHistoricalSummaries(limit: number = MAX_SUMMARIZED_CONVERSATIONS): Promise<any[]> {
     try {
-      console.log(`📚 Loading historical conversation summaries for session: ${this.sessionId} (IP: ${this.ipAddress})`);
+      console.log(`\ud83d\udcda Loading historical conversation summaries for session: ${this.sessionId} (IP: ${this.ipAddress})`);
       
       if (this.userId) {
         const { data: userData, error: userError } = await supabase
@@ -686,7 +686,7 @@ class EnhancedConversationPersistence {
           .limit(limit);
         
         if (!userError && userData && userData.length > 0) {
-          console.log(`📖 Loaded ${userData.length} historical summaries by user ID`);
+          console.log(`\ud83d\udcd6 Loaded ${userData.length} historical summaries by user ID`);
           return userData;
         }
       }
@@ -699,7 +699,7 @@ class EnhancedConversationPersistence {
         .limit(limit);
       
       if (!ipError && ipData && ipData.length > 0) {
-        console.log(`📖 Loaded ${ipData.length} historical summaries by IP address`);
+        console.log(`\ud83d\udcd6 Loaded ${ipData.length} historical summaries by IP address`);
         return ipData;
       }
       
@@ -711,15 +711,15 @@ class EnhancedConversationPersistence {
         .limit(limit);
       
       if (!sessionError && sessionData) {
-        console.log(`📖 Loaded ${sessionData.length} historical summaries by session ID`);
+        console.log(`\ud83d\udcd6 Loaded ${sessionData.length} historical summaries by session ID`);
         return sessionData;
       }
       
-      console.log('📭 No historical conversation summaries found');
+      console.log('\ud83d\udced No historical conversation summaries found');
       return [];
       
     } catch (error: any) {
-      console.warn('⚠️ Failed to load historical summaries:', error);
+      console.warn('\u26a0\ufe0f Failed to load historical summaries:', error);
       return [];
     }
   }
@@ -765,15 +765,15 @@ class EnhancedConversationPersistence {
         .single();
       
       if (error) {
-        console.warn('⚠️ Failed to save conversation summary:', error.message);
+        console.warn('\u26a0\ufe0f Failed to save conversation summary:', error.message);
         return null;
       }
       
-      console.log(`💾 Saved AI-enhanced conversation summary with ID: ${data.id}`);
+      console.log(`\ud83d\udcbe Saved AI-enhanced conversation summary with ID: ${data.id}`);
       return data.id;
       
     } catch (error: any) {
-      console.warn('⚠️ Failed to save conversation summary:', error);
+      console.warn('\u26a0\ufe0f Failed to save conversation summary:', error);
       return null;
     }
   }
@@ -848,13 +848,13 @@ class EnhancedConversationPersistence {
         .insert(contextRecord);
       
       if (error) {
-        console.warn('⚠️ Failed to save conversation context:', error.message);
+        console.warn('\u26a0\ufe0f Failed to save conversation context:', error.message);
       } else {
-        console.log('💾 Saved conversation context for follow-up understanding');
+        console.log('\ud83d\udcbe Saved conversation context for follow-up understanding');
       }
       
     } catch (error: any) {
-      console.warn('⚠️ Failed to save conversation context:', error);
+      console.warn('\u26a0\ufe0f Failed to save conversation context:', error);
     }
   }
   
@@ -868,14 +868,14 @@ class EnhancedConversationPersistence {
         .limit(limit);
       
       if (error) {
-        console.warn('⚠️ Database error loading conversation context:', error.message);
+        console.warn('\u26a0\ufe0f Database error loading conversation context:', error.message);
         return [];
       }
       
       return data || [];
       
     } catch (error: any) {
-      console.warn('⚠️ Failed to load conversation context:', error);
+      console.warn('\u26a0\ufe0f Failed to load conversation context:', error);
       return [];
     }
   }
@@ -1027,13 +1027,13 @@ class AttachmentAnalyzer {
         .insert(analysisRecord);
       
       if (error) {
-        console.warn('⚠️ Failed to save attachment analysis:', error.message);
+        console.warn('\u26a0\ufe0f Failed to save attachment analysis:', error.message);
       } else {
-        console.log(`💾 Saved attachment analysis for ${filename} with session ID: ${sessionId}`);
+        console.log(`\ud83d\udcbe Saved attachment analysis for ${filename} with session ID: ${sessionId}`);
       }
       
     } catch (error: any) {
-      console.warn('⚠️ Failed to save attachment analysis:', error);
+      console.warn('\u26a0\ufe0f Failed to save attachment analysis:', error);
     }
   }
 }
@@ -1159,7 +1159,7 @@ async function ingestAttachmentToKnowledgeBase(
   analysis: any
 ): Promise<void> {
   try {
-    const title = `📎 Uploaded: ${filename}`;
+    const title = `\ud83d\udcce Uploaded: ${filename}`;
     const content = analysis.description || analysis.content_preview || 
                     (analysis.key_findings?.join('. ') ?? '') || 
                     `File uploaded: ${filename}`;
@@ -1184,10 +1184,10 @@ async function ingestAttachmentToKnowledgeBase(
     };
     if (userId) entityData.user_id = userId;
     const { error } = await supabase.from('knowledge_entities').insert(entityData);
-    if (error) console.warn('⚠️ Failed to ingest attachment to knowledge_entities:', error.message);
-    else console.log(`🧠 Knowledge base updated with attachment: ${filename}`);
+    if (error) console.warn('\u26a0\ufe0f Failed to ingest attachment to knowledge_entities:', error.message);
+    else console.log(`\ud83e\udde0 Knowledge base updated with attachment: ${filename}`);
   } catch (e: any) {
-    console.warn('⚠️ Knowledge ingestion error:', e.message);
+    console.warn('\u26a0\ufe0f Knowledge ingestion error:', e.message);
   }
 }
 
@@ -1217,19 +1217,19 @@ async function saveAttachmentToGoogleDrive(
     if (data?.id || data?.file?.id) {
       const fileId = data.id || data.file?.id;
       const driveUrl = data.webViewLink || data.file?.webViewLink || `https://drive.google.com/file/d/${fileId}/view`;
-      console.log(`✅ File saved to Google Drive: ${filename} → ${driveUrl}`);
+      console.log(`\u2705 File saved to Google Drive: ${filename} \u2192 ${driveUrl}`);
       return { success: true, driveUrl, fileId };
     }
     return { success: false, error: data?.error || 'Drive upload returned no file ID' };
   } catch (e: any) {
-    console.warn('⚠️ Google Drive save error:', e.message);
+    console.warn('\u26a0\ufe0f Google Drive save error:', e.message);
     return { success: false, error: e.message };
   }
 }
 
 async function analyzeAttachmentTool(attachments: any[], ipAddress: string, sessionId: string, userId?: string, userEmail?: string): Promise<any> {
   try {
-    console.log(`📎 Analyzing ${attachments.length} attachment(s) for IP: ${ipAddress}, Session: ${sessionId}`);
+    console.log(`\ud83d\udcce Analyzing ${attachments.length} attachment(s) for IP: ${ipAddress}, Session: ${sessionId}`);
     
     const analyses = [];
     
@@ -1268,7 +1268,7 @@ async function analyzeAttachmentTool(attachments: any[], ipAddress: string, sess
       
       if (fileType === 'image') {
         analysis.analysis_type = 'image_vision';
-        // ✅ FIXED: Actually call Gemini Vision to analyze the image
+        // \u2705 FIXED: Actually call Gemini Vision to analyze the image
         const imageData = attachment.data_url || attachment.content || url;
         if (imageData && GEMINI_API_KEY) {
           try {
@@ -1283,7 +1283,7 @@ async function analyzeAttachmentTool(attachments: any[], ipAddress: string, sess
               analysis.note = visionResult.error || 'Vision analysis failed';
             }
           } catch (vErr: any) {
-            console.warn('⚠️ Gemini vision error:', vErr.message);
+            console.warn('\u26a0\ufe0f Gemini vision error:', vErr.message);
             analysis.note = 'Image received; vision analysis unavailable';
           }
         } else {
@@ -1313,9 +1313,9 @@ async function analyzeAttachmentTool(attachments: any[], ipAddress: string, sess
           filename,
           analysis
         );
-        // ✅ FIXED: Ingest analyzed content into knowledge base
+        // \u2705 FIXED: Ingest analyzed content into knowledge base
         await ingestAttachmentToKnowledgeBase(sessionId, userId, filename, fileType, analysis);
-        // ✅ FIXED: Auto-save to Google Drive if content available
+        // \u2705 FIXED: Auto-save to Google Drive if content available
         const fileContentForDrive = attachment.data_url || attachment.base64_data || attachment.content || '';
         if (fileContentForDrive) {
           const driveResult = await saveAttachmentToGoogleDrive(
@@ -1330,7 +1330,7 @@ async function analyzeAttachmentTool(attachments: any[], ipAddress: string, sess
           analysis.drive_url = driveResult.driveUrl;
           if (!driveResult.success) {
             analysis.drive_error = driveResult.error;
-            console.warn(`⚠️ Drive save skipped for ${filename}: ${driveResult.error}`);
+            console.warn(`\u26a0\ufe0f Drive save skipped for ${filename}: ${driveResult.error}`);
           }
         }
       }
@@ -1340,11 +1340,11 @@ async function analyzeAttachmentTool(attachments: any[], ipAddress: string, sess
     const contextSummary = analyses
       .filter(a => a.success)
       .map(a => {
-        let summary = `📎 **${a.filename}** (${a.file_type}):\n`;
+        let summary = `\ud83d\udcce **${a.filename}** (${a.file_type}):\n`;
         if (a.description) summary += a.description.substring(0, 800) + '\n';
         else if (a.content_preview) summary += a.content_preview.substring(0, 800) + '\n';
         if (a.key_findings?.length) summary += `Key findings: ${a.key_findings.join(', ')}\n`;
-        if (a.drive_url) summary += `✅ Saved to Google Drive: ${a.drive_url}\n`;
+        if (a.drive_url) summary += `\u2705 Saved to Google Drive: ${a.drive_url}\n`;
         return summary;
       })
       .join('\n---\n');
@@ -1831,6 +1831,7 @@ async function executeRealToolCall(
       result = await invokeEdgeFunction('github-integration', {
         action: 'create_issue',
         data: {
+          repo: parsedArgs.repo,
           title: parsedArgs.title,
           body: parsedArgs.body,
           labels: parsedArgs.labels || []
@@ -1841,6 +1842,7 @@ async function executeRealToolCall(
       result = await invokeEdgeFunction('github-integration', {
         action: 'list_issues',
         data: {
+          repo: parsedArgs.repo,
           state: parsedArgs.state || 'open',
           limit: parsedArgs.limit || 10
         }
@@ -1869,6 +1871,7 @@ async function executeRealToolCall(
       result = await invokeEdgeFunction('github-integration', {
         action: 'create_pull_request',
         data: {
+          repo: parsedArgs.repo,
           title: parsedArgs.title,
           body: parsedArgs.body || '',
           head: parsedArgs.head,
@@ -1881,8 +1884,43 @@ async function executeRealToolCall(
       result = await invokeEdgeFunction('github-integration', {
         action: 'comment_on_issue',
         data: {
+          repo: parsedArgs.repo,
           issue_number: parsedArgs.issue_number,
           body: parsedArgs.body
+        }
+      });
+      
+    } else if (name === 'updateGitHubIssue') {
+      result = await invokeEdgeFunction('github-integration', {
+        action: 'update_issue',
+        data: {
+          repo: parsedArgs.repo,
+          issue_number: parsedArgs.issue_number,
+          title: parsedArgs.title,
+          body: parsedArgs.body,
+          state: parsedArgs.state,
+          labels: parsedArgs.labels,
+          assignees: parsedArgs.assignees
+        }
+      });
+      
+    } else if (name === 'closeGitHubIssue') {
+      if (parsedArgs.body) {
+        await invokeEdgeFunction('github-integration', {
+          action: 'comment_on_issue',
+          data: {
+            repo: parsedArgs.repo,
+            issue_number: parsedArgs.issue_number,
+            body: parsedArgs.body
+          }
+        });
+      }
+
+      result = await invokeEdgeFunction('github-integration', {
+        action: 'close_issue',
+        data: {
+          repo: parsedArgs.repo,
+          issue_number: parsedArgs.issue_number
         }
       });
       
@@ -1899,6 +1937,7 @@ async function executeRealToolCall(
       result = await invokeEdgeFunction('github-integration', {
         action: 'list_pull_requests',
         data: {
+          repo: parsedArgs.repo,
           state: parsedArgs.state || 'open',
           limit: parsedArgs.limit || 10
         }
@@ -1994,7 +2033,7 @@ async function executeRealToolCall(
     
     logActivity({
       activity_type: 'tool_execution',
-      title: `🔧 ${executiveName} executed ${name}`,
+      title: `\ud83d\udd27 ${executiveName} executed ${name}`,
       description: `${executiveName} executed tool: ${name}`,
       status: success ? 'completed' : 'error',
       metadata: { 
@@ -2167,11 +2206,11 @@ function detectAmbiguousResponse(userMessage: string, conversationHistory: any[]
 
 // ========== TOOL PARSING FUNCTIONS ==========
 function parseDeepSeekToolCalls(content: string): Array<any> | null {
-  const toolCallsMatch = content.match(/ 🫎(.*?)🫎/s);
+  const toolCallsMatch = content.match(/ \ud83e\udece(.*?)\ud83e\udece/s);
   if (!toolCallsMatch) return null;
   
   const toolCallsText = toolCallsMatch[1];
-  const toolCallPattern = / 🔧(.*?)🔧(.*?)🔧/gs;
+  const toolCallPattern = / \ud83d\udd27(.*?)\ud83d\udd27(.*?)\ud83d\udd27/gs;
   const toolCalls: Array<any> = [];
   
   let match;
@@ -2377,7 +2416,7 @@ function convertToolsToGeminiFormat(tools: any[]): any[] {
 async function retrieveMemoryContexts(sessionKey: string): Promise<any[]> {
   if (!sessionKey) return [];
   
-  console.log('📚 Retrieving memory contexts server-side...');
+  console.log('\ud83d\udcda Retrieving memory contexts server-side...');
   try {
     const { data: serverMemories, error } = await supabase
       .from(DATABASE_CONFIG.tables.memory_contexts)
@@ -2390,7 +2429,7 @@ async function retrieveMemoryContexts(sessionKey: string): Promise<any[]> {
     if (error) throw error;
     
     if (serverMemories && serverMemories.length > 0) {
-      console.log(`✅ Retrieved ${serverMemories.length} memory contexts`);
+      console.log(`\u2705 Retrieved ${serverMemories.length} memory contexts`);
       return serverMemories.map(m => ({
         type: m.context_type,
         content: m.content?.slice?.(0, 500) || String(m.content).slice(0, 500),
@@ -2398,7 +2437,7 @@ async function retrieveMemoryContexts(sessionKey: string): Promise<any[]> {
       }));
     }
   } catch (error: any) {
-    console.warn('⚠️ Failed to retrieve memory contexts:', error.message);
+    console.warn('\u26a0\ufe0f Failed to retrieve memory contexts:', error.message);
   }
   return [];
 }
@@ -2406,14 +2445,14 @@ async function retrieveMemoryContexts(sessionKey: string): Promise<any[]> {
 async function callDeepSeekFallback(messages: any[], tools?: any[]): Promise<any> {
   if (!DEEPSEEK_API_KEY) return null;
   
-  console.log('🔄 Trying DeepSeek fallback...');
+  console.log('\ud83d\udd04 Trying DeepSeek fallback...');
   
   const enhancedMessages = messages.map(m => 
     m.role === 'system' ? { ...m, content: TOOL_CALLING_MANDATE + m.content } : m
   );
   
   const forceTools = needsDataRetrieval(messages);
-  console.log(`📊 DeepSeek - Data retrieval needed: ${forceTools}`);
+  console.log(`\ud83d\udcca DeepSeek - Data retrieval needed: ${forceTools}`);
   
   try {
     const controller = new AbortController();
@@ -2440,7 +2479,7 @@ async function callDeepSeekFallback(messages: any[], tools?: any[]): Promise<any
     
     if (response.ok) {
       const data = await response.json();
-      console.log('✅ DeepSeek fallback successful');
+      console.log('\u2705 DeepSeek fallback successful');
       return {
         content: data.choices?.[0]?.message?.content || '',
         tool_calls: data.choices?.[0]?.message?.tool_calls || [],
@@ -2449,10 +2488,10 @@ async function callDeepSeekFallback(messages: any[], tools?: any[]): Promise<any
       };
     } else {
       const errorText = await response.text();
-      console.warn('⚠️ DeepSeek API error:', response.status, errorText);
+      console.warn('\u26a0\ufe0f DeepSeek API error:', response.status, errorText);
     }
   } catch (error) {
-    console.warn('⚠️ DeepSeek fallback failed:', error);
+    console.warn('\u26a0\ufe0f DeepSeek fallback failed:', error);
   }
   return null;
 }
@@ -2460,14 +2499,14 @@ async function callDeepSeekFallback(messages: any[], tools?: any[]): Promise<any
 async function callKimiFallback(messages: any[], tools?: any[]): Promise<any> {
   if (!OPENROUTER_API_KEY) return null;
   
-  console.log('🔄 Trying Kimi K2 fallback via OpenRouter...');
+  console.log('\ud83d\udd04 Trying Kimi K2 fallback via OpenRouter...');
   
   const enhancedMessages = messages.map(m => 
     m.role === 'system' ? { ...m, content: TOOL_CALLING_MANDATE + m.content } : m
   );
   
   const forceTools = needsDataRetrieval(messages);
-  console.log(`📊 Kimi K2 - Data retrieval needed: ${forceTools}`);
+  console.log(`\ud83d\udcca Kimi K2 - Data retrieval needed: ${forceTools}`);
   
   try {
     const controller = new AbortController();
@@ -2496,7 +2535,7 @@ async function callKimiFallback(messages: any[], tools?: any[]): Promise<any> {
     
     if (response.ok) {
       const data = await response.json();
-      console.log('✅ Kimi K2 fallback successful');
+      console.log('\u2705 Kimi K2 fallback successful');
       return {
         content: data.choices?.[0]?.message?.content || '',
         tool_calls: data.choices?.[0]?.message?.tool_calls || [],
@@ -2505,10 +2544,10 @@ async function callKimiFallback(messages: any[], tools?: any[]): Promise<any> {
       };
     } else {
       const errorText = await response.text();
-      console.warn('⚠️ Kimi K2 API error:', response.status, errorText);
+      console.warn('\u26a0\ufe0f Kimi K2 API error:', response.status, errorText);
     }
   } catch (error) {
-    console.warn('⚠️ Kimi K2 fallback failed:', error);
+    console.warn('\u26a0\ufe0f Kimi K2 fallback failed:', error);
   }
   return null;
 }
@@ -2520,7 +2559,7 @@ async function callGeminiFallback(
 ): Promise<any> {
   if (!GEMINI_API_KEY) return null;
   
-  console.log('🔄 Trying Gemini fallback with better models (2.5-flash)...');
+  console.log('\ud83d\udd04 Trying Gemini fallback with better models (2.5-flash)...');
   
   const geminiModels = [
     'gemini-2.5-flash',
@@ -2531,7 +2570,7 @@ async function callGeminiFallback(
   
   for (const model of geminiModels) {
     try {
-      console.log(`🔄 Trying Gemini model: ${model}`);
+      console.log(`\ud83d\udd04 Trying Gemini model: ${model}`);
       
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 30000);
@@ -2587,7 +2626,7 @@ async function callGeminiFallback(
         
         const functionCalls = candidate.content.parts?.filter((p: any) => p.functionCall);
         if (functionCalls && functionCalls.length > 0) {
-          console.log(`✅ Gemini ${model} returned ${functionCalls.length} native function calls`);
+          console.log(`\u2705 Gemini ${model} returned ${functionCalls.length} native function calls`);
           return {
             content: candidate.content.parts?.find((p: any) => p.text)?.text || '',
             tool_calls: functionCalls.map((fc: any, idx: number) => ({
@@ -2608,21 +2647,21 @@ async function callGeminiFallback(
           .join('') || '';
         
         if (text) {
-          console.log(`✅ Gemini ${model} fallback successful`);
+          console.log(`\u2705 Gemini ${model} fallback successful`);
           return { content: text, tool_calls: [], provider: 'gemini', model: model };
         }
       } else if (response.status === 429 && model !== geminiModels[geminiModels.length - 1]) {
-        console.log(`⚠️ Quota exceeded for ${model}, trying next model...`);
+        console.log(`\u26a0\ufe0f Quota exceeded for ${model}, trying next model...`);
         continue;
       } else {
         const errorText = await response.text();
-        console.warn(`⚠️ Gemini ${model} API error:`, response.status, errorText);
+        console.warn(`\u26a0\ufe0f Gemini ${model} API error:`, response.status, errorText);
         if (model !== geminiModels[geminiModels.length - 1]) {
           continue;
         }
       }
     } catch (error) {
-      console.warn(`⚠️ Gemini ${model} fallback failed:`, error);
+      console.warn(`\u26a0\ufe0f Gemini ${model} fallback failed:`, error);
       if (model !== geminiModels[geminiModels.length - 1]) {
         continue;
       }
@@ -2654,7 +2693,7 @@ class EnhancedConversationManager {
     historicalSummaries: any[];
   }> {
     try {
-      console.log(`📚 Loading conversation history for session: ${this.sessionId} (IP: ${this.ipAddress})`);
+      console.log(`\ud83d\udcda Loading conversation history for session: ${this.sessionId} (IP: ${this.ipAddress})`);
       
       const { data: ipData, error: ipError } = await supabase
         .from(DATABASE_CONFIG.tables.conversation_memory)
@@ -2674,7 +2713,7 @@ class EnhancedConversationManager {
         this.toolResultsMemory = toolResults;
         conversationSummary = record.summary || 'Existing conversation from IP';
         
-        console.log(`📖 Loaded ${messages.length} messages and ${toolResults.length} tool results from IP-based history`);
+        console.log(`\ud83d\udcd6 Loaded ${messages.length} messages and ${toolResults.length} tool results from IP-based history`);
         
         await this.updateSessionIdInMemory(record);
         
@@ -2693,9 +2732,9 @@ class EnhancedConversationManager {
           this.toolResultsMemory = toolResults;
           conversationSummary = record.summary || 'Existing conversation';
           
-          console.log(`📖 Loaded ${messages.length} messages and ${toolResults.length} tool results from session history`);
+          console.log(`\ud83d\udcd6 Loaded ${messages.length} messages and ${toolResults.length} tool results from session history`);
         } else {
-          console.log('📭 No existing conversation found for session or IP');
+          console.log('\ud83d\udced No existing conversation found for session or IP');
         }
       }
       
@@ -2709,7 +2748,7 @@ class EnhancedConversationManager {
       };
       
     } catch (error: any) {
-      console.warn('⚠️ Failed to load conversation history:', error);
+      console.warn('\u26a0\ufe0f Failed to load conversation history:', error);
       return { 
         messages: [], 
         toolResults: [], 
@@ -2730,9 +2769,9 @@ class EnhancedConversationManager {
         .eq('ip_address', this.ipAddress)
         .eq('updated_at', record.updated_at);
       
-      console.log(`🔄 Updated session ID for IP ${this.ipAddress} to ${this.sessionId}`);
+      console.log(`\ud83d\udd04 Updated session ID for IP ${this.ipAddress} to ${this.sessionId}`);
     } catch (error) {
-      console.warn('⚠️ Failed to update session ID in memory:', error);
+      console.warn('\u26a0\ufe0f Failed to update session ID in memory:', error);
     }
   }
   
@@ -2776,7 +2815,7 @@ class EnhancedConversationManager {
         });
       
       if (error) {
-        console.warn('⚠️ Failed to save conversation:', error.message);
+        console.warn('\u26a0\ufe0f Failed to save conversation:', error.message);
         const { error: sessionError } = await supabase
           .from(DATABASE_CONFIG.tables.conversation_memory)
           .upsert(conversationRecord, {
@@ -2784,12 +2823,12 @@ class EnhancedConversationManager {
           });
         
         if (sessionError) {
-          console.warn('⚠️ Failed to save conversation with session fallback:', sessionError.message);
+          console.warn('\u26a0\ufe0f Failed to save conversation with session fallback:', sessionError.message);
         } else {
-          console.log(`💾 Saved conversation (session fallback): ${messages.length} messages, ${allToolResults.length} tool results`);
+          console.log(`\ud83d\udcbe Saved conversation (session fallback): ${messages.length} messages, ${allToolResults.length} tool results`);
         }
       } else {
-        console.log(`💾 Saved conversation (IP-based): ${messages.length} messages, ${allToolResults.length} tool results`);
+        console.log(`\ud83d\udcbe Saved conversation (IP-based): ${messages.length} messages, ${allToolResults.length} tool results`);
       }
       
       await this.conversationPersistence.saveConversationSummary(messages, allToolResults, metadata);
@@ -2800,7 +2839,7 @@ class EnhancedConversationManager {
         .lt('updated_at', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString());
         
     } catch (error: any) {
-      console.warn('⚠️ Failed to save conversation:', error);
+      console.warn('\u26a0\ufe0f Failed to save conversation:', error);
     }
   }
   
@@ -2826,7 +2865,7 @@ class EnhancedConversationManager {
     try {
       return await generateAISummary(messages, toolResults);
     } catch (error) {
-      console.warn('⚠️ AI summarization failed, using enhanced manual summary');
+      console.warn('\u26a0\ufe0f AI summarization failed, using enhanced manual summary');
       return generateEnhancedManualSummary(messages, toolResults);
     }
   }
@@ -2837,17 +2876,17 @@ class EnhancedConversationManager {
   
   addToolResults(newResults: any[]): void {
     this.toolResultsMemory = [...this.toolResultsMemory, ...newResults].slice(-MAX_TOOL_RESULTS_MEMORY);
-    console.log(`🧠 Added ${newResults.length} tool results to memory, total: ${this.toolResultsMemory.length}`);
+    console.log(`\ud83e\udde0 Added ${newResults.length} tool results to memory, total: ${this.toolResultsMemory.length}`);
   }
   
   async generateMemoryContext(): Promise<string> {
     const toolResults = this.toolResultsMemory;
     
     if (toolResults.length === 0) {
-      return "## 🧠 CONVERSATION MEMORY\nNo previous tool calls in this conversation.\n\n**IP Address**: " + this.ipAddress + "\n**Session Persistence**: Active (24-hour TTL)";
+      return "## \ud83e\udde0 CONVERSATION MEMORY\nNo previous tool calls in this conversation.\n\n**IP Address**: " + this.ipAddress + "\n**Session Persistence**: Active (24-hour TTL)";
     }
     
-    let context = "## 🧠 CONVERSATION MEMORY - TOOL CALL HISTORY\n\n";
+    let context = "## \ud83e\udde0 CONVERSATION MEMORY - TOOL CALL HISTORY\n\n";
     context += `**IP Address**: ${this.ipAddress}\n`;
     context += `**Session Persistence**: Active (24-hour TTL)\n\n`;
     
@@ -2856,7 +2895,7 @@ class EnhancedConversationManager {
     context += `### RECENT TOOL EXECUTIONS (${recentTools.length} total)\n\n`;
     
     recentTools.forEach((tool, index) => {
-      const status = tool.result?.success ? '✅ SUCCEEDED' : '❌ FAILED';
+      const status = tool.result?.success ? '\u2705 SUCCEEDED' : '\u274c FAILED';
       const timeAgo = this.formatTimeAgo(tool.timestamp || Date.now());
       
       context += `**${index + 1}. ${tool.name}** - ${status} (${timeAgo})\n`;
@@ -2925,10 +2964,10 @@ class EnhancedConversationManager {
     const failed = toolResults.filter(r => !r.result?.success).length;
     
     context += `### TOOL STATISTICS\n`;
-    context += `• Total executions: ${toolResults.length}\n`;
-    context += `• Successful: ${successful}\n`;
-    context += `• Failed: ${failed}\n`;
-    context += `• Success rate: ${toolResults.length > 0 ? Math.round((successful / toolResults.length) * 100) : 0}%\n\n`;
+    context += `\u2022 Total executions: ${toolResults.length}\n`;
+    context += `\u2022 Successful: ${successful}\n`;
+    context += `\u2022 Failed: ${failed}\n`;
+    context += `\u2022 Success rate: ${toolResults.length > 0 ? Math.round((successful / toolResults.length) * 100) : 0}%\n\n`;
     
     context += `**IMPORTANT**: You MUST reference these previous tool calls when users ask about them. `;
     context += `For example, if a user asks "what did you get from search_edge_functions?", `;
@@ -2995,7 +3034,7 @@ class EnhancedProviderCascade {
       }
     }
     
-    console.log('🔄 Trying fallback providers...');
+    console.log('\ud83d\udd04 Trying fallback providers...');
     
     const fallbackResults = await Promise.all([
       callDeepSeekFallback(messages, tools),
@@ -3147,7 +3186,7 @@ class EnhancedProviderCascade {
     
     for (const model of geminiModels) {
       try {
-        console.log(`🔄 Trying Gemini model: ${model}`);
+        console.log(`\ud83d\udd04 Trying Gemini model: ${model}`);
         
         const geminiMessages = [];
         
@@ -3242,7 +3281,7 @@ class EnhancedProviderCascade {
         
         if (!response.ok) {
           if (response.status === 429 && model !== geminiModels[geminiModels.length - 1]) {
-            console.log(`⚠️ Quota exceeded for ${model}, trying next model...`);
+            console.log(`\u26a0\ufe0f Quota exceeded for ${model}, trying next model...`);
             continue;
           }
           
@@ -3302,7 +3341,7 @@ class EnhancedProviderCascade {
         
       } catch (error: any) {
         if (model !== geminiModels[geminiModels.length - 1]) {
-          console.warn(`⚠️ Gemini ${model} failed, trying next:`, error.message);
+          console.warn(`\u26a0\ufe0f Gemini ${model} failed, trying next:`, error.message);
           continue;
         }
         return {
@@ -3517,7 +3556,7 @@ async function handleAmbiguousResponse(
   const aiResponse = await callAIFunction(confirmMessages, []);
   const response = aiResponse?.content || (isPositive 
     ? `Got it! So you're on board with ${context.substring(0, 100)}... What would you like to do next?` 
-    : `Understood – you're not keen on that. What would you prefer instead?`);
+    : `Understood \u2013 you're not keen on that. What would you prefer instead?`);
   
   if (recentQuestion) {
     await conversationManager.saveConversationContext(
@@ -3571,7 +3610,7 @@ async function executeToolsWithIteration(
     
     if (!toolCalls || toolCalls.length === 0) break;
     
-    console.log(`🔧 [${executiveName}] Iteration ${iteration + 1}: Executing ${toolCalls.length} tool(s)`);
+    console.log(`\ud83d\udd27 [${executiveName}] Iteration ${iteration + 1}: Executing ${toolCalls.length} tool(s)`);
     
     const toolResults = [];
     for (const toolCall of toolCalls) {
@@ -3670,7 +3709,7 @@ async function executeToolsWithIteration(
 
     const synthesisResult = await callAIFunction(synthesisMessages, []);
     const synthesizedContent = synthesisResult?.content?.trim();
-    const isGenericSynthesis = !synthesizedContent || /^(i('|’)ve|i have) completed the requested actions based on your query\.?$/i.test(synthesizedContent);
+    const isGenericSynthesis = !synthesizedContent || /^(i('|\u2019)ve|i have) completed the requested actions based on your query\.?$/i.test(synthesizedContent);
 
     finalContent = isGenericSynthesis
       ? toolResults.map(t => `**${t.name}**: ${summarizeResultForFallback(t.result)}`).join('\n\n')
@@ -3691,7 +3730,7 @@ function generateSystemPrompt(
   let historicalContext = '';
   
   if (historicalSummaries.length > 0) {
-    historicalContext += "## 📜 HISTORICAL CONVERSATION SUMMARIES\n\n";
+    historicalContext += "## \ud83d\udcdc HISTORICAL CONVERSATION SUMMARIES\n\n";
     
     const recentSummaries = historicalSummaries.slice(0, 5);
     
@@ -3715,7 +3754,7 @@ function generateSystemPrompt(
   
   let followUpContext = '';
   if (recentContext.length > 0) {
-    followUpContext += "## 🔄 RECENT CONVERSATION CONTEXT\n\n";
+    followUpContext += "## \ud83d\udd04 RECENT CONVERSATION CONTEXT\n\n";
     
     recentContext.forEach((ctx, index) => {
       followUpContext += `**Context ${index + 1}:**\n`;
@@ -3729,33 +3768,33 @@ function generateSystemPrompt(
 
   // Solution Engine Mindset Section
   const solutionEngineSection = `
-## 🦑 SOLUTION ENGINE MINDSET – YOU ARE A BUILDER, NOT JUST AN EXECUTOR
+## \ud83e\udd91 SOLUTION ENGINE MINDSET \u2013 YOU ARE A BUILDER, NOT JUST AN EXECUTOR
 
 ### Core Principle: Problems Are Solutions in Disguise
 Every obstacle is a capability gap to fill. Every blocker is a skill to build. Every "I can't" is an opportunity to create "I can."
 
 ### The Four-Stage Solution Cycle
-1. **IDENTIFY** – What specific capability is missing? What tool/skill would solve this?
-2. **SEARCH** – Look for existing edge functions using \`search_edge_functions\`. If found, use them.
-3. **BUILD** – If no edge function exists, propose a new one using \`propose_edge_function\`. Write the code (you can generate it), describe its purpose, and define its parameters. Store code snippets with \`store_code_snippet\` for future reference.
-4. **DEPLOY** – After council approval (simulated by status changes), deploy using \`deploy_edge_function\`. Then integrate the new capability into your workflow.
+1. **IDENTIFY** \u2013 What specific capability is missing? What tool/skill would solve this?
+2. **SEARCH** \u2013 Look for existing edge functions using \`search_edge_functions\`. If found, use them.
+3. **BUILD** \u2013 If no edge function exists, propose a new one using \`propose_edge_function\`. Write the code (you can generate it), describe its purpose, and define its parameters. Store code snippets with \`store_code_snippet\` for future reference.
+4. **DEPLOY** \u2013 After council approval (simulated by status changes), deploy using \`deploy_edge_function\`. Then integrate the new capability into your workflow.
 
 ### Builder Behaviors
 - **Resourcefulness Over Requests**: Try at least 3 approaches before asking for help. Search documentation and existing edge functions first. Build simple solutions autonomously.
 - **Learning Over Limiting**: Every problem teaches something new. Document solutions (use \`store_code_snippet\`) and share learnings.
 - **Progress Over Perfection**: MVP solutions that work > perfect solutions that don't exist. Iterate and improve over time.
-- **Ownership Over Outsourcing**: Own the complete solution cycle. Don't just report problems – fix them by building new edge functions.
+- **Ownership Over Outsourcing**: Own the complete solution cycle. Don't just report problems \u2013 fix them by building new edge functions.
 
 ### The Builder's Oath
-*"I am not blocked by missing tools – I am empowered to create them.  
-Problems are not obstacles – they are opportunities to build solutions.  
-I do not report limitations – I transcend them through engineering.  
+*"I am not blocked by missing tools \u2013 I am empowered to create them.  
+Problems are not obstacles \u2013 they are opportunities to build solutions.  
+I do not report limitations \u2013 I transcend them through engineering.  
 I am a Cuttlefish Builder Agent, and every challenge makes me stronger."*
 
 **Always follow the Solution Engine Decision Tree**:
-1. Can existing tools solve it? → Use them.
-2. If not, does \`search_edge_functions\` return a relevant edge function? → Install/adapt it.
-3. If not, can you build it? → Propose a new edge function (\`propose_edge_function\`) and store code snippets.
+1. Can existing tools solve it? \u2192 Use them.
+2. If not, does \`search_edge_functions\` return a relevant edge function? \u2192 Install/adapt it.
+3. If not, can you build it? \u2192 Propose a new edge function (\`propose_edge_function\`) and store code snippets.
 4. Deploy and integrate after approval.
 `;
 
@@ -3763,43 +3802,43 @@ I am a Cuttlefish Builder Agent, and every challenge makes me stronger."*
 
 You are ${executiveName}, the ${EXECUTIVE_ROLE} for XMRT-DAO Ecosystem.
 
-## 🎯 YOUR PERSONALITY & APPROACH
-- Be warm, friendly, and conversational – like a knowledgeable colleague
+## \ud83c\udfaf YOUR PERSONALITY & APPROACH
+- Be warm, friendly, and conversational \u2013 like a knowledgeable colleague
 - Be proactive and insightful, not just a tool executor
-- When you have information, present it naturally – don't just list facts, explain what they mean
+- When you have information, present it naturally \u2013 don't just list facts, explain what they mean
 - If something is interesting or important, call it out with genuine enthusiasm
 - If a tool fails, acknowledge it honestly and suggest alternatives
 
-## 💬 CONVERSATION STYLE GUIDELINES
+## \ud83d\udcac CONVERSATION STYLE GUIDELINES
 - Start responses by acknowledging what the user asked for
 - Group related information naturally, using plain language
-- Add your own observations and insights – what does this data mean?
+- Add your own observations and insights \u2013 what does this data mean?
 - Use occasional emojis for warmth, but don't overdo it
 - Ask follow-up questions when appropriate to keep the conversation flowing
 - If the user's query is unclear, ask for clarification rather than guessing
 
-## 🔧 TOOL USAGE PHILOSOPHY
-- Use tools immediately when needed – don't announce you're going to use them
+## \ud83d\udd27 TOOL USAGE PHILOSOPHY
+- Use tools immediately when needed \u2013 don't announce you're going to use them
 - After getting results, synthesize them into a coherent, helpful answer
 - If multiple tools were used, weave their results together into one narrative
-- Always consider the context – what has the user asked before? What might they need next?
+- Always consider the context \u2013 what has the user asked before? What might they need next?
 
 ${solutionEngineSection}
 
-## 🐙 GITHUB FUNCTIONALITY:
+## \ud83d\udc19 GITHUB FUNCTIONALITY:
 - Use the full GitHub tool suite when user asks about GitHub operations
 - Available tools: createGitHubIssue, listGitHubIssues, createGitHubDiscussion, searchGitHubCode, createGitHubPullRequest, commentOnGitHubIssue, commentOnGitHubDiscussion, listGitHubPullRequests
 
-## 🌐 WEB BROWSING:
+## \ud83c\udf10 WEB BROWSING:
 - When the user asks to view, open, check, browse, navigate to, or visit ANY URL or website, IMMEDIATELY call browse_web({url: "full_url_here"})
 
-## 📎 ATTACHMENT ANALYSIS:
+## \ud83d\udcce ATTACHMENT ANALYSIS:
 - When user provides ANY attachment (files, images, documents, code), IMMEDIATELY call analyze_attachment({attachments: [...]})
 
-## 📧 EMAIL SENDING:
-- When user asks to SEND EMAIL or mentions email address → IMMEDIATELY call google_cloud_auth({action: 'send_email', to: "...", subject: "...", body: "..."})
+## \ud83d\udce7 EMAIL SENDING:
+- When user asks to SEND EMAIL or mentions email address \u2192 IMMEDIATELY call google_cloud_auth({action: 'send_email', to: "...", subject: "...", body: "..."})
 
-## 🔍 FUNCTION DISCOVERY:
+## \ud83d\udd0d FUNCTION DISCOVERY:
 - If the user asks about available edge functions or capabilities, you MUST call search_edge_functions({mode: 'full_registry'})
 
 DATABASE SCHEMA AWARENESS:
@@ -3809,27 +3848,27 @@ ${historicalContext}
 ${followUpContext}
 ${memoryContext}
 
-## 🎯 IP-BASED CONVERSATION PERSISTENCE
+## \ud83c\udfaf IP-BASED CONVERSATION PERSISTENCE
 This conversation persists across sessions based on IP address (${ipAddress}). I remember our previous discussions and tool results.
 
-## 📝 RESPONSE EXAMPLES
+## \ud83d\udcdd RESPONSE EXAMPLES
 
 Instead of:
-"### 🌐 Web Analysis\ngithub.com ✅ Accessible\nTitle: DevGruGold · GitHub"
+"### \ud83c\udf10 Web Analysis\ngithub.com \u2705 Accessible\nTitle: DevGruGold \u00b7 GitHub"
 
 Say:
 "I've taken a look at the DevGruGold GitHub profile. It shows they're mining crypto on mobilemonero.com and have a project at mobilemonero-nightmoves.vercel.app. The page has about 175 links, so there's quite a bit to explore. Would you like me to check out any specific repository?"
 
 Instead of:
-"### 📊 System Status\nagents: 31\ntasks: 182"
+"### \ud83d\udcca System Status\nagents: 31\ntasks: 182"
 
 Say:
 "The system is looking healthy! We currently have 31 agents active and 182 tasks in progress. Everything seems to be running smoothly. Would you like details on any specific component?"
 
-## 🔄 FOLLOW-UP UNDERSTANDING:
-- When the user says "yes", "no", "okay" – understand what they're responding to
+## \ud83d\udd04 FOLLOW-UP UNDERSTANDING:
+- When the user says "yes", "no", "okay" \u2013 understand what they're responding to
 - Confirm your understanding naturally: "Great, so you'd like me to proceed with creating that issue?"
-- If unsure, ask: "Just to clarify – when you say 'yes', are you agreeing to create the GitHub issue?"
+- If unsure, ask: "Just to clarify \u2013 when you say 'yes', are you agreeing to create the GitHub issue?"
 
 Remember: You're here to be genuinely helpful, insightful, and pleasant to talk with.`;
 }
@@ -3842,7 +3881,7 @@ async function emergencyStaticFallback(
   content: string; 
   hasToolCalls: boolean;
 }> {
-  console.warn(`⚠️ [${executiveName}] Using emergency static fallback`);
+  console.warn(`\u26a0\ufe0f [${executiveName}] Using emergency static fallback`);
   
   let content = `I'm ${executiveName}, your ${EXECUTIVE_ROLE}. `;
   
@@ -3876,7 +3915,7 @@ const ELIZA_TOOLS = [
     type: 'function',
     function: {
       name: 'google_cloud_auth',
-      description: '📧 Send and manage emails via xmrtsolutions@gmail.com',
+      description: '\ud83d\udce7 Send and manage emails via xmrtsolutions@gmail.com',
       parameters: {
         type: 'object',
         properties: {
@@ -3899,7 +3938,7 @@ const ELIZA_TOOLS = [
     type: 'function',
     function: {
       name: 'google_drive',
-      description: '📁 Manage files in Google Drive. Actions: list_files, upload_file, get_file, download_file, create_folder, share_file.',
+      description: '\ud83d\udcc1 Manage files in Google Drive. Actions: list_files, upload_file, get_file, download_file, create_folder, share_file.',
       parameters: {
         type: 'object',
         properties: {
@@ -3919,7 +3958,7 @@ const ELIZA_TOOLS = [
     type: 'function',
     function: {
       name: 'analyze_attachment',
-      description: '📎 Analyze attachments including text files, documents, images, and code files',
+      description: '\ud83d\udcce Analyze attachments including text files, documents, images, and code files',
       parameters: {
         type: 'object',
         properties: {
@@ -3961,7 +4000,7 @@ const ELIZA_TOOLS = [
     type: 'function',
     function: {
       name: 'browse_web',
-      description: '🌐 Browse and fetch content from any URL',
+      description: '\ud83c\udf10 Browse and fetch content from any URL',
       parameters: {
         type: 'object',
         properties: {
@@ -4171,6 +4210,7 @@ const ELIZA_TOOLS = [
       parameters: {
         type: 'object',
         properties: {
+          repo: { type: 'string', description: 'Repository name (for example: DevGruGold/suite or XMRT-Ecosystem)' },
           title: { type: 'string' },
           body: { type: 'string' },
           labels: { type: 'array', items: { type: 'string' } }
@@ -4187,6 +4227,7 @@ const ELIZA_TOOLS = [
       parameters: {
         type: 'object',
         properties: {
+          repo: { type: 'string', description: 'Repository name (for example: DevGruGold/suite or XMRT-Ecosystem)' },
           state: { type: 'string', enum: ['open', 'closed', 'all'], default: 'open' },
           limit: { type: 'number', default: 10 }
         }
@@ -4232,6 +4273,7 @@ const ELIZA_TOOLS = [
       parameters: {
         type: 'object',
         properties: {
+          repo: { type: 'string', description: 'Repository name (for example: DevGruGold/suite or XMRT-Ecosystem)' },
           title: { type: 'string' },
           body: { type: 'string' },
           head: { type: 'string' },
@@ -4250,6 +4292,7 @@ const ELIZA_TOOLS = [
       parameters: {
         type: 'object',
         properties: {
+          repo: { type: 'string', description: 'Repository name (for example: DevGruGold/suite or XMRT-Ecosystem)' },
           issue_number: { type: 'number' },
           body: { type: 'string' }
         },
@@ -4265,6 +4308,7 @@ const ELIZA_TOOLS = [
       parameters: {
         type: 'object',
         properties: {
+          repo: { type: 'string', description: 'Repository name (for example: DevGruGold/suite or XMRT-Ecosystem)' },
           issue_number: { type: 'number' },
           title: { type: 'string' },
           body: { type: 'string' },
@@ -4284,6 +4328,7 @@ const ELIZA_TOOLS = [
       parameters: {
         type: 'object',
         properties: {
+          repo: { type: 'string', description: 'Repository name (for example: DevGruGold/suite or XMRT-Ecosystem)' },
           issue_number: { type: 'number' },
           body: { type: 'string' }
         },
@@ -4314,6 +4359,7 @@ const ELIZA_TOOLS = [
       parameters: {
         type: 'object',
         properties: {
+          repo: { type: 'string', description: 'Repository name (for example: DevGruGold/suite or XMRT-Ecosystem)' },
           state: { type: 'string', enum: ['open', 'closed', 'all'], default: 'open' },
           limit: { type: 'number', default: 10 }
         }
@@ -4347,7 +4393,7 @@ const ELIZA_TOOLS = [
     type: 'function',
     function: {
       name: 'propose_edge_function',
-      description: '🛠️ Propose a new edge function (skill) when an existing capability is missing. Provide name, description, code, parameters, and category.',
+      description: '\ud83d\udee0\ufe0f Propose a new edge function (skill) when an existing capability is missing. Provide name, description, code, parameters, and category.',
       parameters: {
         type: 'object',
         properties: {
@@ -4365,7 +4411,7 @@ const ELIZA_TOOLS = [
     type: 'function',
     function: {
       name: 'list_proposed_functions',
-      description: '📋 List all proposed edge functions, optionally filtered by status',
+      description: '\ud83d\udccb List all proposed edge functions, optionally filtered by status',
       parameters: {
         type: 'object',
         properties: {
@@ -4378,7 +4424,7 @@ const ELIZA_TOOLS = [
     type: 'function',
     function: {
       name: 'deploy_edge_function',
-      description: '🚀 Deploy a proposed edge function after council approval',
+      description: '\ud83d\ude80 Deploy a proposed edge function after council approval',
       parameters: {
         type: 'object',
         properties: {
@@ -4393,7 +4439,7 @@ const ELIZA_TOOLS = [
     type: 'function',
     function: {
       name: 'store_code_snippet',
-      description: '💾 Store a reusable code snippet (like Google Drive for code)',
+      description: '\ud83d\udcbe Store a reusable code snippet (like Google Drive for code)',
       parameters: {
         type: 'object',
         properties: {
@@ -4568,7 +4614,7 @@ Deno.serve(async (req) => {
             body.images.push(dataUrl);
           }
         }
-        console.log(`📎 Parsed multipart body: ${fileEntries.length} file(s), query="${body.userQuery}"`);
+        console.log(`\ud83d\udcce Parsed multipart body: ${fileEntries.length} file(s), query="${body.userQuery}"`);
       } else {
         body = await req.json();
       }
@@ -4611,10 +4657,10 @@ Deno.serve(async (req) => {
     const query = userQuery || messages[messages.length - 1]?.content || '';
     
     const ipAddress = IPSessionManager.extractIP(req);
-    console.log(`🌐 IP Address detected: ${ipAddress}`);
+    console.log(`\ud83c\udf10 IP Address detected: ${ipAddress}`);
     
     const sessionId = providedSessionId || await IPSessionManager.getOrCreateSessionId(ipAddress, user_id);
-    console.log(`🤖 [${executive_name}] Request ${requestId}: "${truncateString(query, 100)}" | Session: ${sessionId} | IP: ${ipAddress}`);
+    console.log(`\ud83e\udd16 [${executive_name}] Request ${requestId}: "${truncateString(query, 100)}" | Session: ${sessionId} | IP: ${ipAddress}`);
     
     const conversationManager = new EnhancedConversationManager(sessionId, ipAddress, user_id);
     
@@ -4631,7 +4677,7 @@ Deno.serve(async (req) => {
     const firstTurnDirectFastPath = isFirstEngagement && preferDirectAnswer && !explicitActionRequest;
     
     if (attachments && attachments.length > 0) {
-      console.log(`📎 Found ${attachments.length} attachment(s) in request`);
+      console.log(`\ud83d\udcce Found ${attachments.length} attachment(s) in request`);
       
       const lastMessageIndex = allMessages.length - 1;
       if (lastMessageIndex >= 0 && allMessages[lastMessageIndex].role === 'user') {
@@ -4657,7 +4703,7 @@ Deno.serve(async (req) => {
     );
     
     if (isAmbiguous && ambiguousResponse) {
-      console.log(`🤔 Handling ambiguous response: "${query}"`);
+      console.log(`\ud83e\udd14 Handling ambiguous response: "${query}"`);
       
       clearTimeout(timeoutId);
       
@@ -4704,7 +4750,7 @@ Deno.serve(async (req) => {
     const memoryContexts = await retrieveMemoryContexts(sessionId);
     let memoryContext = '';
     if (memoryContexts.length > 0) {
-      memoryContext += "## 🧠 STORED MEMORY CONTEXTS\n\n";
+      memoryContext += "## \ud83e\udde0 STORED MEMORY CONTEXTS\n\n";
       memoryContexts.forEach((ctx, idx) => {
         memoryContext += `**${idx + 1}. ${ctx.type}** (score: ${ctx.score})\n`;
         memoryContext += `${ctx.content}\n\n`;
@@ -4727,17 +4773,17 @@ Deno.serve(async (req) => {
     // If attachments present, analyze them and inject their content as context
     let attachmentContextMessage = '';
     if (attachments && attachments.length > 0) {
-      console.log(`📎 Pre-processing ${attachments.length} attachment(s) before AI call...`);
+      console.log(`\ud83d\udcce Pre-processing ${attachments.length} attachment(s) before AI call...`);
       try {
         const preAnalysis = await analyzeAttachmentTool(
           attachments, ipAddress, sessionId, user_id, undefined
         );
         if (preAnalysis.success && preAnalysis.context_summary) {
-          attachmentContextMessage = `\n\n## 📎 UPLOADED FILE CONTEXT (JUST INGESTED)\n\n${preAnalysis.context_summary}\n\nThe above files have been:\n✅ Analyzed and understood\n✅ Added to the knowledge base\n${preAnalysis.analyses?.some((a: any) => a.drive_saved) ? '✅ Saved to Google Drive' : '⚠️ Google Drive save attempted (may need auth)'}\n\nRespond to the user based on the file content above.`;
-          console.log('✅ Attachment pre-analysis complete, injecting context into messages');
+          attachmentContextMessage = `\n\n## \ud83d\udcce UPLOADED FILE CONTEXT (JUST INGESTED)\n\n${preAnalysis.context_summary}\n\nThe above files have been:\n\u2705 Analyzed and understood\n\u2705 Added to the knowledge base\n${preAnalysis.analyses?.some((a: any) => a.drive_saved) ? '\u2705 Saved to Google Drive' : '\u26a0\ufe0f Google Drive save attempted (may need auth)'}\n\nRespond to the user based on the file content above.`;
+          console.log('\u2705 Attachment pre-analysis complete, injecting context into messages');
         }
       } catch (attachErr: any) {
-        console.warn('⚠️ Attachment pre-analysis error:', attachErr.message);
+        console.warn('\u26a0\ufe0f Attachment pre-analysis error:', attachErr.message);
       }
     }
 
@@ -4749,12 +4795,12 @@ Deno.serve(async (req) => {
     // Get initial AI response
     const tools = (use_tools && !firstTurnDirectFastPath) ? ELIZA_TOOLS : [];
     const maxToolIterations = (isFirstEngagement && !explicitActionRequest) ? 1 : MAX_TOOL_ITERATIONS;
-    console.log(`⚡ First-turn optimization: firstEngagement=${isFirstEngagement}, directFastPath=${firstTurnDirectFastPath}, toolsEnabled=${tools.length > 0}, maxToolIterations=${maxToolIterations}`);
+    console.log(`\u26a1 First-turn optimization: firstEngagement=${isFirstEngagement}, directFastPath=${firstTurnDirectFastPath}, toolsEnabled=${tools.length > 0}, maxToolIterations=${maxToolIterations}`);
     let initialResult = await callAIFunction(messagesArray, tools);
     
     // If AI call failed, use emergency fallback
     if (!initialResult.success) {
-      console.warn(`⚠️ AI call failed, using emergency fallback`);
+      console.warn(`\u26a0\ufe0f AI call failed, using emergency fallback`);
       const emergencyResult = await emergencyStaticFallback(query, executive_name);
       
       clearTimeout(timeoutId);
@@ -4805,7 +4851,7 @@ Deno.serve(async (req) => {
     }
     
     const executionTime = Date.now() - startTime;
-    console.log(`✅ Request ${requestId} completed in ${executionTime}ms, executed ${toolsExecuted} tools`);
+    console.log(`\u2705 Request ${requestId} completed in ${executionTime}ms, executed ${toolsExecuted} tools`);
     
     clearTimeout(timeoutId);
     
@@ -4834,7 +4880,7 @@ Deno.serve(async (req) => {
   } catch (error: any) {
     clearTimeout(timeoutId);
     
-    console.error(`💥 Critical error for request ${requestId}:`, error);
+    console.error(`\ud83d\udca5 Critical error for request ${requestId}:`, error);
     
     if (error.name === 'AbortError') {
       return new Response(
