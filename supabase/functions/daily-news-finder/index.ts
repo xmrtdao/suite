@@ -99,7 +99,76 @@ serve(async (req) => {
 
         console.log(`🤖 Gemini selected: "${generatedContent.selected_story_title}"`);
 
-        // 4. Publish to Paragraph using the internal function call
+        // 4. Generate lead image prompt with vertex-ai-chat, then generate the lead image.
+        console.log('🖼️ Generating lead image prompt with vertex-ai-chat...');
+
+        const imagePromptRequest = `
+You are an editorial image director.
+Generate one concise, vivid prompt for Imagen to create a lead image for a news analysis article.
+
+Article title: ${generatedContent.post_title}
+Selected source story: ${generatedContent.selected_story_title}
+Article summary:
+${generatedContent.post_markdown?.slice(0, 1200)}
+
+Requirements:
+- Visual tone: journalistic, cinematic, modern, high-contrast
+- No text, captions, logos, watermarks, brand marks, or readable typography in the image
+- Avoid identifiable public figures and copyrighted characters
+- Keep it symbolic and globally relevant
+- Suitable as a 16:9 blog lead image
+
+Return ONLY a JSON object:
+{
+  "image_prompt": "prompt text here"
+}
+        `;
+
+        const { data: imagePromptData, error: imagePromptError } = await supabase.functions.invoke('vertex-ai-chat', {
+            body: {
+                prompt: imagePromptRequest
+            }
+        });
+
+        if (imagePromptError) {
+            throw new Error(`Failed to generate image prompt via vertex-ai-chat: ${imagePromptError.message}`);
+        }
+
+        const imagePromptRaw = imagePromptData?.data?.choices?.[0]?.message?.content || '';
+        let parsedImagePrompt = '';
+        try {
+            const sanitizedPrompt = imagePromptRaw.replace(/```json|```/g, '').trim();
+            parsedImagePrompt = JSON.parse(sanitizedPrompt).image_prompt;
+        } catch {
+            parsedImagePrompt = imagePromptRaw.trim();
+        }
+
+        if (!parsedImagePrompt) {
+            throw new Error('vertex-ai-chat did not return an image prompt.');
+        }
+
+        console.log('🎨 Generating lead image with vertex-ai-chat...');
+
+        const { data: imageGenData, error: imageGenError } = await supabase.functions.invoke('vertex-ai-chat', {
+            body: {
+                action: 'generate_image',
+                prompt: parsedImagePrompt,
+                aspectRatio: '16:9'
+            }
+        });
+
+        if (imageGenError) {
+            throw new Error(`Failed to generate lead image via vertex-ai-chat: ${imageGenError.message}`);
+        }
+
+        const leadImageUrl = imageGenData?.data?.imageUrl;
+        if (!leadImageUrl) {
+            throw new Error('Lead image generation completed without a public image URL.');
+        }
+
+        console.log(`✅ Lead image generated: ${leadImageUrl}`);
+
+        // 5. Publish to Paragraph using the internal function call
         // We invoke the paragraph-publisher function directly or simply call the logic if we want to save an internal hop, 
         // but invoking is cleaner architecture.
         console.log('📝 Publishing to Paragraph...');
@@ -108,6 +177,7 @@ serve(async (req) => {
             body: {
                 title: generatedContent.post_title,
                 markdown: generatedContent.post_markdown,
+                imageUrl: leadImageUrl,
                 sendNewsletter: true, // As requested, maybe? Or false for safety. User said "publish a story", usually implies standard post.
                 categories: ['News', 'XMRT Intelligence']
             }
@@ -117,7 +187,7 @@ serve(async (req) => {
 
         const publishedUrl = pubData?.data?.url || 'https://paragraph.xyz/@xmrt'; // Fallback if url is nested differently
 
-        // 5. Log Success
+        // 6. Log Success
         await supabase.from('eliza_activity_log').insert({
             activity_type: 'daily_news_published',
             title: '📰 Daily News Published',
@@ -126,6 +196,8 @@ serve(async (req) => {
             metadata: {
                 original_story: generatedContent.selected_story_title,
                 original_link: generatedContent.selected_story_link,
+                lead_image_prompt: parsedImagePrompt,
+                lead_image_url: leadImageUrl,
                 published_url: publishedUrl,
                 paragraph_response: pubData
             }
@@ -136,7 +208,8 @@ serve(async (req) => {
         return new Response(JSON.stringify({
             success: true,
             published_url: publishedUrl,
-            story: generatedContent.selected_story_title
+            story: generatedContent.selected_story_title,
+            lead_image_url: leadImageUrl
         }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
             status: 200
