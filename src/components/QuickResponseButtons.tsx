@@ -16,6 +16,20 @@ interface QuickResponseButtonsProps {
   turnCount?: number;
 }
 
+const MAX_SUGGESTIVE_BUTTON_WORDS = 4;
+
+const countWords = (label: string): number =>
+  label
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean).length;
+
+const shortenNumberedChoice = (label: string): string => {
+  const words = label.trim().split(/\s+/).filter(Boolean);
+  if (words.length <= MAX_SUGGESTIVE_BUTTON_WORDS) return label.trim();
+  return words.slice(0, MAX_SUGGESTIVE_BUTTON_WORDS).join(' ').trim();
+};
+
 // Number emoji mapping for detected options
 const numberEmojis: Record<number, string> = {
   1: '1️⃣',
@@ -107,10 +121,8 @@ const extractNumberedOptions = (content: string): ButtonConfig[] | null => {
         .replace(/\s*[-–—]\s*.*$/, '') // Remove dash explanations
         .trim();
       
-      // Truncate long labels
-      if (label.length > 50) {
-        label = label.substring(0, 47) + '...';
-      }
+      // For numbered choices only, keep the label concise (<= 4 words)
+      label = shortenNumberedChoice(label);
       
       // Skip empty or too short labels
       if (label.length < 3) continue;
@@ -134,23 +146,23 @@ const extractNumberedOptions = (content: string): ButtonConfig[] | null => {
 
 // Buttons shown when conversation is empty
 const emptyConversationResponses: ButtonConfig[] = [
-  { label: "Hello! What can you do?", emoji: "👋" },
-  { label: "Show me system status", emoji: "📊" },
-  { label: "Help me get started", emoji: "🎯" }
+  { label: "What can you do?", emoji: "👋" },
+  { label: "Plan my next move", emoji: "🎯" },
+  { label: "Get 'er done", emoji: "🧰" }
 ];
 
 // Buttons shown for returning users who already have conversation history
 const returningUserResponses: ButtonConfig[] = [
   { label: "Where were we?", emoji: "🧠" },
-  { label: "What's new?", emoji: "✨" },
-  { label: "Get my email", emoji: "📧" }
+  { label: "Show recent changes", emoji: "✨" },
+  { label: "Draft my emails", emoji: "📧" }
 ];
 
 // Buttons shown after user sends (while waiting for AI)
 const afterUserResponses: ButtonConfig[] = [
-  { label: "List available tools", emoji: "🛠️" },
-  { label: "Check system health", emoji: "💚" },
-  { label: "What's new?", emoji: "✨" }
+  { label: "Find related docs", emoji: "📚" },
+  { label: "Check open issues", emoji: "🛠️" },
+  { label: "Queue next actions", emoji: "✨" }
 ];
 
 // Executive-specific button configurations
@@ -159,43 +171,43 @@ const executiveButtonSets: Record<string, {
   contextualButtons: ButtonConfig[];
 }> = {
   'deepseek-chat': { // CTO - Technical focus
-    feedbackButton: { label: "Great work, proceed with the fix", emoji: "✅" },
+    feedbackButton: { label: "Proceed with fix", emoji: "✅" },
     contextualButtons: [
-      { label: "Show me the code", emoji: "📝" },
-      { label: "Run the tests", emoji: "🧪" },
-      { label: "Check for security issues", emoji: "🔒" }
+      { label: "Review changed code", emoji: "📝" },
+      { label: "Run focused tests", emoji: "🧪" },
+      { label: "Scan security gaps", emoji: "🔒" }
     ]
   },
   'gemini-chat': { // CIO - Vision/Information focus
-    feedbackButton: { label: "Good analysis, continue", emoji: "✅" },
+    feedbackButton: { label: "Continue analysis", emoji: "✅" },
     contextualButtons: [
       { label: "Analyze another image", emoji: "🖼️" },
-      { label: "Extract text from this", emoji: "📄" },
-      { label: "What patterns do you see?", emoji: "🔍" }
+      { label: "Extract key text", emoji: "📄" },
+      { label: "Reveal key patterns", emoji: "🔍" }
     ]
   },
   'openai-chat': { // CAO - Analytics focus
-    feedbackButton: { label: "Solid analysis, proceed", emoji: "✅" },
+    feedbackButton: { label: "Proceed with insights", emoji: "✅" },
     contextualButtons: [
-      { label: "Give me more data", emoji: "📈" },
-      { label: "What are the risks?", emoji: "⚠️" },
-      { label: "Recommend next steps", emoji: "🎯" }
+      { label: "Pull deeper metrics", emoji: "📈" },
+      { label: "Highlight top risks", emoji: "⚠️" },
+      { label: "Recommend next actions", emoji: "🎯" }
     ]
   },
   'vercel-ai-chat': { // CSO - Strategy focus
-    feedbackButton: { label: "Good strategy, please proceed", emoji: "✅" },
+    feedbackButton: { label: "Advance this strategy", emoji: "✅" },
     contextualButtons: [
-      { label: "What should I do next?", emoji: "🚀" },
-      { label: "Coordinate with the council", emoji: "👥" },
-      { label: "Help me plan this out", emoji: "📋" }
+      { label: "Pick my next step", emoji: "🚀" },
+      { label: "Coordinate council votes", emoji: "👥" },
+      { label: "Build action roadmap", emoji: "📋" }
     ]
   },
   'lovable-chat': { // Default Eliza
-    feedbackButton: { label: "Good job, please proceed", emoji: "✅" },
+    feedbackButton: { label: "Proceed with plan", emoji: "✅" },
     contextualButtons: [
       { label: "Tell me more", emoji: "🔄" },
-      { label: "What else can you help with?", emoji: "❓" },
-      { label: "Show me system status", emoji: "📊" }
+      { label: "Try another workflow", emoji: "❓" },
+      { label: "Get 'er done", emoji: "🧰" }
     ]
   }
 };
@@ -221,47 +233,6 @@ const detectActionIntent = (content: string): boolean => {
   ];
   
   return actionPatterns.some(pattern => pattern.test(lowerContent));
-};
-
-const normalizeImperativeLabel = (text: string): string => {
-  const cleaned = text
-    .replace(/^to\s+/i, '')
-    .replace(/\s+(now|next|right now|please)\b/gi, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/[.?!,:;]+$/g, '');
-
-  if (!cleaned) return 'Continue.';
-
-  const capitalized = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
-  return `${capitalized}.`;
-};
-
-// Build a continuation button that mirrors the assistant's last-turn wording.
-const buildSmartActionLabel = (content: string): string => {
-  const trimmed = content.trim();
-  if (!trimmed) return 'Continue.';
-
-  const extractionPatterns: RegExp[] = [
-    /should i\s+([^?.!]+)/i,
-    /would you like me to\s+([^?.!]+)/i,
-    /do you want me to\s+([^?.!]+)/i,
-    /want me to\s+([^?.!]+)/i,
-    /i can\s+([^?.!]+)/i,
-    /i(?:'ll| will| can| am going to| 'm going to)\s+([^?.!]+)/i,
-    /let me\s+([^?.!]+)/i,
-    /ready to\s+([^?.!]+)/i,
-  ];
-
-  for (const pattern of extractionPatterns) {
-    const match = trimmed.match(pattern);
-    if (match?.[1]) {
-      return normalizeImperativeLabel(match[1]);
-    }
-  }
-
-  const firstSentence = trimmed.split(/[.!?]/)[0] || trimmed;
-  return normalizeImperativeLabel(firstSentence);
 };
 
 // Topic detection patterns
@@ -294,34 +265,34 @@ const detectConversationTopics = (content: string): string[] => {
 // Topic-specific contextual buttons
 const topicButtons: Record<string, ButtonConfig[]> = {
   technical: [
-    { label: "Show me the error logs", emoji: "📋" },
-    { label: "Deploy the fix", emoji: "🚀" },
-    { label: "Run diagnostics", emoji: "🔧" }
+    { label: "Inspect error logs", emoji: "📋" },
+    { label: "Ship the patch", emoji: "🚀" },
+    { label: "Run diagnostics now", emoji: "🔧" }
   ],
   status: [
-    { label: "Check all systems", emoji: "💚" },
-    { label: "Show agent status", emoji: "🤖" },
-    { label: "Any issues to address?", emoji: "⚠️" }
+    { label: "Review active blockers", emoji: "💚" },
+    { label: "List available agents", emoji: "🤖" },
+    { label: "Prioritize urgent work", emoji: "⚠️" }
   ],
   tasks: [
     { label: "Show task pipeline", emoji: "📊" },
-    { label: "Assign to an agent", emoji: "🤖" },
-    { label: "What's blocking progress?", emoji: "🚧" }
+    { label: "Assign next tasks", emoji: "🤖" },
+    { label: "Resolve blocked work", emoji: "🚧" }
   ],
   governance: [
-    { label: "Show pending proposals", emoji: "📜" },
-    { label: "How did executives vote?", emoji: "🗳️" },
+    { label: "Review pending proposals", emoji: "📜" },
+    { label: "Show executive votes", emoji: "🗳️" },
     { label: "Submit my vote", emoji: "✋" }
   ],
   mining: [
-    { label: "Check my mining stats", emoji: "⛏️" },
+    { label: "Review mining stats", emoji: "⛏️" },
     { label: "Show hashrate trends", emoji: "📈" },
-    { label: "Optimize my setup", emoji: "⚡" }
+    { label: "Optimize mining setup", emoji: "⚡" }
   ],
   analytics: [
-    { label: "Deeper analysis please", emoji: "🔬" },
-    { label: "Compare with last week", emoji: "📅" },
-    { label: "Export this data", emoji: "💾" }
+    { label: "Run deeper analysis", emoji: "🔬" },
+    { label: "Compare last week", emoji: "📅" },
+    { label: "Export this dataset", emoji: "💾" }
   ]
 };
 
@@ -332,6 +303,32 @@ const GO_SURFING_BUTTON: ButtonConfig = {
 
 const GO_SURFING_PROMPT =
   "Go Surfing 🏄‍♀️ — Eliza, use browse_web to follow your curiosity and engage your imagination for a series of 3 chained tool calls based on your own whims. Don't bother telling me what you're going to surf, just explore and return with your summarized synthesis of what you explored and what you learned.";
+
+const GET_ER_DONE_BUTTON: ButtonConfig = {
+  label: "Get 'er done",
+  emoji: "🧰",
+};
+
+const GET_ER_DONE_PROMPT =
+  "Get 'er done 🧰 — Eliza, run a triage workflow: (1) gather latest 20 GitHub issues and latest PRs, (2) gather my latest 20 inbox emails and draft replies in Gmail first, clearly stating which drafts were created and what I must do to send each one, (3) gather recently edited Google Drive docs/sheets and relevant calendar items, (4) verify all findings against recent conversation context, (5) list currently available agents and choose qualified available agents, (6) create and assign prioritized tasks across email follow-ups, GitHub work, and document collaboration, (7) run a lightweight system check, and (8) report what changed since my last visit plus what work is now underway, by whom, and toward which goals.";
+
+const normalizeSuggestedButtons = (buttons: ButtonConfig[]): ButtonConfig[] => {
+  const normalized: ButtonConfig[] = [];
+  const seen = new Set<string>();
+
+  for (const button of buttons) {
+    const label = button.label.trim();
+    if (!label || seen.has(label)) continue;
+
+    const isNumberedChoice = Object.values(numberEmojis).includes(button.emoji);
+    if (!isNumberedChoice && countWords(label) > MAX_SUGGESTIVE_BUTTON_WORDS) continue;
+
+    normalized.push({ ...button, label });
+    seen.add(label);
+  }
+
+  return normalized;
+};
 
 const getContextualButtons = (
   lastMessageContent: string | undefined,
@@ -345,18 +342,18 @@ const getContextualButtons = (
   if (!hasUserEngaged) {
     if (hasPastConversations) {
       return turnCount >= 3
-        ? [...returningUserResponses, GO_SURFING_BUTTON]
+        ? normalizeSuggestedButtons([...returningUserResponses, GET_ER_DONE_BUTTON, GO_SURFING_BUTTON])
         : returningUserResponses;
     }
     return turnCount >= 3
-      ? [...emptyConversationResponses, GO_SURFING_BUTTON]
+      ? normalizeSuggestedButtons([...emptyConversationResponses, GO_SURFING_BUTTON])
       : emptyConversationResponses;
   }
   
   // While waiting for AI response
   if (lastMessageRole === 'user') {
     return turnCount >= 3
-      ? [...afterUserResponses, GO_SURFING_BUTTON]
+      ? normalizeSuggestedButtons([...afterUserResponses, GET_ER_DONE_BUTTON, GO_SURFING_BUTTON])
       : afterUserResponses;
   }
   
@@ -364,7 +361,7 @@ const getContextualButtons = (
   const numberedOptions = extractNumberedOptions(lastMessageContent || '');
   if (numberedOptions && isUserChoiceList(lastMessageContent || '')) {
     return turnCount >= 3
-      ? [...numberedOptions, GO_SURFING_BUTTON]
+      ? normalizeSuggestedButtons([...numberedOptions, GET_ER_DONE_BUTTON, GO_SURFING_BUTTON])
       : numberedOptions;
   }
   
@@ -379,7 +376,7 @@ const getContextualButtons = (
   
   // 1. Add action confirmation or feedback button first
   if (hasActionIntent) {
-    buttons.push({ label: buildSmartActionLabel(lastMessageContent || ''), emoji: "👍" });
+    buttons.push({ label: "Ok, do it!", emoji: "👍" });
   } else {
     buttons.push(execConfig.feedbackButton);
   }
@@ -409,7 +406,11 @@ const getContextualButtons = (
     buttons.push(GO_SURFING_BUTTON);
   }
 
-  return buttons;
+  if (!buttons.some((button) => button.label === GET_ER_DONE_BUTTON.label)) {
+    buttons.push(GET_ER_DONE_BUTTON);
+  }
+
+  return normalizeSuggestedButtons(buttons);
 };
 
 export const QuickResponseButtons = ({ 
@@ -442,6 +443,8 @@ export const QuickResponseButtons = ({
             onQuickResponse(
               response.label === GO_SURFING_BUTTON.label
                 ? GO_SURFING_PROMPT
+                : response.label === GET_ER_DONE_BUTTON.label
+                  ? GET_ER_DONE_PROMPT
                 : response.label
             )
           }
