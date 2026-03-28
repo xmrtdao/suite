@@ -8,8 +8,6 @@ export class EnhancedTTSService {
   private static instance: EnhancedTTSService;
   private lastMethod = 'Web Speech API';
   private initialized = false;
-  private readonly SUMMARY_TRIGGER_CHARS = 1200;
-  private readonly SUMMARY_MAX_CHARS = 700;
 
   private constructor() {}
 
@@ -50,54 +48,8 @@ export class EnhancedTTSService {
       .trim();
   }
 
-  private summarizeForTTS(text: string): string {
-    const cleaned = this.toSpeechFriendlyText(text);
-
-    if (!cleaned || cleaned.length <= this.SUMMARY_TRIGGER_CHARS) {
-      return cleaned;
-    }
-
-    const sentences = cleaned
-      .split(/(?<=[.!?])\s+/)
-      .map((sentence) => sentence.trim())
-      .filter(Boolean);
-
-    if (sentences.length <= 3) {
-      return cleaned.slice(0, this.SUMMARY_MAX_CHARS).trim();
-    }
-
-    const withScores = sentences.map((sentence, index) => {
-      let score = 0;
-
-      if (index === 0) score += 3;
-      if (index < 4) score += 2;
-      if (/\d/.test(sentence)) score += 2;
-      if (/(important|key|recommend|next|action|summary|result|because|therefore|should)/i.test(sentence)) {
-        score += 2;
-      }
-
-      const wordCount = sentence.split(/\s+/).length;
-      if (wordCount >= 8 && wordCount <= 30) score += 1;
-
-      return { sentence, index, score };
-    });
-
-    const selected = withScores
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 5)
-      .sort((a, b) => a.index - b.index)
-      .map((item) => item.sentence);
-
-    let summary = selected.join(' ');
-    if (summary.length > this.SUMMARY_MAX_CHARS) {
-      summary = `${summary.slice(0, this.SUMMARY_MAX_CHARS).trim()}...`;
-    }
-
-    return `Here is a concise spoken summary. ${summary}`;
-  }
-
   async speak(text: string, options?: Partial<UnifiedTTSOptions>): Promise<void> {
-    const speechText = this.summarizeForTTS(text);
+    const speechText = this.toSpeechFriendlyText(text);
     if (!speechText) {
       return;
     }
