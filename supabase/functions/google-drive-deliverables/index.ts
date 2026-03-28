@@ -252,7 +252,7 @@ serve(async (req: Request) => {
         const shortId = task_id.slice(0, 8);
 
         // ── 2. Ensure Drive folder hierarchy ──────────────────────────────────
-        const { folderId, folderUrl } = await ensureFolder(supabaseAdmin, accessToken, deliverableType, shortId);
+        const { folderId, folderUrl } = await ensureFolder(supabaseAdmin, accessToken, deliverable_type, shortId);
         console.log(`📁 [drive-deliverables] Folder ready: ${folderId}`);
 
         // ── 3. Create Google Doc and insert content ────────────────────────────
@@ -424,7 +424,8 @@ serve(async (req: Request) => {
                 last_work_result: existingResult.includes('Google Drive Deliverables')
                     ? existingResult  // already has links — don't duplicate
                     : existingResult + deliverableFooter,
-                drive_deliverables: [...existingDeliverables, deliverableRecord]
+                drive_deliverables: [...existingDeliverables, deliverableRecord],
+                proof_of_work_link: docUrl || pdfUrl || sheetUrl || folderUrl
             })
             .eq('id', task_id);
 
