@@ -300,6 +300,27 @@ const GET_ER_DONE_PROMPT =
 const DRAFT_MY_EMAILS_PROMPT =
   "Draft my emails 📧 — Eliza, fetch my latest 10 emails before drafting anything. Intelligently classify each message as actionable, ads/promotions, spam/suspicious, or no-reply/automated failure notice. Do NOT draft replies for ads, spam, no-reply senders, or failure notices; only draft concise, high-quality responses for truly actionable emails.";
 
+const SEND_EMAIL_BUTTON: ButtonConfig = {
+  label: "Send Email",
+  emoji: "📨",
+};
+
+const SEND_EMAIL_PROMPT =
+  "Send Email 📨 — Eliza, if you already prepared a draft email, send it now. If multiple drafts are ready, send the highest-priority actionable draft first and then summarize what was sent.";
+
+const draftEmailPreparedPatterns = [
+  /prepared (a|an)?\s*draft email/i,
+  /i('ve| have)\s+(prepared|drafted)\s+(a|an)?\s*email/i,
+  /draft email (is )?(ready|prepared)/i,
+  /here'?s (your|the)\s+draft email/i,
+  /email draft (is )?(ready|prepared)/i,
+];
+
+const hasPreparedDraftEmailSignal = (content: string | undefined): boolean => {
+  if (!content) return false;
+  return draftEmailPreparedPatterns.some((pattern) => pattern.test(content));
+};
+
 const normalizeSuggestedButtons = (buttons: ButtonConfig[]): ButtonConfig[] => {
   const normalized: ButtonConfig[] = [];
   const seen = new Set<string>();
@@ -356,6 +377,11 @@ const getContextualButtons = (
   
   // After AI response - build dynamic buttons
   const buttons: ButtonConfig[] = [];
+
+  // If the assistant indicates an email draft is ready, surface send action immediately.
+  if (hasPreparedDraftEmailSignal(lastMessageContent)) {
+    buttons.push(SEND_EMAIL_BUTTON);
+  }
   
   // Get executive config or default to lovable-chat
   const execConfig = executiveButtonSets[lastExecutive || 'lovable-chat'] || executiveButtonSets['lovable-chat'];
@@ -429,6 +455,8 @@ export const QuickResponseButtons = ({
                   ? GET_ER_DONE_PROMPT
                 : response.label === GET_MY_EMAILS_BUTTON.label
                   ? GET_MY_EMAILS_PROMPT
+                  : response.label === SEND_EMAIL_BUTTON.label
+                    ? SEND_EMAIL_PROMPT
                   : response.label === "Draft my emails"
                     ? DRAFT_MY_EMAILS_PROMPT
                     : response.label
