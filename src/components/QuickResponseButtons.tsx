@@ -223,6 +223,47 @@ const detectActionIntent = (content: string): boolean => {
   return actionPatterns.some(pattern => pattern.test(lowerContent));
 };
 
+const normalizeImperativeLabel = (text: string): string => {
+  const cleaned = text
+    .replace(/^to\s+/i, '')
+    .replace(/\s+(now|next|right now|please)\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[.?!,:;]+$/g, '');
+
+  if (!cleaned) return 'Continue.';
+
+  const capitalized = cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+  return `${capitalized}.`;
+};
+
+// Build a continuation button that mirrors the assistant's last-turn wording.
+const buildSmartActionLabel = (content: string): string => {
+  const trimmed = content.trim();
+  if (!trimmed) return 'Continue.';
+
+  const extractionPatterns: RegExp[] = [
+    /should i\s+([^?.!]+)/i,
+    /would you like me to\s+([^?.!]+)/i,
+    /do you want me to\s+([^?.!]+)/i,
+    /want me to\s+([^?.!]+)/i,
+    /i can\s+([^?.!]+)/i,
+    /i(?:'ll| will| can| am going to| 'm going to)\s+([^?.!]+)/i,
+    /let me\s+([^?.!]+)/i,
+    /ready to\s+([^?.!]+)/i,
+  ];
+
+  for (const pattern of extractionPatterns) {
+    const match = trimmed.match(pattern);
+    if (match?.[1]) {
+      return normalizeImperativeLabel(match[1]);
+    }
+  }
+
+  const firstSentence = trimmed.split(/[.!?]/)[0] || trimmed;
+  return normalizeImperativeLabel(firstSentence);
+};
+
 // Topic detection patterns
 const detectConversationTopics = (content: string): string[] => {
   const topics: string[] = [];
@@ -338,7 +379,7 @@ const getContextualButtons = (
   
   // 1. Add action confirmation or feedback button first
   if (hasActionIntent) {
-    buttons.push({ label: "Ok, do it!", emoji: "👍" });
+    buttons.push({ label: buildSmartActionLabel(lastMessageContent || ''), emoji: "👍" });
   } else {
     buttons.push(execConfig.feedbackButton);
   }
