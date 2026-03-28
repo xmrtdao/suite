@@ -310,7 +310,7 @@ const GET_ER_DONE_BUTTON: ButtonConfig = {
 };
 
 const GET_ER_DONE_PROMPT =
-  "Get 'er done 🧰 — Eliza, run a GitHub-only triage workflow: (1) gather the 10 most recent GitHub issues, (2) gather the 10 most recent merged PRs in production code, (3) compare issues against merged PRs to identify what is still open versus already delivered, (4) summarize all remaining work that still needs to be done, and (5) if work remains, propose a concrete execution plan that assigns each item to a targeted agent with clear next steps and priorities for me to approve.";
+  "Get 'er done 🧰 — Eliza, in single-AI mode complete this in ONE turn by using tool chaining + your own curiosity: (1) pick one explicit operational purpose that would create concrete business value now, (2) randomly choose 4-7 edge functions from your full 293-function toolset that are relevant to that purpose and likely underused, (3) state the exact tool-call order before execution, (4) execute every planned call in sequence without asking follow-up questions, (5) after each call, use the result to decide the next best call while still finishing the full chain, and (6) deliver a final response with: purpose, exact tools used in order, key findings from each step, completed actions, and recommended next actions. Do not stop early; finish all actions and respond fully in this single turn.";
 
 const normalizeSuggestedButtons = (buttons: ButtonConfig[]): ButtonConfig[] => {
   const normalized: ButtonConfig[] = [];
