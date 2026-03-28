@@ -1,5 +1,12 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.46.2";
+import {
+  buildContextLensBlock,
+  buildRecentEntityRecallBlock,
+  inferContextFromText,
+  parseContextDirective,
+  resolveActiveContext,
+} from "../_shared/contextualIntelligence.ts";
 
 // ========== ENVIRONMENT CONFIGURATION ==========
 const SUPABASE_URL = Deno.env.get('NEXT_PUBLIC_SUPABASE_URL') || 'https://vawouugtzwmejxqkeqqj.supabase.co';
@@ -56,7 +63,9 @@ const DATABASE_CONFIG = {
     ip_conversation_sessions: 'ip_conversation_sessions',
     // NEW: Solution Engine tables
     proposed_edge_functions: 'proposed_edge_functions',
-    code_snippets: 'code_snippets'
+    code_snippets: 'code_snippets',
+    user_context_profiles: 'user_context_profiles',
+    context_session_snapshots: 'context_session_snapshots'
   },
   
   agentStatuses: ['IDLE', 'BUSY', 'ARCHIVED', 'ERROR', 'OFFLINE'] as const,
@@ -2413,18 +2422,24 @@ function convertToolsToGeminiFormat(tools: any[]): any[] {
   }));
 }
 
-async function retrieveMemoryContexts(sessionKey: string): Promise<any[]> {
+async function retrieveMemoryContexts(sessionKey: string, activeContext?: string): Promise<any[]> {
   if (!sessionKey) return [];
   
   console.log('\ud83d\udcda Retrieving memory contexts server-side...');
   try {
-    const { data: serverMemories, error } = await supabase
+    let query = supabase
       .from(DATABASE_CONFIG.tables.memory_contexts)
       .select('context_type, content, importance_score')
       .or(`user_id.eq.${sessionKey},session_id.eq.${sessionKey}`)
       .order('importance_score', { ascending: false })
       .order('created_at', { ascending: false })
       .limit(30);
+
+    if (activeContext) {
+      query = query.in('context_type', [activeContext, 'general', 'General', 'default']);
+    }
+
+    const { data: serverMemories, error } = await query;
     
     if (error) throw error;
     
@@ -2440,6 +2455,67 @@ async function retrieveMemoryContexts(sessionKey: string): Promise<any[]> {
     console.warn('\u26a0\ufe0f Failed to retrieve memory contexts:', error.message);
   }
   return [];
+}
+
+async function loadProfileDefaultContext(userId?: string): Promise<string | null> {
+  if (!userId) return null;
+
+  try {
+    const { data, error } = await supabase
+      .from(DATABASE_CONFIG.tables.user_context_profiles)
+      .select('default_context')
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (error) throw error;
+    return data?.default_context || null;
+  } catch (error: any) {
+    console.warn('⚠️ Failed to load context profile:', error.message);
+    return null;
+  }
+}
+
+async function loadSessionStoredContext(sessionId: string): Promise<string | null> {
+  if (!sessionId) return null;
+
+  try {
+    const { data, error } = await supabase
+      .from(DATABASE_CONFIG.tables.context_session_snapshots)
+      .select('context_name')
+      .eq('session_id', sessionId)
+      .maybeSingle();
+
+    if (error) throw error;
+    return data?.context_name || null;
+  } catch (error: any) {
+    console.warn('⚠️ Failed to load session context snapshot:', error.message);
+    return null;
+  }
+}
+
+async function saveContextSnapshot(params: {
+  sessionId: string;
+  userId?: string;
+  contextName: string;
+  source: string;
+  confidence: number;
+  signals: string[];
+}): Promise<void> {
+  try {
+    await supabase
+      .from(DATABASE_CONFIG.tables.context_session_snapshots)
+      .upsert({
+        session_id: params.sessionId,
+        user_id: params.userId || null,
+        context_name: params.contextName,
+        source: params.source,
+        inference_confidence: params.confidence,
+        signals: params.signals,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'session_id' });
+  } catch (error: any) {
+    console.warn('⚠️ Failed to save context snapshot:', error.message);
+  }
 }
 
 async function callDeepSeekFallback(messages: any[], tools?: any[]): Promise<any> {
@@ -2962,6 +3038,11 @@ class EnhancedConversationManager {
     
     const successful = toolResults.filter(r => r.result?.success).length;
     const failed = toolResults.filter(r => !r.result?.success).length;
+
+    const recallCache = buildRecentEntityRecallBlock(toolResults);
+    if (recallCache) {
+      context += recallCache;
+    }
     
     context += `### TOOL STATISTICS\n`;
     context += `\u2022 Total executions: ${toolResults.length}\n`;
@@ -3725,7 +3806,8 @@ function generateSystemPrompt(
   memoryContext: string = '',
   historicalSummaries: any[] = [],
   recentContext: any[] = [],
-  ipAddress: string = 'unknown'
+  ipAddress: string = 'unknown',
+  contextLayerBlock: string = ''
 ): string {
   let historicalContext = '';
   
@@ -3846,6 +3928,7 @@ DATABASE SCHEMA AWARENESS:
 
 ${historicalContext}
 ${followUpContext}
+${contextLayerBlock}
 ${memoryContext}
 
 ## \ud83c\udfaf IP-BASED CONVERSATION PERSISTENCE
@@ -4640,7 +4723,10 @@ Deno.serve(async (req) => {
       save_memory = true,
       images = [],
       attachments = [],
-      user_id
+      user_id,
+      active_context,
+      context_directive,
+      context_hints
     } = body;
     
     if (!userQuery && (!messages || messages.length === 0)) {
@@ -4655,13 +4741,44 @@ Deno.serve(async (req) => {
     }
     
     const query = userQuery || messages[messages.length - 1]?.content || '';
-    
+
+    const directiveContext = parseContextDirective(context_directive || query);
+    const inferredContextData = inferContextFromText(query, messages);
+
     const ipAddress = IPSessionManager.extractIP(req);
     console.log(`\ud83c\udf10 IP Address detected: ${ipAddress}`);
     
     const sessionId = providedSessionId || await IPSessionManager.getOrCreateSessionId(ipAddress, user_id);
-    console.log(`\ud83e\udd16 [${executive_name}] Request ${requestId}: "${truncateString(query, 100)}" | Session: ${sessionId} | IP: ${ipAddress}`);
-    
+    console.log(`🤖 [${executive_name}] Request ${requestId}: "${truncateString(query, 100)}" | Session: ${sessionId} | IP: ${ipAddress}`);
+
+    const [profileDefaultContext, storedSessionContext] = await Promise.all([
+      loadProfileDefaultContext(user_id),
+      loadSessionStoredContext(sessionId),
+    ]);
+
+    const resolvedContext = resolveActiveContext({
+      explicitContext: active_context,
+      directive: directiveContext,
+      storedContext: storedSessionContext,
+      profileDefaultContext,
+      inferredContext: inferredContextData.context,
+    });
+
+    const contextSignals = Array.isArray(context_hints)
+      ? context_hints.map((h: any) => String(h)).slice(0, 8)
+      : inferredContextData.signals;
+
+    await saveContextSnapshot({
+      sessionId,
+      userId: user_id,
+      contextName: resolvedContext.activeContext,
+      source: resolvedContext.source,
+      confidence: resolvedContext.confidence,
+      signals: contextSignals,
+    });
+
+    const contextLayerBlock = buildContextLensBlock(resolvedContext, contextSignals);
+
     const conversationManager = new EnhancedConversationManager(sessionId, ipAddress, user_id);
     
     const { 
@@ -4721,7 +4838,8 @@ Deno.serve(async (req) => {
           hasToolCalls: false,
           executionTimeMs: Date.now() - startTime,
           session_id: sessionId,
-          request_id: requestId
+          request_id: requestId,
+          context: resolvedContext
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
@@ -4735,7 +4853,8 @@ Deno.serve(async (req) => {
           content: "How can I help you?",
           executive: executive_name,
           session_id: sessionId,
-          request_id: requestId
+          request_id: requestId,
+          context: resolvedContext
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
@@ -4747,7 +4866,7 @@ Deno.serve(async (req) => {
       recentContext = await conversationManager.loadRecentContext();
     }
     
-    const memoryContexts = await retrieveMemoryContexts(sessionId);
+    const memoryContexts = await retrieveMemoryContexts(sessionId, resolvedContext.activeContext);
     let memoryContext = '';
     if (memoryContexts.length > 0) {
       memoryContext += "## \ud83e\udde0 STORED MEMORY CONTEXTS\n\n";
@@ -4766,7 +4885,8 @@ Deno.serve(async (req) => {
       memoryContext, 
       historicalSummaries,
       recentContext,
-      ipAddress
+      ipAddress,
+      contextLayerBlock
     );
     
     // ====== ATTACHMENT PRE-PROCESSING: Analyze before AI call ======
@@ -4820,7 +4940,8 @@ Deno.serve(async (req) => {
           executionTimeMs: Date.now() - startTime,
           session_id: sessionId,
           request_id: requestId,
-          note: 'Used fallback response due to AI provider issues'
+          note: 'Used fallback response due to AI provider issues',
+          context: resolvedContext
         }),
         { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
@@ -4866,6 +4987,7 @@ Deno.serve(async (req) => {
         session_id: sessionId,
         request_id: requestId,
         executionTimeMs: executionTime,
+        context: resolvedContext,
         memory: {
           previous_tool_results: previousToolResults.length,
           current_tool_results: toolsExecuted,
