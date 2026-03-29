@@ -189,7 +189,10 @@ const Index = () => {
           {/* 2. Chat Interface */}
           <Card className="glass-card overflow-hidden">
             <CardContent className="p-0">
-              <UnifiedChat enableMiningStats={false} />
+              <UnifiedChat
+                enableMiningStats={false}
+                className="h-[1667px] sm:h-[2000px]"
+              />
             </CardContent>
           </Card>
 
