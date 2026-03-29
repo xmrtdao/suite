@@ -89,6 +89,35 @@ interface UnifiedMessage {
 const normalizeMessageContent = (content: string): string =>
   (content || '').replace(/\s+/g, ' ').trim();
 
+interface ToolMarkupSanitizationResult {
+  cleanText: string;
+  removedRawToolMarkup: boolean;
+}
+
+const sanitizeRawToolMarkup = (content: string): ToolMarkupSanitizationResult => {
+  let cleanText = content || '';
+  const originalText = cleanText;
+
+  // Remove XML-style tool wrappers that should never be shown to users
+  cleanText = cleanText
+    .replace(/<tool_use>[\s\S]*?<\/tool_use>/gi, '')
+    .replace(/<tool_code>[\s\S]*?<\/tool_code>/gi, '');
+
+  // Remove fenced snippets that look like pseudo tool invocation code
+  cleanText = cleanText.replace(
+    /```(?:python|tool|tool_code)?\s*\n[\s\S]*?default_api\.[\s\S]*?```/gi,
+    ''
+  );
+
+  // Remove single-line pseudo tool invocation remnants
+  cleanText = cleanText.replace(/^\s*print\(\s*default_api\.[^\n]*\)\s*$/gim, '');
+
+  return {
+    cleanText: cleanText.trim(),
+    removedRawToolMarkup: cleanText.trim() !== originalText.trim(),
+  };
+};
+
 // MiningStats imported from unifiedDataService
 import { ExecutiveName, EXECUTIVE_PROFILES } from './ExecutiveBio';
 
@@ -1982,8 +2011,9 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       // Check if this is a workflow initiation message
       const isWorkflowInitiation = responseText.includes('🎬') && responseText.includes('background');
 
-      // Remove tool_use tags from chat display
-      let cleanResponse = responseText.replace(/<tool_use>[\s\S]*?<\/tool_use>/g, '').trim();
+      // Remove raw/pseudo tool markup from chat display and only show real tool call telemetry
+      const sanitizedToolMarkup = sanitizeRawToolMarkup(responseText);
+      let cleanResponse = sanitizedToolMarkup.cleanText;
 
       // 🖼️ Extract base64 images from response to prevent UI freeze
       let generatedImages: string[] = [];
@@ -2018,11 +2048,6 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
         cleanResponse = cleanResponse.replace(videoUrlRegex, '').trim();
       }
 
-      // If it's a workflow initiation, show a brief acknowledgment instead
-      const displayContent = isWorkflowInitiation
-        ? '🔄 Processing your request in the background. I\'ll share the results shortly...'
-        : cleanResponse;
-
       // Extract reasoning from response if available
       let reasoning: ReasoningStep[] = [];
       try {
@@ -2039,6 +2064,21 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       const toolCalls = (window as any).__lastElizaToolCalls || [];
       const executiveTitle = (window as any).__lastElizaExecutiveTitle || '';
 
+      if (sanitizedToolMarkup.removedRawToolMarkup && toolCalls.length > 0) {
+        const executedToolsSummary = toolCalls
+          .map((tool: { function_name?: string; status?: string }) =>
+            tool?.function_name
+              ? `- ${tool.function_name}${tool.status ? ` (${tool.status})` : ''}`
+              : null
+          )
+          .filter(Boolean)
+          .join('\n');
+
+        if (executedToolsSummary) {
+          cleanResponse = `${cleanResponse}\n\n✅ **Executed tools**\n${executedToolsSummary}`.trim();
+        }
+      }
+
       if (toolCalls.length > 0) {
         toolCalls.forEach((tool: { function_name?: string }) => {
           if (tool.function_name) {
@@ -2046,6 +2086,11 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
           }
         });
       }
+
+      // If it's a workflow initiation, show a brief acknowledgment instead
+      const displayContent = isWorkflowInitiation
+        ? '🔄 Processing your request in the background. I\'ll share the results shortly...'
+        : cleanResponse;
 
       const elizaMessage: UnifiedMessage = {
         id: `eliza-${Date.now()}`,
