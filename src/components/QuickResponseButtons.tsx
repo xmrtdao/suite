@@ -308,6 +308,41 @@ const SEND_EMAIL_BUTTON: ButtonConfig = {
 const SEND_EMAIL_PROMPT =
   "Send Email 📨 — Eliza, if you already prepared a draft email, send it now. If multiple drafts are ready, send the highest-priority actionable draft first and then summarize what was sent.";
 
+const STORE_IN_KNOWLEDGE_BUTTON: ButtonConfig = {
+  label: "Store in your Knowledge",
+  emoji: "🧠",
+};
+
+const STORE_IN_KNOWLEDGE_PROMPT =
+  "Store in your Knowledge 🧠 — Eliza, store the key information from your most recent completed result into your knowledgebase for permanent recall. Save concise structured memory covering context, verified facts/findings, decisions made, completed workflow steps, and recommended next actions. If confidence is low, explicitly mark uncertainty in the stored record.";
+
+const workflowCompletionPatterns = [
+  /create a workflow/i,
+  /completed successful workflow/i,
+  /workflow completed/i,
+  /workflow succeeded/i,
+  /functional workflow/i,
+  /every step (succeeded|completed)/i,
+];
+
+const researchReturnPatterns = [
+  /\bresearch\b/i,
+  /\bfindings\b/i,
+  /\binsights?\b/i,
+  /\bi (found|learned|discovered)\b/i,
+  /\bi explored\b/i,
+  /\bsummarized synthesis\b/i,
+  /\bsources?\b/i,
+];
+
+const shouldShowStoreKnowledgeButton = (content: string | undefined): boolean => {
+  if (!content) return false;
+  return (
+    workflowCompletionPatterns.some((pattern) => pattern.test(content)) ||
+    researchReturnPatterns.some((pattern) => pattern.test(content))
+  );
+};
+
 const draftEmailPreparedPatterns = [
   /prepared (a|an)?\s*draft email/i,
   /i('ve| have)\s+(prepared|drafted)\s+(a|an)?\s*email/i,
@@ -378,6 +413,10 @@ const getContextualButtons = (
   // After AI response - build dynamic buttons
   const buttons: ButtonConfig[] = [];
 
+  if (shouldShowStoreKnowledgeButton(lastMessageContent)) {
+    buttons.push(STORE_IN_KNOWLEDGE_BUTTON);
+  }
+
   // If the assistant indicates an email draft is ready, surface send action immediately.
   if (hasPreparedDraftEmailSignal(lastMessageContent)) {
     buttons.push(SEND_EMAIL_BUTTON);
@@ -391,7 +430,7 @@ const getContextualButtons = (
   
   // 2. Detect topics and add relevant buttons
   const topics = detectConversationTopics(lastMessageContent || '');
-  const addedLabels = new Set([buttons[0].label]);
+  const addedLabels = new Set(buttons.map((button) => button.label));
   
   for (const topic of topics.slice(0, 2)) {
     const topicBtns = topicButtons[topic];
@@ -455,9 +494,11 @@ export const QuickResponseButtons = ({
                   ? GET_ER_DONE_PROMPT
                 : response.label === GET_MY_EMAILS_BUTTON.label
                   ? GET_MY_EMAILS_PROMPT
-                  : response.label === SEND_EMAIL_BUTTON.label
+                : response.label === SEND_EMAIL_BUTTON.label
                     ? SEND_EMAIL_PROMPT
-                  : response.label === "Draft my emails"
+                    : response.label === STORE_IN_KNOWLEDGE_BUTTON.label
+                      ? STORE_IN_KNOWLEDGE_PROMPT
+                    : response.label === "Draft my emails"
                     ? DRAFT_MY_EMAILS_PROMPT
                     : response.label
             )
