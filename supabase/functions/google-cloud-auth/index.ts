@@ -1,6 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { SignJWT, importPKCS8 } from 'https://deno.land/x/jose@v4.15.5/index.ts';
-import { extractUserContext } from "../_shared/googleAuthHelper.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -49,6 +48,58 @@ interface TokenResponse {
   token_type: string;
   scope: string;
   refresh_token?: string;
+}
+
+interface RequestUserContext {
+  userId?: string;
+  userEmail?: string;
+  requestedFrom?: string;
+  authMethod?: string;
+}
+
+// Helper: decode JWT payload without verification (context extraction only)
+function decodeJwtPayload(token: string): Record<string, any> | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length < 2) return null;
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64.padEnd(base64.length + (4 - (base64.length % 4 || 4)) % 4, '=');
+    const json = atob(padded);
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
+
+function extractUserContext(req: Request, body: any): RequestUserContext {
+  const authHeader = req.headers.get('authorization') || req.headers.get('Authorization');
+  const bearer = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : undefined;
+  const claims = bearer ? decodeJwtPayload(bearer) : null;
+
+  // JWT-first
+  const jwtUserId = claims?.sub || claims?.user_id;
+  const jwtEmail = claims?.email || claims?.user_email || claims?.user_metadata?.email || claims?.app_metadata?.email;
+
+  // Header/body fallbacks (support common aliases)
+  const headerUserId = req.headers.get('x-user-id') || req.headers.get('x-user_id');
+  const headerUserEmail = req.headers.get('x-user-email') || req.headers.get('x-user_email');
+
+  const bodyUserId = body?.user_id || body?.userId;
+  const bodyUserEmail = body?.user_email || body?.userEmail;
+
+  const userId = jwtUserId || headerUserId || bodyUserId;
+  const userEmailRaw = jwtEmail || headerUserEmail || bodyUserEmail;
+  const requestedFromRaw = body?.requested_from || body?.requestedFrom;
+
+  const userEmail = typeof userEmailRaw === 'string' ? userEmailRaw.toLowerCase() : userEmailRaw;
+  const requestedFrom = typeof requestedFromRaw === 'string' ? requestedFromRaw.toLowerCase() : requestedFromRaw;
+
+  let authMethod: string | undefined;
+  if (jwtUserId || jwtEmail) authMethod = 'jwt';
+  else if (headerUserId || headerUserEmail) authMethod = 'header';
+  else if (bodyUserId || bodyUserEmail) authMethod = 'body';
+
+  return { userId, userEmail, requestedFrom, authMethod };
 }
 
 interface OAuthStatePayload {
@@ -105,6 +156,12 @@ async function getAccessToken(userCtx?: { userId?: string; userEmail?: string })
   const clientId = Deno.env.get('GOOGLE_CLIENT_ID')?.trim();
   const clientSecret = Deno.env.get('GOOGLE_CLIENT_SECRET')?.trim();
   let refreshToken = (Deno.env.get('GOOGLE_REFRESH_TOKEN') || Deno.env.get('GMAIL_REFRESH_TOKEN'))?.trim();
+
+  if (!userCtx?.userId && !userCtx?.userEmail) {
+    console.warn('❌ No user context provided; refusing token lookup without user scope');
+    return null;
+  }
+
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
@@ -141,12 +198,6 @@ async function getAccessToken(userCtx?: { userId?: string; userEmail?: string })
     }
   } catch (err) {
     console.error('Error fetching refresh token from DB in getAccessToken:', err);
-  }
-
-  // 2. Fallback to Env Vars if not in DB
-  if (!refreshToken && !userCtx?.userId && !userCtx?.userEmail) {
-    refreshToken = Deno.env.get('GOOGLE_REFRESH_TOKEN') || Deno.env.get('GMAIL_REFRESH_TOKEN');
-    if (refreshToken) console.log('Using refresh token from Environment Variables');
   }
 
   if (!clientId || !clientSecret || !refreshToken) {
@@ -806,6 +857,14 @@ serve(async (req) => {
       case 'get_access_token': {
         const authType = body.auth_type || 'user_fallback'; // 'user', 'service_account', 'user_fallback' (default)
         console.log(`🔑 [get_access_token] Requested auth_type: '${authType}'`);
+
+        if (!userContext.userId && !userContext.userEmail && authType !== 'service_account') {
+          return new Response(JSON.stringify({
+            success: false,
+            error: 'Missing user context. Provide Authorization Bearer JWT, x-user-email, or user_email.',
+            needs_user_context: true
+          }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
 
         let accessToken: string | null = null;
         let usedMethod = 'none';
