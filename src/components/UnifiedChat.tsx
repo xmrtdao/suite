@@ -2279,7 +2279,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   return (
     <div className="relative overflow-visible">
       <ProcessingStickyNotes notes={processingNotes} />
-      <Card className={`bg-card border-border/60 flex flex-col h-[500px] sm:h-[600px] ${className}`}>
+      <Card className={`bg-card border-border/60 flex flex-col h-[2500px] sm:h-[3000px] ${className}`}>
       {/* Voice Intelligence Toggle */}
       {/* Voice Intelligence Toggle Removed */}
 

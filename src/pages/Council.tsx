@@ -92,7 +92,7 @@ const Council = () => {
             <UnifiedChat
               defaultCouncilMode={true}
               onBack={() => setIsCouncilMode(false)}
-              className="h-[600px]"
+              className="h-[3000px]"
             />
           </div>
         ) : (
