@@ -287,7 +287,7 @@ const GET_MY_EMAILS_BUTTON: ButtonConfig = {
 };
 
 const GET_MY_EMAILS_PROMPT =
-  "Get my emails 📥 — Eliza, fetch my latest 10 emails first, then intelligently classify each email into one of: actionable, ads/promotions, spam/suspicious, and no-reply or automated failure notices. Prioritize actionable emails for me, and clearly mark ads, spam, and no-reply/failure notices as do-not-reply.";
+  "Get my emails 📥 — Eliza, fetch my latest 10 emails, then open and read the full content of each of those 10 emails to understand their context before summarizing. After reviewing all 10, intelligently classify each email into one of: actionable, ads/promotions, spam/suspicious, and no-reply or automated failure notices. Prioritize actionable emails for me, and clearly mark ads, spam, and no-reply/failure notices as do-not-reply.";
 
 const GET_ER_DONE_BUTTON: ButtonConfig = {
   label: "Create a Workflow",
