@@ -7,6 +7,7 @@ import {
   parseContextDirective,
   resolveActiveContext,
 } from "../_shared/contextualIntelligence.ts";
+import { EDGE_FUNCTIONS_REGISTRY } from "../_shared/edgeFunctionRegistry.ts";
 
 // ========== ENVIRONMENT CONFIGURATION ==========
 const SUPABASE_URL = Deno.env.get('NEXT_PUBLIC_SUPABASE_URL') || 'https://vawouugtzwmejxqkeqqj.supabase.co';
@@ -25,7 +26,7 @@ const EXECUTIVE_ROLE = Deno.env.get('EXECUTIVE_ROLE') || 'General Intelligence A
 const FUNCTION_NAME = Deno.env.get('FUNCTION_NAME') || 'ai-chat';
 
 // Performance Configuration
-const MAX_TOOL_ITERATIONS = parseInt(Deno.env.get('MAX_TOOL_ITERATIONS') || '5');
+const MAX_TOOL_ITERATIONS = parseInt(Deno.env.get('MAX_TOOL_ITERATIONS') || '12');
 const REQUEST_TIMEOUT_MS = parseInt(Deno.env.get('REQUEST_TIMEOUT_MS') || '120000');
 const CONVERSATION_HISTORY_LIMIT = parseInt(Deno.env.get('CONVERSATION_HISTORY_LIMIT') || '1000');
 
@@ -73,6 +74,49 @@ const DATABASE_CONFIG = {
   taskStages: ['DISCUSS', 'PLAN', 'EXECUTE', 'VERIFY', 'INTEGRATE'] as const,
   taskCategories: ['code', 'infra', 'research', 'governance', 'mining', 'device', 'ops', 'other'] as const
 };
+
+type FunctionCatalogEntry = {
+  name: string;
+  description?: string;
+  category?: string;
+  is_active?: boolean;
+  parameters?: any;
+};
+
+async function getMergedFunctionCatalog(): Promise<FunctionCatalogEntry[]> {
+  const { data, error } = await supabase
+    .from(DATABASE_CONFIG.tables.ai_tools)
+    .select('name, description, category, is_active, parameters')
+    .eq('is_active', true)
+    .order('name');
+
+  if (error) throw error;
+
+  const registryEntries: FunctionCatalogEntry[] = EDGE_FUNCTIONS_REGISTRY.map((fn) => ({
+    name: fn.name,
+    description: fn.description,
+    category: fn.category,
+    is_active: true,
+    parameters: fn.example_payload ?? null
+  }));
+
+  const mergedMap = new Map<string, FunctionCatalogEntry>();
+
+  for (const entry of registryEntries) {
+    mergedMap.set(entry.name, entry);
+  }
+
+  for (const entry of (data || [])) {
+    const existing = mergedMap.get(entry.name);
+    mergedMap.set(entry.name, {
+      ...existing,
+      ...entry,
+      is_active: true
+    });
+  }
+
+  return Array.from(mergedMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+}
 
 // ========== AI PROVIDER CONFIGURATION ==========
 interface AIProviderConfig {
@@ -173,29 +217,6 @@ const corsHeaders = {
 const AMBIGUOUS_RESPONSES = ['yes', 'yeah', 'yep', 'sure', 'ok', 'okay', 'alright', 'fine', 'go ahead', 'proceed', 'no', 'nope', 'nah'];
 const POSITIVE_AMBIGUOUS = ['yes', 'yeah', 'yep', 'sure', 'ok', 'okay', 'alright', 'fine', 'go ahead', 'proceed'];
 const RESPONSE_MAX_TOKENS = parseInt(Deno.env.get('RESPONSE_MAX_TOKENS') || '16000');
-
-function isSimpleDirectAnswerQuery(query: string): boolean {
-  const normalized = (query || '').trim().toLowerCase();
-  if (!normalized) return true;
-
-  const simplePatterns = [
-    /^(hi|hello|hey|yo|good morning|good afternoon|good evening)[!. ]*$/,
-    /^how are you[?.! ]*$/,
-    /^who are you[?.! ]*$/,
-    /^what can you do[?.! ]*$/,
-    /^help[?.! ]*$/,
-    /^thanks?[!. ]*$/,
-    /^tell me about (xmrt|xmrt[- ]dao|eliza)[?.! ]*$/
-  ];
-
-  if (simplePatterns.some((pattern) => pattern.test(normalized))) return true;
-
-  const explicitlyActionOrLiveData = /(http[s]?:\/\/|www\.|status|metrics|current|latest|today|price|check|open|browse|search|analyze|upload|attachment|email|send|create|run|execute|invoke|github|deploy|function|edge function|tool)/i;
-  if (explicitlyActionOrLiveData.test(normalized)) return false;
-
-  // Short conceptual questions are usually best answered directly from model memory.
-  return normalized.length <= 140;
-}
 
 function isExplicitActionRequest(query: string): boolean {
   const normalized = (query || '').trim().toLowerCase();
@@ -1644,15 +1665,9 @@ async function executeRealToolCall(
       const { query, category, mode } = parsedArgs;
       
       if (mode === 'full_registry') {
-        const { data, error } = await supabase
-          .from(DATABASE_CONFIG.tables.ai_tools)
-          .select('name, description, category, is_active, parameters')
-          .eq('is_active', true)
-          .order('name');
-        
-        if (error) throw error;
-        
-        const grouped = (data || []).reduce((acc: any, tool) => {
+        const fullCatalog = await getMergedFunctionCatalog();
+
+        const grouped = (fullCatalog || []).reduce((acc: any, tool) => {
           const cat = tool.category || 'uncategorized';
           if (!acc[cat]) acc[cat] = [];
           acc[cat].push(tool);
@@ -1661,45 +1676,31 @@ async function executeRealToolCall(
         
         result = { 
           success: true, 
-          functions: data,
+          functions: fullCatalog,
           grouped_by_category: grouped,
-          total: data?.length || 0
+          total: fullCatalog?.length || 0
         };
       } else {
-        let dbQuery = supabase
-          .from(DATABASE_CONFIG.tables.ai_tools)
-          .select('name, description, category, is_active, parameters')
-          .eq('is_active', true);
-        
-        if (query) {
-          dbQuery = dbQuery.or(`name.ilike.%${query}%,description.ilike.%${query}%`);
-        }
-        
-        if (category) {
-          dbQuery = dbQuery.eq('category', category);
-        }
-        
-        const { data, error } = await dbQuery.order('name');
-        if (error) throw error;
-        result = { success: true, functions: data, total: data?.length || 0 };
+        const fullCatalog = await getMergedFunctionCatalog();
+        const q = typeof query === 'string' ? query.toLowerCase().trim() : '';
+        const filtered = fullCatalog.filter((fn) => {
+          if (category && fn.category !== category) return false;
+          if (!q) return true;
+          const haystack = `${fn.name} ${fn.description || ''} ${fn.category || ''}`.toLowerCase();
+          return haystack.includes(q);
+        });
+
+        result = { success: true, functions: filtered, total: filtered.length };
       }
       
     } else if (name === 'list_available_functions') {
       const { category } = parsedArgs;
-      
-      let dbQuery = supabase
-        .from(DATABASE_CONFIG.tables.ai_tools)
-        .select('name, description, category, is_active, parameters')
-        .eq('is_active', true)
-        .order('name');
-      
-      if (category) {
-        dbQuery = dbQuery.eq('category', category);
-      }
-      
-      const { data, error } = await dbQuery;
-      if (error) throw error;
-      result = { success: true, functions: data, total: data?.length || 0 };
+      const fullCatalog = await getMergedFunctionCatalog();
+      const filtered = category
+        ? fullCatalog.filter((fn) => fn.category === category)
+        : fullCatalog;
+
+      result = { success: true, functions: filtered, total: filtered.length };
       
     } else if (name === 'get_edge_function_logs') {
       const { function_name, limit = 100 } = parsedArgs;
@@ -3388,19 +3389,17 @@ class EnhancedProviderCascade {
           };
         }
         
-        const functionCallPart = candidate.content.parts?.find((part: any) => part.functionCall);
-        if (functionCallPart) {
-          const functionCall = functionCallPart.functionCall;
-          
-          const toolCalls = [{
-            id: `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        const functionCallParts = candidate.content.parts?.filter((part: any) => part.functionCall) || [];
+        if (functionCallParts.length > 0) {
+          const toolCalls = functionCallParts.map((part: any, index: number) => ({
+            id: `call_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 9)}`,
             type: 'function',
             function: {
-              name: functionCall.name,
-              arguments: JSON.stringify(functionCall.args)
+              name: part.functionCall.name,
+              arguments: JSON.stringify(part.functionCall.args || {})
             }
-          }];
-          
+          }));
+
           return {
             success: true,
             tool_calls: toolCalls,
@@ -4789,9 +4788,7 @@ Deno.serve(async (req) => {
     
     const allMessages = [...savedMessages, ...messages].slice(-CONVERSATION_HISTORY_LIMIT);
     const isFirstEngagement = savedMessages.length === 0 && previousToolResults.length === 0;
-    const preferDirectAnswer = isSimpleDirectAnswerQuery(query);
     const explicitActionRequest = isExplicitActionRequest(query);
-    const firstTurnDirectFastPath = isFirstEngagement && preferDirectAnswer && !explicitActionRequest;
     
     if (attachments && attachments.length > 0) {
       console.log(`\ud83d\udcce Found ${attachments.length} attachment(s) in request`);
@@ -4913,9 +4910,9 @@ Deno.serve(async (req) => {
     ];
     
     // Get initial AI response
-    const tools = (use_tools && !firstTurnDirectFastPath) ? ELIZA_TOOLS : [];
-    const maxToolIterations = (isFirstEngagement && !explicitActionRequest) ? 1 : MAX_TOOL_ITERATIONS;
-    console.log(`\u26a1 First-turn optimization: firstEngagement=${isFirstEngagement}, directFastPath=${firstTurnDirectFastPath}, toolsEnabled=${tools.length > 0}, maxToolIterations=${maxToolIterations}`);
+    const tools = use_tools ? ELIZA_TOOLS : [];
+    const maxToolIterations = MAX_TOOL_ITERATIONS;
+    console.log(`\u26a1 Tool execution config: firstEngagement=${isFirstEngagement}, explicitActionRequest=${explicitActionRequest}, toolsEnabled=${tools.length > 0}, maxToolIterations=${maxToolIterations}`);
     let initialResult = await callAIFunction(messagesArray, tools);
     
     // If AI call failed, use emergency fallback
