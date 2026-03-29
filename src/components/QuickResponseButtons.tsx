@@ -148,7 +148,7 @@ const extractNumberedOptions = (content: string): ButtonConfig[] | null => {
 const emptyConversationResponses: ButtonConfig[] = [
   { label: "What can you do?", emoji: "👋" },
   { label: "Plan my next move", emoji: "🎯" },
-  { label: "Get 'er done", emoji: "🧰" }
+  { label: "Create a Workflow", emoji: "🧰" }
 ];
 
 // Buttons shown for returning users who already have conversation history
@@ -207,7 +207,7 @@ const executiveButtonSets: Record<string, {
     contextualButtons: [
       { label: "Tell me more", emoji: "🔄" },
       { label: "Try another workflow", emoji: "❓" },
-      { label: "Get 'er done", emoji: "🧰" }
+      { label: "Create a Workflow", emoji: "🧰" }
     ]
   }
 };
@@ -290,12 +290,12 @@ const GET_MY_EMAILS_PROMPT =
   "Get my emails 📥 — Eliza, fetch my latest 10 emails first, then intelligently classify each email into one of: actionable, ads/promotions, spam/suspicious, and no-reply or automated failure notices. Prioritize actionable emails for me, and clearly mark ads, spam, and no-reply/failure notices as do-not-reply.";
 
 const GET_ER_DONE_BUTTON: ButtonConfig = {
-  label: "Get 'er done",
+  label: "Create a Workflow",
   emoji: "🧰",
 };
 
 const GET_ER_DONE_PROMPT =
-  "Get 'er done 🧰 — Eliza, in single-AI mode complete this in ONE turn by using tool chaining + your own curiosity: (1) pick one explicit operational purpose that would create concrete business value now, (2) randomly choose 4-7 edge functions from your full 293-function toolset that are relevant to that purpose and likely underused, (3) state the exact tool-call order before execution, (4) execute every planned call in sequence without asking follow-up questions, (5) after each call, use the result to decide the next best call while still finishing the full chain, and (6) deliver a final response with: purpose, exact tools used in order, key findings from each step, completed actions, and recommended next actions. Do not stop early; finish all actions and respond fully in this single turn.";
+  "Create a Workflow 🧰 — Eliza, in single-AI mode complete this in ONE turn by using tool chaining + your own curiosity: (1) pick one explicit operational purpose that would create concrete business value now, (2) randomly choose 4-7 edge functions from your full 293-function toolset that are relevant to that purpose and likely underused, (3) state the exact tool-call order before execution, (4) execute every planned call in sequence without asking follow-up questions, (5) after each call, use the result to decide the next best call while still finishing the full chain, and (6) deliver a final response with: purpose, exact tools used in order, key findings from each step, completed actions, and recommended next actions. Do not stop early; finish all actions and respond fully in this single turn.";
 
 const DRAFT_MY_EMAILS_PROMPT =
   "Draft my emails 📧 — Eliza, fetch my latest 10 emails before drafting anything. Intelligently classify each message as actionable, ads/promotions, spam/suspicious, or no-reply/automated failure notice. Do NOT draft replies for ads, spam, no-reply senders, or failure notices; only draft concise, high-quality responses for truly actionable emails.";
