@@ -96,6 +96,17 @@ export interface ElizaContext {
 }
 
 export class UnifiedElizaService {
+  private static async getCurrentUserContext(): Promise<{ userId?: string; userEmail?: string }> {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      return {
+        userId: user?.id,
+        userEmail: user?.email || undefined,
+      };
+    } catch (_) {
+      return {};
+    }
+  }
 
   /**
    * Get healthy executives by checking their status from the backend
@@ -242,12 +253,12 @@ export class UnifiedElizaService {
             formData.append('isLiveCameraFeed', 'true');
           }
 
-          // ✅ FIXED: Pass user_id and session_id so backend can ingest to KB + Drive
-          try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (user?.id) formData.append('user_id', user.id);
-            if (user?.email) formData.append('user_email', user.email);
-          } catch (_) {}
+          // ✅ Ensure user context is always included for downstream payload packaging.
+          // Use email as user_id for google-cloud-auth context routing.
+          const userContext = await this.getCurrentUserContext();
+          const userIdForPayload = userContext.userEmail || userContext.userId;
+          if (userIdForPayload) formData.append('user_id', userIdForPayload);
+          if (userContext.userEmail) formData.append('user_email', userContext.userEmail);
           // Pass any stored session ID for memory continuity
           const storedSession = localStorage.getItem('eliza_session_id');
           if (storedSession) formData.append('session_id', storedSession);
@@ -266,6 +277,8 @@ export class UnifiedElizaService {
 
         } else {
           // Standard JSON payload
+          const userContext = await this.getCurrentUserContext();
+          const userIdForPayload = userContext.userEmail || userContext.userId;
           const payload = {
             message: userInput || 'Hello',
             messages: [{
@@ -274,6 +287,8 @@ export class UnifiedElizaService {
             }],
             organizationContext: context.organizationContext,
             timestamp: new Date().toISOString(),
+            user_id: userIdForPayload,
+            user_email: userContext.userEmail,
             // ✅ CRITICAL FIX: Include images if they exist in the context
             images: context.images || undefined, // Pass the images array (Base64 strings)
             isLiveCameraFeed: context.isLiveCameraFeed || undefined // Pass the live camera feed flag
@@ -326,6 +341,8 @@ export class UnifiedElizaService {
     userInput: string,
     context: ElizaContext
   ): Promise<string | null> {
+    const userContext = await this.getCurrentUserContext();
+    const userIdForPayload = userContext.userEmail || userContext.userId;
     const payload = {
       message: userInput,
       messages: [
@@ -333,6 +350,8 @@ export class UnifiedElizaService {
       ],
       organizationContext: context.organizationContext,
       timestamp: new Date().toISOString(),
+      user_id: userIdForPayload,
+      user_email: userContext.userEmail,
       images: context.images || undefined,
       isLiveCameraFeed: context.isLiveCameraFeed || undefined,
     };
