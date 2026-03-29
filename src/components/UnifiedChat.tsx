@@ -2326,7 +2326,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
                     <Users className="h-4 w-4 text-primary" />
                     Executive Council
                   </h3>
-                  <p className="text-[11px] text-muted-foreground truncate">All 4 executives deliberating</p>
+                  <p className="text-[11px] text-muted-foreground truncate">All 5 executives deliberating</p>
                 </>
               ) : (
                 <>
@@ -2369,7 +2369,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {councilMode
-                      ? 'Get perspectives from all 4 AI executives (CTO, CSO, CIO, CAO) before a unified response.'
+                      ? 'Get perspectives from all 5 AI executives (CSO, CTO, CIO, CAO, COO) before a unified response.'
                       : 'Chat with Eliza directly. Toggle to consult all executives.'}
                   </p>
                 </TooltipContent>
