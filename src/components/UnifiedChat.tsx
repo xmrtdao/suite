@@ -597,8 +597,10 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   // Voice/TTS state
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [voiceEnabled, setVoiceEnabled] = useState(() => {
-    // Check if user previously enabled voice
-    return localStorage.getItem('audioEnabled') === 'true';
+    // Default to enabled unless user explicitly turned audio off.
+    const storedPreference = localStorage.getItem('audioEnabled');
+    if (storedPreference === null) return true;
+    return storedPreference === 'true';
   });
   const [audioInitialized, setAudioInitialized] = useState(false);
   const [interimTranscript, setInterimTranscript] = useState(''); // New state for real-time feedback
@@ -834,7 +836,11 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   // Auto-initialize TTS on mount for immediate use
   useEffect(() => {
     const initializeTTS = async () => {
-      const wasEnabled = localStorage.getItem('audioEnabled') === 'true';
+      const storedPreference = localStorage.getItem('audioEnabled');
+      const wasEnabled = storedPreference === null || storedPreference === 'true';
+      if (storedPreference === null) {
+        localStorage.setItem('audioEnabled', 'true');
+      }
       if (wasEnabled) {
         await handleEnableAudio();
       } else {
@@ -2397,17 +2403,113 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
             {/* Voice Toggle */}
             <Button
               onClick={toggleVoiceSynthesis}
-              variant="ghost"
+              variant={voiceEnabled ? 'default' : 'outline'}
               size="sm"
-              className={`h-7 w-7 sm:h-8 sm:w-8 p-0 flex-shrink-0 ${voiceEnabled
-                ? 'text-primary'
+              className={`h-8 px-3 sm:h-9 sm:px-4 gap-2 flex-shrink-0 font-medium ${voiceEnabled
+                ? ''
                 : 'text-muted-foreground'
                 }`}
               title={`${voiceEnabled ? 'Disable' : 'Enable'} voice`}
             >
               {voiceEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+              <span className="text-xs sm:text-sm">{voiceEnabled ? 'Voice On' : 'Voice Off'}</span>
             </Button>
           </div>
+        </div>
+      </div>
+
+      {/* Text Input Area (moved to hero/top section) */}
+      <div className="border-t border-border/60 bg-card/50">
+        <div className="p-4">
+          {/* Attachment Preview */}
+          <AttachmentPreview
+            attachments={attachments}
+            onRemove={removeAttachment}
+            onClear={clearAttachments}
+          />
+
+          <div className="flex gap-3 items-center">
+            {/* File Attachment Button */}
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileSelect}
+              accept="image/*,audio/*,video/*,.pdf,.doc,.docx,.txt,.md,.csv,.json,.yaml,.yml,.js,.ts,.jsx,.tsx,.py,.java,.cpp,.c,.h,.go,.rs,.rb,.php,.sol,.html,.css,.xml,.toml,.ini,.sh,.bat,.ps1"
+              multiple
+              className="hidden"
+            />
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isProcessing || attachments.length >= 5}
+              className="rounded-full min-h-[48px] min-w-[48px] hover:bg-muted/50"
+              title="Attach files (max 5)"
+            >
+              <Paperclip className="h-4 w-4" />
+            </Button>
+
+            {/* Interim Transcript Feedback */}
+            {interimTranscript && (
+              <div className="absolute bottom-full left-0 right-0 p-2 bg-background/80 backdrop-blur-sm text-sm text-muted-foreground animate-pulse border-t border-border">
+                Listening: "{interimTranscript}..."
+              </div>
+            )}
+
+            {/* Microphone Button */}
+            <Button
+              variant={isRecording ? "destructive" : "ghost"}
+              size="sm"
+              onClick={toggleRecording}
+              disabled={isProcessing}
+              className={`rounded-full min-h-[48px] min-w-[48px] ${isRecording ? 'animate-pulse' : 'hover:bg-muted/50'}`}
+              title={isRecording ? "Stop Listening" : "Start Listening"}
+            >
+              {isRecording ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+            </Button>
+
+            <Textarea
+              value={textInput}
+              onChange={(e) => {
+                setTextInput(e.target.value);
+                // If user starts typing while assistant is speaking, interrupt
+                if (isSpeaking && e.target.value.length > 0) {
+                  enhancedTTS.stop();
+                  setIsSpeaking(false);
+                }
+              }}
+              onKeyDown={handleKeyPress}
+              placeholder={
+                needsAPIKey
+                  ? "Configure API key to continue..."
+                  : attachments.length > 0
+                    ? `${attachments.length} file${attachments.length > 1 ? 's' : ''} attached`
+                    : "Ask anything..."
+              }
+              className="flex-1 rounded-lg border-border/60 bg-background min-h-[44px] max-h-48 text-sm px-4 py-3 resize-y"
+              disabled={isProcessing}
+            />
+            <Button
+              onClick={() => handleSendMessage()}
+              disabled={(!textInput.trim() && attachments.length === 0) || isProcessing}
+              size="sm"
+              className="rounded-lg min-h-[44px] min-w-[44px]"
+            >
+              <Send className="h-4 w-4" />
+            </Button>
+          </div>
+
+          {/* Quick Response Buttons */}
+          <QuickResponseButtons
+            onQuickResponse={(message) => handleSendMessage(message)}
+            disabled={isProcessing}
+            lastMessageRole={messages.length === 0 ? null : messages[messages.length - 1].sender === 'user' ? 'user' : 'assistant'}
+            hasUserEngaged={hasUserEngaged}
+            hasPastConversations={conversationSummaries.length > 0 || totalMessageCount > 0}
+            lastMessageContent={messages.length > 0 ? messages[messages.length - 1].content : undefined}
+            lastExecutive={messages.length > 0 ? (messages[messages.length - 1] as any).executive : undefined}
+            turnCount={messages.length}
+          />
         </div>
       </div>
 
@@ -2579,104 +2681,6 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
         )}
       </div>
 
-      {/* Text Input Area */}
-      <div className="border-t border-border/60 bg-card/50">
-        <div className="p-4">
-          {/* Attachment Preview */}
-          <AttachmentPreview
-            attachments={attachments}
-            onRemove={removeAttachment}
-            onClear={clearAttachments}
-          />
-
-          <div className="flex gap-3 items-center">
-
-
-
-
-            {/* File Attachment Button */}
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={handleFileSelect}
-              accept="image/*,audio/*,video/*,.pdf,.doc,.docx,.txt,.md,.csv,.json,.yaml,.yml,.js,.ts,.jsx,.tsx,.py,.java,.cpp,.c,.h,.go,.rs,.rb,.php,.sol,.html,.css,.xml,.toml,.ini,.sh,.bat,.ps1"
-              multiple
-              className="hidden"
-            />
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isProcessing || attachments.length >= 5}
-              className="rounded-full min-h-[48px] min-w-[48px] hover:bg-muted/50"
-              title="Attach files (max 5)"
-            >
-              <Paperclip className="h-4 w-4" />
-            </Button>
-
-            {/* Interim Transcript Feedback */}
-            {interimTranscript && (
-              <div className="absolute bottom-full left-0 right-0 p-2 bg-background/80 backdrop-blur-sm text-sm text-muted-foreground animate-pulse border-t border-border">
-                Listening: "{interimTranscript}..."
-              </div>
-            )}
-
-            {/* Microphone Button */}
-            <Button
-              variant={isRecording ? "destructive" : "ghost"}
-              size="sm"
-              onClick={toggleRecording}
-              disabled={isProcessing}
-              className={`rounded-full min-h-[48px] min-w-[48px] ${isRecording ? 'animate-pulse' : 'hover:bg-muted/50'}`}
-              title={isRecording ? "Stop Listening" : "Start Listening"}
-            >
-              {isRecording ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
-            </Button>
-
-            <Textarea
-              value={textInput}
-              onChange={(e) => {
-                setTextInput(e.target.value);
-                // If user starts typing while assistant is speaking, interrupt
-                if (isSpeaking && e.target.value.length > 0) {
-                  enhancedTTS.stop();
-                  setIsSpeaking(false);
-                }
-              }}
-              onKeyDown={handleKeyPress}
-              placeholder={
-                needsAPIKey
-                  ? "Configure API key to continue..."
-                  : attachments.length > 0
-                    ? `${attachments.length} file${attachments.length > 1 ? 's' : ''} attached`
-                    : "Ask anything..."
-              }
-              className="flex-1 rounded-lg border-border/60 bg-background min-h-[44px] max-h-48 text-sm px-4 py-3 resize-y"
-              disabled={isProcessing}
-            />
-            <Button
-              onClick={() => handleSendMessage()}
-              disabled={(!textInput.trim() && attachments.length === 0) || isProcessing}
-              size="sm"
-              className="rounded-lg min-h-[44px] min-w-[44px]"
-            >
-              <Send className="h-4 w-4" />
-            </Button>
-          </div>
-
-          {/* Quick Response Buttons */}
-          <QuickResponseButtons
-            onQuickResponse={(message) => handleSendMessage(message)}
-            disabled={isProcessing}
-            lastMessageRole={messages.length === 0 ? null : messages[messages.length - 1].sender === 'user' ? 'user' : 'assistant'}
-            hasUserEngaged={hasUserEngaged}
-            hasPastConversations={conversationSummaries.length > 0 || totalMessageCount > 0}
-            lastMessageContent={messages.length > 0 ? messages[messages.length - 1].content : undefined}
-            lastExecutive={messages.length > 0 ? (messages[messages.length - 1] as any).executive : undefined}
-            turnCount={messages.length}
-          />
-        </div>
-      </div>
     </Card>
     </div>
   );
