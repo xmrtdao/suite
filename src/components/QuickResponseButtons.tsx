@@ -314,7 +314,28 @@ const STORE_IN_KNOWLEDGE_BUTTON: ButtonConfig = {
 };
 
 const STORE_IN_KNOWLEDGE_PROMPT =
-  "Store in your Knowledge 🧠 — Eliza, store the key information from your most recent completed result into your knowledgebase for permanent recall. Save concise structured memory covering context, verified facts/findings, decisions made, completed workflow steps, and recommended next actions. If confidence is low, explicitly mark uncertainty in the stored record.";
+  "Store in your Knowledge 🧠 — Eliza, store the key information from your most recent assistant conversation response (not tool call logs/results) into your knowledgebase for permanent recall. Save concise structured memory covering context, verified facts/findings, decisions made, completed workflow steps, and recommended next actions. If confidence is low, explicitly mark uncertainty in the stored record.";
+
+const MAX_STORED_SNIPPET_LENGTH = 3000;
+
+const buildStoreKnowledgePrompt = (lastMessageContent?: string): string => {
+  const assistantMessage = (lastMessageContent || '').trim();
+
+  if (!assistantMessage) {
+    return STORE_IN_KNOWLEDGE_PROMPT;
+  }
+
+  const normalizedAssistantMessage = assistantMessage
+    .replace(/\n\n✅ \*\*Executed tools\*\*[\s\S]*$/i, '')
+    .trim()
+    .slice(0, MAX_STORED_SNIPPET_LENGTH);
+
+  return `${STORE_IN_KNOWLEDGE_PROMPT}
+
+Use THIS exact assistant response content as the source-of-truth to store:
+
+${normalizedAssistantMessage}`;
+};
 
 const workflowCompletionPatterns = [
   /create a workflow/i,
@@ -497,7 +518,7 @@ export const QuickResponseButtons = ({
                 : response.label === SEND_EMAIL_BUTTON.label
                     ? SEND_EMAIL_PROMPT
                     : response.label === STORE_IN_KNOWLEDGE_BUTTON.label
-                      ? STORE_IN_KNOWLEDGE_PROMPT
+                      ? buildStoreKnowledgePrompt(lastMessageContent)
                     : response.label === "Draft my emails"
                     ? DRAFT_MY_EMAILS_PROMPT
                     : response.label
