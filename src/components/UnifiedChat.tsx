@@ -876,18 +876,13 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
     return () => unsubscribe();
   }, []);
 
-  // Auto-scroll within chat container only (no page-level scrolling)
+  // Keep newest content visible directly under the top composer.
   useEffect(() => {
-    // Only scroll if there are messages and not just loading
     if (messages.length > 0 && !isProcessing) {
-      // Use setTimeout to ensure DOM updates are complete
       setTimeout(() => {
-        // Only scroll within the chat container itself
         if (scrollAreaRef.current) {
-          scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight;
+          scrollAreaRef.current.scrollTop = 0;
         }
-        // Removed scrollIntoView to prevent page-level scrolling
-        // User stays at their current position on the page
       }, 100);
     }
   }, [messages, isProcessing]);
@@ -2515,7 +2510,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
 
       {/* Clean Messages Area */}
       <div className="flex-1 overflow-hidden">
-        <ScrollArea className="h-full">
+        <ScrollArea ref={scrollAreaRef} className="h-full">
           <div className="space-y-4 p-4 xl:pr-40">
             {/* Live Camera for Multimodal Mode */}
             {inputMode === 'multimodal' && (
@@ -2568,21 +2563,6 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
               </div>
             )}
 
-            {/* Load Previous Conversation Button */}
-            {hasMoreMessages && totalMessageCount > 0 && (
-              <div className="flex justify-center">
-                <Button
-                  onClick={loadMoreMessages}
-                  disabled={loadingMoreMessages}
-                  variant="outline"
-                  size="sm"
-                  className="text-xs"
-                >
-                  {loadingMoreMessages ? 'Loading...' : `View Previous Conversation (${totalMessageCount} messages)`}
-                </Button>
-              </div>
-            )}
-
             {/* Conversation Summary Context (only show if user hasn't loaded messages) */}
             {conversationSummaries.length > 0 && !messages.some(m => m.id !== 'greeting') && (
               <div className="bg-muted/30 border border-border/30 rounded-lg p-3 mb-2">
@@ -2593,7 +2573,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
               </div>
             )}
 
-            {messages.map((message) => (
+            {[...messages].reverse().map((message) => (
               <ChatMessage key={message.id} message={message} />
             ))}
 
@@ -2664,6 +2644,21 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
                 </div>
               </div>
             )}
+            {/* Load Previous Conversation Button */}
+            {hasMoreMessages && totalMessageCount > 0 && (
+              <div className="flex justify-center pt-2">
+                <Button
+                  onClick={loadMoreMessages}
+                  disabled={loadingMoreMessages}
+                  variant="outline"
+                  size="sm"
+                  className="text-xs"
+                >
+                  {loadingMoreMessages ? 'Loading...' : `View Older Conversation (${totalMessageCount} messages)`}
+                </Button>
+              </div>
+            )}
+
             <div ref={messagesEndRef} />
           </div>
         </ScrollArea>
