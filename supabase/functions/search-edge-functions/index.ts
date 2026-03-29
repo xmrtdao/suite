@@ -33,43 +33,88 @@ Deno.serve(async (req) => {
       : EDGE_FUNCTIONS_REGISTRY;
 
     // Search across name, description, capabilities, and example_use
-    // Tokenize query so multi-word checklist items like "Execute plan" still match
-    // partial capabilities such as "execute", "plan", etc.
+    // with lightweight stemming and token overlap so natural-language checklist
+    // items such as "Execute plan" can still match functions with
+    // descriptions like "Create execution plan".
     const queryLower = query.toLowerCase().trim();
-    const queryTokens = queryLower
+    const stopWords = new Set([
+      'the', 'and', 'for', 'with', 'from', 'that', 'this', 'into', 'your', 'you',
+      'are', 'was', 'were', 'have', 'has', 'had', 'will', 'would', 'could', 'should',
+      'can', 'ensure', 'add', 'such', 'even', 'if', 'not', 'found', 'item', 'task',
+      'steps', 'step', 'mechanism', 'using', 'use'
+    ]);
+
+    const normalizeToken = (token: string): string => {
+      const cleaned = token.toLowerCase().replace(/[^a-z0-9]/g, '').trim();
+      if (cleaned.length <= 3) return cleaned;
+
+      const suffixes = ['ization', 'ation', 'ition', 'ments', 'ment', 'ions', 'ion', 'ing', 'ed', 'es', 's'];
+      for (const suffix of suffixes) {
+        if (cleaned.endsWith(suffix) && cleaned.length - suffix.length >= 4) {
+          return cleaned.slice(0, -suffix.length);
+        }
+      }
+
+      return cleaned;
+    };
+
+    const tokenize = (value: string): string[] => value
+      .toLowerCase()
       .split(/\s+/)
-      .map((token: string) => token.trim())
-      .filter((token: string) => token.length >= 3);
+      .map((token: string) => normalizeToken(token))
+      .filter((token: string) => token.length >= 3 && !stopWords.has(token));
+
+    const queryTokens = tokenize(queryLower);
+    const queryTokenSet = new Set(queryTokens);
     const maxResults = typeof limit === 'number' && limit > 0
       ? Math.min(limit, 25)
       : 10;
 
+    const fieldTokenOverlap = (value: string): number => {
+      const fieldTokens = tokenize(value);
+      if (fieldTokens.length === 0 || queryTokens.length === 0) return 0;
+      const overlap = fieldTokens.filter((token) => queryTokenSet.has(token)).length;
+      return overlap / Math.max(queryTokens.length, fieldTokens.length);
+    };
+
     const includesQueryOrToken = (value: string): boolean => {
       const normalized = value.toLowerCase();
       if (normalized.includes(queryLower)) return true;
-      return queryTokens.some((token: string) => normalized.includes(token));
+
+      const valueTokens = tokenize(value);
+      return valueTokens.some((token) => queryTokenSet.has(token));
     };
 
     const results = functions
       .map((fn: any) => {
         let score = 0;
-        
+
         // Exact name match gets highest score
         if (fn.name.toLowerCase() === queryLower) score += 100;
         else if (includesQueryOrToken(fn.name)) score += 50;
-        
-        // Description matches
-        if (includesQueryOrToken(fn.description)) score += 30;
-        
+
+        // Description matches (direct + overlap)
+        const description = typeof fn.description === 'string' ? fn.description : '';
+        if (includesQueryOrToken(description)) score += 30;
+        score += Math.round(fieldTokenOverlap(description) * 35);
+
         // Capability matches
-        const capabilityMatch = fn.capabilities.some((cap: string) => 
+        const capabilities = Array.isArray(fn.capabilities) ? fn.capabilities : [];
+        const capabilityMatch = capabilities.some((cap: string) =>
           includesQueryOrToken(cap)
         );
         if (capabilityMatch) score += 40;
-        
+
+        const capabilityOverlapScore = capabilities
+          .map((cap: string) => fieldTokenOverlap(cap))
+          .reduce((max: number, current: number) => Math.max(max, current), 0);
+        score += Math.round(capabilityOverlapScore * 45);
+
         // Example use matches
-        if (includesQueryOrToken(fn.example_use)) score += 20;
-        
+        const exampleUse = typeof fn.example_use === 'string' ? fn.example_use : '';
+        if (includesQueryOrToken(exampleUse)) score += 20;
+        score += Math.round(fieldTokenOverlap(exampleUse) * 20);
+
         return { ...fn, relevance_score: score };
       })
       .filter((fn: any) => fn.relevance_score > 0)
