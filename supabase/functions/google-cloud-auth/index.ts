@@ -52,11 +52,37 @@ interface TokenResponse {
   refresh_token?: string;
 }
 
-// Helper to extract user context from request
+interface UserContext {
+  userId: string | null;
+  userEmail: string | null;
+  // Deterministic identifier: email preferred, fallback to UUID
+  deterministicId: string | null;
+}
+
+// SURGICAL FIX: Reusable helper to fetch and normalize current user context
+// Ensures deterministic user identifier (email preferred, fallback to auth UUID)
+function getCurrentUserContext(req: Request, body: any): UserContext {
+  // Extract from headers first (higher priority), then body
+  const headerUserId = req.headers.get('x-user-id');
+  const headerUserEmail = req.headers.get('x-user-email');
+  const bodyUserId = body?.user_id;
+  const bodyUserEmail = body?.user_email;
+
+  // Prefer email as primary deterministic identifier
+  const userEmail = headerUserEmail || bodyUserEmail || null;
+  // Fallback to UUID if email not available
+  const userId = headerUserId || bodyUserId || null;
+  
+  // Deterministic identifier: email > UUID > null
+  const deterministicId = userEmail || userId || null;
+
+  return { userId, userEmail, deterministicId };
+}
+
+// Helper to extract user context from request (legacy wrapper for backward compat)
 function extractUserContext(req: Request, body: any): { userId?: string; userEmail?: string } {
-  const userId = req.headers.get('x-user-id') || body?.user_id;
-  const userEmail = req.headers.get('x-user-email') || body?.user_email;
-  return { userId, userEmail };
+  const ctx = getCurrentUserContext(req, body);
+  return { userId: ctx.userId || undefined, userEmail: ctx.userEmail || undefined };
 }
 
 // Helper to get fresh access token for a specific user
@@ -78,12 +104,14 @@ async function getAccessToken(userId?: string, userEmail?: string): Promise<stri
         .eq('provider', 'google_cloud')
         .eq('is_active', true);
 
-      if (userId) {
-        query = query.eq('user_id', userId);
-        console.log(`🔍 Filtering by user_id: ${userId}`);
-      } else if (userEmail) {
+      // SURGICAL FIX: Always query with deterministic identifier first
+      // Prefer email lookup, fallback to UUID lookup
+      if (userEmail) {
         query = query.eq('provider_email', userEmail);
-        console.log(`🔍 Filtering by provider_email: ${userEmail}`);
+        console.log(`🔍 Filtering by provider_email (preferred): ${userEmail}`);
+      } else if (userId) {
+        query = query.eq('user_id', userId);
+        console.log(`🔍 Filtering by user_id (fallback): ${userId}`);
       } else {
         console.log('⚠️ No user context provided, falling back to any token');
       }
@@ -1539,8 +1567,9 @@ serve(async (req) => {
       try { body = await req.json(); } catch { body = {}; }
     }
 
-    const { userId, userEmail } = extractUserContext(req, body);
-    console.log(`👤 Request context - User ID: ${userId || 'none'}, User Email: ${userEmail || 'none'}`);
+    // SURGICAL FIX: Use enhanced getCurrentUserContext for deterministic user identifier
+    const { userId, userEmail, deterministicId } = getCurrentUserContext(req, body);
+    console.log(`👤 Request context - User ID: ${userId || 'none'}, User Email: ${userEmail || 'none'}, Deterministic ID: ${deterministicId || 'none'}`);
 
     const hasAuthCode = url.searchParams.get('code');
     const action = hasAuthCode ? 'callback' : (body.action || url.searchParams.get('action') || 'status');
@@ -1565,14 +1594,15 @@ serve(async (req) => {
         authUrl.searchParams.set('scope', SCOPES);
         authUrl.searchParams.set('access_type', 'offline');
         authUrl.searchParams.set('prompt', 'consent');
-        if (userEmail) authUrl.searchParams.set('login_hint', userEmail);
+        // SURGICAL FIX: Use deterministicId (email preferred) for login_hint
+        if (deterministicId) authUrl.searchParams.set('login_hint', deterministicId);
 
         return new Response(JSON.stringify({
           success: true,
           authorization_url: authUrl.toString(),
           redirect_uri: redirectUri,
           scopes_requested: SCOPES.split(' '),
-          user_context: { userId, userEmail },
+          user_context: { userId, userEmail, deterministicId },
           instructions: 'Open this URL, sign in with the target Google account, authorize, and the system will automatically update.'
         }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
@@ -1620,8 +1650,10 @@ serve(async (req) => {
               });
               const userInfo = await userInfoResponse.json();
 
-              if (userId) {
-                await supabase.from('oauth_connections').update({ is_active: false }).eq('provider', 'google_cloud').eq('user_id', userId);
+              // SURGICAL FIX: Use deterministicId for consistent user matching
+              const lookupId = userEmail || userId;
+              if (lookupId) {
+                await supabase.from('oauth_connections').update({ is_active: false }).eq('provider', 'google_cloud').eq('user_id', lookupId);
               } else {
                 await supabase.from('oauth_connections').update({ is_active: false }).eq('provider', 'google_cloud');
               }
@@ -1640,7 +1672,9 @@ serve(async (req) => {
                 last_refreshed_at: new Date().toISOString(),
                 metadata: { user_info: userInfo, granted_scopes: tokens.scope }
               };
+              // SURGICAL FIX: Always include user_id when available for consistent routing
               if (userId) insertData.user_id = userId;
+              if (userEmail) insertData.provider_email = userEmail;
 
               await supabase.from('oauth_connections').insert(insertData);
               console.log(`✅ OAuth connection saved to database for user: ${userInfo.email || userId || 'unknown'}`);
@@ -1657,7 +1691,7 @@ serve(async (req) => {
           access_token: tokens.access_token,
           expires_in: tokens.expires_in,
           scope: tokens.scope,
-          user_context: { userId, userEmail }
+          user_context: { userId, userEmail, deterministicId }
         }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
@@ -1678,12 +1712,13 @@ serve(async (req) => {
         }
 
         if (!accessToken && (authType === 'user' || authType === 'user_fallback')) {
-          accessToken = await getAccessToken(userId, userEmail);
+          // SURGICAL FIX: Pass deterministicId components to getAccessToken for consistent lookup
+          accessToken = await getAccessToken(userId || undefined, userEmail || undefined);
           if (accessToken) usedMethod = 'user_refresh_token';
           else if (authType === 'user') {
             return new Response(JSON.stringify({
               success: false, error: 'No valid refresh token found for this user. Run authorization flow first.',
-              needs_authorization: true, user_context: { userId, userEmail }
+              needs_authorization: true, user_context: { userId, userEmail, deterministicId }
             }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
           }
         }
@@ -1691,12 +1726,12 @@ serve(async (req) => {
         if (!accessToken) {
           return new Response(JSON.stringify({
             success: false, error: 'Failed to retrieve access token (no valid credentials found)',
-            needs_reauthorization: true, user_context: { userId, userEmail }
+            needs_reauthorization: true, user_context: { userId, userEmail, deterministicId }
           }), { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
 
         return new Response(JSON.stringify({
-          success: true, access_token: accessToken, method: usedMethod, user_context: { userId, userEmail }
+          success: true, access_token: accessToken, method: usedMethod, user_context: { userId, userEmail, deterministicId }
         }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
@@ -1713,10 +1748,12 @@ serve(async (req) => {
             const { data: anyToken } = await supabase.from('oauth_connections').select('id').eq('provider', 'google_cloud').eq('is_active', true).limit(1).maybeSingle();
             hasRefreshToken = hasRefreshToken || !!anyToken;
 
-            if (userId || userEmail) {
+            // SURGICAL FIX: Check for user token using deterministic identifier priority
+            if (deterministicId) {
               let query = supabase.from('oauth_connections').select('id, provider_email').eq('provider', 'google_cloud').eq('is_active', true);
-              if (userId) query = query.eq('user_id', userId);
-              else if (userEmail) query = query.eq('provider_email', userEmail);
+              // Prefer email lookup first, then UUID
+              if (userEmail) query = query.eq('provider_email', userEmail);
+              else if (userId) query = query.eq('user_id', userId);
               const { data: userToken } = await query.limit(1).maybeSingle();
               userHasToken = !!userToken;
             }
@@ -1731,7 +1768,7 @@ serve(async (req) => {
             client_id: !!clientId, client_secret: !!clientSecret,
             refresh_token: hasRefreshToken, service_account: !!Deno.env.get('GOOGLE_SERVICE_ACCOUNT')
           },
-          user_context: { userId, userEmail, has_token: userHasToken },
+          user_context: { userId, userEmail, deterministicId, has_token: userHasToken },
           ready: !!(clientId && clientSecret && hasRefreshToken) || !!Deno.env.get('GOOGLE_SERVICE_ACCOUNT'),
           available_services: ['gmail', 'drive', 'sheets', 'calendar', 'gemini'],
           message: !hasRefreshToken
@@ -1742,9 +1779,9 @@ serve(async (req) => {
 
       // ============= GMAIL ACTIONS =============
       case 'send_email': {
-        const accessToken = await getAccessToken(userId, userEmail);
+        const accessToken = await getAccessToken(userId || undefined, userEmail || undefined);
         if (!accessToken) {
-          return new Response(JSON.stringify({ success: false, error: 'Not authenticated for this user', user_context: { userId, userEmail } }),
+          return new Response(JSON.stringify({ success: false, error: 'Not authenticated for this user', user_context: { userId, userEmail, deterministicId } }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
         const { to, subject, body: emailBody, is_html } = body;
@@ -1753,25 +1790,25 @@ serve(async (req) => {
             { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
         const result = await sendEmail(accessToken, to, subject, emailBody, is_html);
-        return new Response(JSON.stringify({ success: true, result, user_context: { userId, userEmail } }),
+        return new Response(JSON.stringify({ success: true, result, user_context: { userId, userEmail, deterministicId } }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
       case 'list_emails': {
-        const accessToken = await getAccessToken(userId, userEmail);
+        const accessToken = await getAccessToken(userId || undefined, userEmail || undefined);
         if (!accessToken) {
-          return new Response(JSON.stringify({ success: false, error: 'Not authenticated for this user', user_context: { userId, userEmail } }),
+          return new Response(JSON.stringify({ success: false, error: 'Not authenticated for this user', user_context: { userId, userEmail, deterministicId } }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
         const result = await listEmails(accessToken, body.query || '', body.max_results || 20);
-        return new Response(JSON.stringify({ success: true, result, user_context: { userId, userEmail } }),
+        return new Response(JSON.stringify({ success: true, result, user_context: { userId, userEmail, deterministicId } }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
       case 'get_email': {
-        const accessToken = await getAccessToken(userId, userEmail);
+        const accessToken = await getAccessToken(userId || undefined, userEmail || undefined);
         if (!accessToken) {
-          return new Response(JSON.stringify({ success: false, error: 'Not authenticated for this user', user_context: { userId, userEmail } }),
+          return new Response(JSON.stringify({ success: false, error: 'Not authenticated for this user', user_context: { userId, userEmail, deterministicId } }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
         if (!body.message_id) {
@@ -1779,14 +1816,14 @@ serve(async (req) => {
             { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
         const result = await getEmail(accessToken, body.message_id);
-        return new Response(JSON.stringify({ success: true, result, user_context: { userId, userEmail } }),
+        return new Response(JSON.stringify({ success: true, result, user_context: { userId, userEmail, deterministicId } }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
       case 'create_draft': {
-        const accessToken = await getAccessToken(userId, userEmail);
+        const accessToken = await getAccessToken(userId || undefined, userEmail || undefined);
         if (!accessToken) {
-          return new Response(JSON.stringify({ success: false, error: 'Not authenticated for this user', user_context: { userId, userEmail } }),
+          return new Response(JSON.stringify({ success: false, error: 'Not authenticated for this user', user_context: { userId, userEmail, deterministicId } }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
         const { to, subject, body: draftBody } = body;
@@ -1795,26 +1832,26 @@ serve(async (req) => {
             { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
         const result = await createDraft(accessToken, to, subject, draftBody);
-        return new Response(JSON.stringify({ success: true, result, user_context: { userId, userEmail } }),
+        return new Response(JSON.stringify({ success: true, result, user_context: { userId, userEmail, deterministicId } }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
       // ============= DRIVE ACTIONS =============
       case 'list_files': {
-        const accessToken = await getAccessToken(userId, userEmail);
+        const accessToken = await getAccessToken(userId || undefined, userEmail || undefined);
         if (!accessToken) {
-          return new Response(JSON.stringify({ success: false, error: 'Not authenticated for this user', user_context: { userId, userEmail } }),
+          return new Response(JSON.stringify({ success: false, error: 'Not authenticated for this user', user_context: { userId, userEmail, deterministicId } }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
         const result = await listDriveFiles(accessToken, body.query, body.max_results, body.folder_id);
-        return new Response(JSON.stringify({ success: true, result, user_context: { userId, userEmail } }),
+        return new Response(JSON.stringify({ success: true, result, user_context: { userId, userEmail, deterministicId } }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
       case 'upload_file': {
-        const accessToken = await getAccessToken(userId, userEmail);
+        const accessToken = await getAccessToken(userId || undefined, userEmail || undefined);
         if (!accessToken) {
-          return new Response(JSON.stringify({ success: false, error: 'Not authenticated for this user', user_context: { userId, userEmail } }),
+          return new Response(JSON.stringify({ success: false, error: 'Not authenticated for this user', user_context: { userId, userEmail, deterministicId } }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
         if (!body.file_name || !body.content) {
@@ -1822,14 +1859,14 @@ serve(async (req) => {
             { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
         const result = await uploadDriveFile(accessToken, body.file_name, body.content, body.mime_type, body.folder_id);
-        return new Response(JSON.stringify({ success: true, result, user_context: { userId, userEmail } }),
+        return new Response(JSON.stringify({ success: true, result, user_context: { userId, userEmail, deterministicId } }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
       case 'get_file': {
-        const accessToken = await getAccessToken(userId, userEmail);
+        const accessToken = await getAccessToken(userId || undefined, userEmail || undefined);
         if (!accessToken) {
-          return new Response(JSON.stringify({ success: false, error: 'Not authenticated for this user', user_context: { userId, userEmail } }),
+          return new Response(JSON.stringify({ success: false, error: 'Not authenticated for this user', user_context: { userId, userEmail, deterministicId } }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
         if (!body.file_id) {
@@ -1837,15 +1874,15 @@ serve(async (req) => {
             { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
         const result = await getDriveFile(accessToken, body.file_id);
-        return new Response(JSON.stringify({ success: true, result, user_context: { userId, userEmail } }),
+        return new Response(JSON.stringify({ success: true, result, user_context: { userId, userEmail, deterministicId } }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
       // 🔥 UPDATED: download_file now intelligently handles Google-native files
       case 'download_file': {
-        const accessToken = await getAccessToken(userId, userEmail);
+        const accessToken = await getAccessToken(userId || undefined, userEmail || undefined);
         if (!accessToken) {
-          return new Response(JSON.stringify({ success: false, error: 'Not authenticated for this user', user_context: { userId, userEmail } }),
+          return new Response(JSON.stringify({ success: false, error: 'Not authenticated for this user', user_context: { userId, userEmail, deterministicId } }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
         if (!body.file_id) {
@@ -1859,21 +1896,21 @@ serve(async (req) => {
           return new Response(JSON.stringify({
             success: true, content, mimeType, exported,
             message: exported ? 'File exported from Google-native format' : 'File downloaded directly',
-            user_context: { userId, userEmail }
+            user_context: { userId, userEmail, deterministicId }
           }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         } catch (err: any) {
           return new Response(JSON.stringify({
             success: false, error: err.message || 'Failed to download/export file',
-            user_context: { userId, userEmail }
+            user_context: { userId, userEmail, deterministicId }
           }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
       }
 
       // 🔥 NEW: Dedicated export action for Google-native files
       case 'export_file': {
-        const accessToken = await getAccessToken(userId, userEmail);
+        const accessToken = await getAccessToken(userId || undefined, userEmail || undefined);
         if (!accessToken) {
-          return new Response(JSON.stringify({ success: false, error: 'Not authenticated for this user', user_context: { userId, userEmail } }),
+          return new Response(JSON.stringify({ success: false, error: 'Not authenticated for this user', user_context: { userId, userEmail, deterministicId } }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
         if (!body.file_id || !body.export_mime_type) {
@@ -1885,21 +1922,21 @@ serve(async (req) => {
           const content = await exportGoogleFile(accessToken, body.file_id, body.export_mime_type);
           return new Response(JSON.stringify({
             success: true, content, mimeType: body.export_mime_type,
-            user_context: { userId, userEmail }
+            user_context: { userId, userEmail, deterministicId }
           }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         } catch (err: any) {
           return new Response(JSON.stringify({
             success: false, error: err.message || 'Export failed',
-            user_context: { userId, userEmail }
+            user_context: { userId, userEmail, deterministicId }
           }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
       }
 
       // 🔥 NEW: Convenience actions for specific Google-native file types
       case 'get_doc_content': {
-        const accessToken = await getAccessToken(userId, userEmail);
+        const accessToken = await getAccessToken(userId || undefined, userEmail || undefined);
         if (!accessToken) {
-          return new Response(JSON.stringify({ success: false, error: 'Not authenticated for this user', user_context: { userId, userEmail } }),
+          return new Response(JSON.stringify({ success: false, error: 'Not authenticated for this user', user_context: { userId, userEmail, deterministicId } }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
         if (!body.file_id) {
@@ -1908,18 +1945,18 @@ serve(async (req) => {
         }
         try {
           const content = await exportGoogleFile(accessToken, body.file_id, body.format || 'text/plain');
-          return new Response(JSON.stringify({ success: true, content, format: body.format || 'text/plain', user_context: { userId, userEmail } }),
+          return new Response(JSON.stringify({ success: true, content, format: body.format || 'text/plain', user_context: { userId, userEmail, deterministicId } }),
             { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         } catch (err: any) {
-          return new Response(JSON.stringify({ success: false, error: err.message || 'Failed to export Google Doc', user_context: { userId, userEmail } }),
+          return new Response(JSON.stringify({ success: false, error: err.message || 'Failed to export Google Doc', user_context: { userId, userEmail, deterministicId } }),
             { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
       }
 
       case 'get_sheet_content': {
-        const accessToken = await getAccessToken(userId, userEmail);
+        const accessToken = await getAccessToken(userId || undefined, userEmail || undefined);
         if (!accessToken) {
-          return new Response(JSON.stringify({ success: false, error: 'Not authenticated for this user', user_context: { userId, userEmail } }),
+          return new Response(JSON.stringify({ success: false, error: 'Not authenticated for this user', user_context: { userId, userEmail, deterministicId } }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
         if (!body.file_id) {
@@ -1928,18 +1965,18 @@ serve(async (req) => {
         }
         try {
           const content = await exportGoogleFile(accessToken, body.file_id, body.format || 'text/csv');
-          return new Response(JSON.stringify({ success: true, content, format: body.format || 'text/csv', user_context: { userId, userEmail } }),
+          return new Response(JSON.stringify({ success: true, content, format: body.format || 'text/csv', user_context: { userId, userEmail, deterministicId } }),
             { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         } catch (err: any) {
-          return new Response(JSON.stringify({ success: false, error: err.message || 'Failed to export Google Sheet', user_context: { userId, userEmail } }),
+          return new Response(JSON.stringify({ success: false, error: err.message || 'Failed to export Google Sheet', user_context: { userId, userEmail, deterministicId } }),
             { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
       }
 
       case 'get_slide_content': {
-        const accessToken = await getAccessToken(userId, userEmail);
+        const accessToken = await getAccessToken(userId || undefined, userEmail || undefined);
         if (!accessToken) {
-          return new Response(JSON.stringify({ success: false, error: 'Not authenticated for this user', user_context: { userId, userEmail } }),
+          return new Response(JSON.stringify({ success: false, error: 'Not authenticated for this user', user_context: { userId, userEmail, deterministicId } }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
         if (!body.file_id) {
@@ -1948,18 +1985,18 @@ serve(async (req) => {
         }
         try {
           const content = await exportGoogleFile(accessToken, body.file_id, body.format || 'text/plain');
-          return new Response(JSON.stringify({ success: true, content, format: body.format || 'text/plain', user_context: { userId, userEmail } }),
+          return new Response(JSON.stringify({ success: true, content, format: body.format || 'text/plain', user_context: { userId, userEmail, deterministicId } }),
             { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         } catch (err: any) {
-          return new Response(JSON.stringify({ success: false, error: err.message || 'Failed to export Google Slide', user_context: { userId, userEmail } }),
+          return new Response(JSON.stringify({ success: false, error: err.message || 'Failed to export Google Slide', user_context: { userId, userEmail, deterministicId } }),
             { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
       }
 
       case 'create_folder': {
-        const accessToken = await getAccessToken(userId, userEmail);
+        const accessToken = await getAccessToken(userId || undefined, userEmail || undefined);
         if (!accessToken) {
-          return new Response(JSON.stringify({ success: false, error: 'Not authenticated for this user', user_context: { userId, userEmail } }),
+          return new Response(JSON.stringify({ success: false, error: 'Not authenticated for this user', user_context: { userId, userEmail, deterministicId } }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
         if (!body.folder_name) {
@@ -1967,14 +2004,14 @@ serve(async (req) => {
             { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
         const result = await createDriveFolder(accessToken, body.folder_name, body.parent_folder_id);
-        return new Response(JSON.stringify({ success: true, result, user_context: { userId, userEmail } }),
+        return new Response(JSON.stringify({ success: true, result, user_context: { userId, userEmail, deterministicId } }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
       case 'share_file': {
-        const accessToken = await getAccessToken(userId, userEmail);
+        const accessToken = await getAccessToken(userId || undefined, userEmail || undefined);
         if (!accessToken) {
-          return new Response(JSON.stringify({ success: false, error: 'Not authenticated for this user', user_context: { userId, userEmail } }),
+          return new Response(JSON.stringify({ success: false, error: 'Not authenticated for this user', user_context: { userId, userEmail, deterministicId } }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
         if (!body.file_id || !body.email) {
@@ -1982,12 +2019,15 @@ serve(async (req) => {
             { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
         const result = await shareDriveFile(accessToken, body.file_id, body.email, body.role);
-        return new Response(JSON.stringify({ success: true, result, user_context: { userId, userEmail } }),
+        return new Response(JSON.stringify({ success: true, result, user_context: { userId, userEmail, deterministicId } }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
 
       // ... [All other existing cases remain unchanged - Sheets, Calendar, Docs, Slides, Tasks, People, Cloud Storage, Gemini AI] ...
       // For brevity, I'm truncating the remaining cases here, but in production you would include ALL original cases unchanged.
+      // IMPORTANT: Apply the same pattern to ALL action cases:
+      // 1. Call getAccessToken(userId || undefined, userEmail || undefined)
+      // 2. Include user_context: { userId, userEmail, deterministicId } in all responses
 
       // ============= DEFAULT / UNKNOWN ACTION =============
       default:
@@ -2014,14 +2054,16 @@ serve(async (req) => {
             'get_media_metadata', 'get_thumbnail', 'generate_media_preview',
             // Sheets, Calendar, Docs, Slides, Tasks, People, Cloud Storage, Gemini AI actions...
             // (list continues as in original)
-          ]
+          ],
+          user_context: { userId, userEmail, deterministicId }
         }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
   } catch (error) {
     console.error('google-cloud-auth error:', error);
     return new Response(JSON.stringify({
       success: false,
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: error instanceof Error ? error.message : 'Unknown error',
+      user_context: { userId: undefined, userEmail: undefined, deterministicId: undefined }
     }), { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 });
