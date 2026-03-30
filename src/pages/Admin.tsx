@@ -360,6 +360,7 @@ export default function Admin() {
     try {
       const rawSupabase = supabase as any;
       const nowIso = new Date().toISOString();
+      let canceledExisting = false;
 
       if (targetUser.tierView.assignmentId) {
         const { error: cancelError } = await rawSupabase
@@ -367,10 +368,29 @@ export default function Admin() {
           .update({ status: 'canceled', ends_at: nowIso })
           .eq('id', targetUser.tierView.assignmentId);
 
-        if (cancelError) throw cancelError;
+        if (cancelError) {
+          const errorMessage = `${cancelError.message || ''} ${cancelError.details || ''}`.toLowerCase();
+          const likelyStatusMismatch =
+            errorMessage.includes('cancelled') ||
+            errorMessage.includes('invalid input value for enum') ||
+            errorMessage.includes('check constraint');
+
+          if (!likelyStatusMismatch) {
+            throw cancelError;
+          }
+
+          const { error: cancelFallbackError } = await rawSupabase
+            .from('user_tier_assignments')
+            .update({ status: 'cancelled', ends_at: nowIso })
+            .eq('id', targetUser.tierView.assignmentId);
+
+          if (cancelFallbackError) throw cancelFallbackError;
+        }
+
+        canceledExisting = true;
       }
 
-      const { data: insertedAssignment, error: insertError } = await rawSupabase
+      let { data: insertedAssignment, error: insertError } = await rawSupabase
         .from('user_tier_assignments')
         .insert({
           user_id: targetUserId,
@@ -378,6 +398,7 @@ export default function Admin() {
           status: 'active',
           starts_at: nowIso,
           ends_at: null,
+          source: 'admin_panel',
         })
         .select(`
           id,
@@ -399,6 +420,46 @@ export default function Admin() {
           )
         `)
         .single();
+
+      if (insertError) {
+        const maybeMissingSourceColumn = `${insertError.message || ''} ${insertError.details || ''}`
+          .toLowerCase()
+          .includes('source');
+
+        if (!maybeMissingSourceColumn) throw insertError;
+
+        const fallbackInsert = await rawSupabase
+          .from('user_tier_assignments')
+          .insert({
+            user_id: targetUserId,
+            tier_id: selectedTierId,
+            status: 'active',
+            starts_at: nowIso,
+            ends_at: null,
+          })
+          .select(`
+            id,
+            user_id,
+            status,
+            starts_at,
+            ends_at,
+            user_tiers:tier_id (
+              id,
+              slug,
+              name,
+              description,
+              pricing_model,
+              amount_cents,
+              currency,
+              interval,
+              features
+            )
+          `)
+          .single();
+
+        insertedAssignment = fallbackInsert.data;
+        insertError = fallbackInsert.error;
+      }
 
       if (insertError) throw insertError;
 
@@ -425,13 +486,15 @@ export default function Admin() {
       const selectedTier = tierCatalog.find((tier) => tier.id === selectedTierId);
       toast({
         title: 'Tier updated',
-        description: `Billing tier changed to ${selectedTier?.name || 'selected tier'}`,
+        description: `${selectedTier?.name || 'Selected tier'} assignment updated${canceledExisting ? ' and previous tier closed' : ''}`,
       });
     } catch (error) {
       console.error('Error updating tier:', error);
+      const errorMessage =
+        typeof error === 'object' && error && 'message' in error ? String((error as { message?: string }).message || '') : '';
       toast({
         title: 'Error',
-        description: 'Failed to update billing tier assignment',
+        description: errorMessage ? `Failed to update billing tier assignment: ${errorMessage}` : 'Failed to update billing tier assignment',
         variant: 'destructive',
       });
     } finally {
