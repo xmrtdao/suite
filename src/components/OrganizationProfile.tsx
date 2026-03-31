@@ -21,8 +21,7 @@ interface Organization {
   whatsapp_number: string | null;
   github_repo: string | null;
   mcp_server_address: string | null;
-  connections: any;
-  typefully_set?: string;
+  connections: Record<string, unknown> | null;
 }
 
 export const OrganizationProfile = () => {
@@ -43,7 +42,6 @@ export const OrganizationProfile = () => {
     whatsapp_number: '',
     github_repo: '',
     mcp_server_address: '',
-    typefully_set: '',
     connections: {}
   });
 
@@ -74,11 +72,14 @@ export const OrganizationProfile = () => {
   const handleSave = async () => {
     if (!user) return;
 
-    // Validation removed for "no required fields"
-    // Use default name if empty to satisfy DB NOT NULL constraint and improve UX
     const submissionData = {
-      ...formData,
-      name: formData.name?.trim() || 'Unnamed Organization'
+      name: formData.name?.trim() || 'Unnamed Organization',
+      website: formData.website?.trim() || null,
+      email: formData.email?.trim() || null,
+      whatsapp_number: formData.whatsapp_number?.trim() || null,
+      github_repo: formData.github_repo?.trim() || null,
+      mcp_server_address: formData.mcp_server_address?.trim() || null,
+      connections: formData.connections || {},
     };
 
     try {
@@ -106,7 +107,6 @@ export const OrganizationProfile = () => {
         whatsapp_number: '',
         github_repo: '',
         mcp_server_address: '',
-        typefully_set: '',
         connections: {}
       });
       fetchOrganizations();
@@ -226,14 +226,6 @@ export const OrganizationProfile = () => {
                   value={formData.mcp_server_address || ''}
                   onChange={e => setFormData({ ...formData, mcp_server_address: e.target.value })}
                   placeholder="http://localhost:3000"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Typefully Set (Social Content)</Label>
-                <Input
-                  value={formData.typefully_set || ''}
-                  onChange={e => setFormData({ ...formData, typefully_set: e.target.value })}
-                  placeholder="e.g. My Tech Brand"
                 />
               </div>
             </div>
