@@ -396,7 +396,7 @@ const shouldShowStoreKnowledgeButton = (content: string | undefined): boolean =>
 const shouldSuppressStoreKnowledgeButton = (
   councilMode: boolean,
   fullAutonomyEnabled: boolean
-): boolean => councilMode && fullAutonomyEnabled;
+): boolean => fullAutonomyEnabled;
 
 const draftEmailPreparedPatterns = [
   /prepared (a|an)?\s*draft email/i,
