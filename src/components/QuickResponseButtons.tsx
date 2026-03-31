@@ -546,6 +546,22 @@ export const getPrimaryQuickResponsePrompt = (context: QuickResponseContext): st
   return resolveQuickResponsePrompt(primaryResponse.label, context.lastMessageContent);
 };
 
+export const getQuickResponsePrompts = (context: QuickResponseContext): string[] => {
+  const responses = getContextualButtons(
+    context.lastMessageContent,
+    context.lastExecutive,
+    context.hasUserEngaged ?? false,
+    context.lastMessageRole,
+    context.hasPastConversations ?? false,
+    context.turnCount ?? 0,
+    context.councilMode ?? false
+  );
+
+  return responses.map((response) =>
+    resolveQuickResponsePrompt(response.label, context.lastMessageContent)
+  );
+};
+
 export const QuickResponseButtons = ({ 
   onQuickResponse, 
   disabled,
