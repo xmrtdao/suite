@@ -14,6 +14,7 @@ interface QuickResponseButtonsProps {
   lastMessageContent?: string;
   lastExecutive?: string;
   turnCount?: number;
+  councilMode?: boolean;
 }
 
 const MAX_SUGGESTIVE_BUTTON_WORDS = 4;
@@ -316,6 +317,22 @@ const STORE_IN_KNOWLEDGE_BUTTON: ButtonConfig = {
 const STORE_IN_KNOWLEDGE_PROMPT =
   "Store in your Knowledge 🧠 — Eliza, store the key information from your most recent assistant conversation response (not tool call logs/results) into your knowledgebase for permanent recall. Save concise structured memory covering context, verified facts/findings, decisions made, completed workflow steps, and recommended next actions. If confidence is low, explicitly mark uncertainty in the stored record.";
 
+const COUNCIL_MOVE_FORWARD_BUTTON: ButtonConfig = {
+  label: "Move forward",
+  emoji: "⏭️",
+};
+
+const COUNCIL_MOVE_FORWARD_PROMPT =
+  "Move forward ⏭️ — Council, continue deliberations from the latest discussion and advance to the next highest-impact decision with clear rationale, dissent notes if any, and immediate next actions.";
+
+const COUNCIL_PRINT_MINUTES_BUTTON: ButtonConfig = {
+  label: "Print the Minutes",
+  emoji: "📝",
+};
+
+const COUNCIL_PRINT_MINUTES_PROMPT =
+  "Print the Minutes 📝 — Council, generate professionally formatted and summarized meeting minutes from this session (agenda, key discussion points, decisions, votes, owners, deadlines, and open risks), then email those finalized minutes to my user email address and confirm that the email was sent.";
+
 const MAX_STORED_SNIPPET_LENGTH = 3000;
 
 const buildStoreKnowledgePrompt = (lastMessageContent?: string): string => {
@@ -401,34 +418,44 @@ const getContextualButtons = (
   hasUserEngaged: boolean,
   lastMessageRole: 'user' | 'assistant' | null | undefined,
   hasPastConversations: boolean,
-  turnCount: number
+  turnCount: number,
+  councilMode: boolean
 ): ButtonConfig[] => {
+  const withCouncilButtons = (buttons: ButtonConfig[]): ButtonConfig[] => {
+    if (!councilMode) return buttons;
+    return normalizeSuggestedButtons([
+      ...buttons,
+      COUNCIL_MOVE_FORWARD_BUTTON,
+      COUNCIL_PRINT_MINUTES_BUTTON
+    ]);
+  };
+
   // Welcome state - show intro buttons
   if (!hasUserEngaged) {
     if (hasPastConversations) {
       const firstTurnReturningButtons = [...returningUserResponses, GET_MY_EMAILS_BUTTON];
-      return turnCount >= 3
+      return withCouncilButtons(turnCount >= 3
         ? normalizeSuggestedButtons([...firstTurnReturningButtons, GET_ER_DONE_BUTTON, GO_SURFING_BUTTON])
-        : firstTurnReturningButtons;
+        : firstTurnReturningButtons);
     }
-    return turnCount >= 3
+    return withCouncilButtons(turnCount >= 3
       ? normalizeSuggestedButtons([...emptyConversationResponses, GO_SURFING_BUTTON])
-      : emptyConversationResponses;
+      : emptyConversationResponses);
   }
   
   // While waiting for AI response
   if (lastMessageRole === 'user') {
-    return turnCount >= 3
+    return withCouncilButtons(turnCount >= 3
       ? normalizeSuggestedButtons([...afterUserResponses, GET_ER_DONE_BUTTON, GO_SURFING_BUTTON])
-      : afterUserResponses;
+      : afterUserResponses);
   }
   
   // Check for numbered options, but ONLY if it's a user choice list (not planned steps)
   const numberedOptions = extractNumberedOptions(lastMessageContent || '');
   if (numberedOptions && isUserChoiceList(lastMessageContent || '')) {
-    return turnCount >= 3
+    return withCouncilButtons(turnCount >= 3
       ? normalizeSuggestedButtons([...numberedOptions, GET_ER_DONE_BUTTON, GO_SURFING_BUTTON])
-      : numberedOptions;
+      : numberedOptions);
   }
   
   // After AI response - build dynamic buttons
@@ -478,7 +505,7 @@ const getContextualButtons = (
     buttons.push(GET_ER_DONE_BUTTON);
   }
 
-  return normalizeSuggestedButtons(buttons);
+  return withCouncilButtons(buttons);
 };
 
 export const QuickResponseButtons = ({ 
@@ -489,7 +516,8 @@ export const QuickResponseButtons = ({
   hasPastConversations = false,
   lastMessageContent,
   lastExecutive,
-  turnCount = 0
+  turnCount = 0,
+  councilMode = false
 }: QuickResponseButtonsProps) => {
   const responses = getContextualButtons(
     lastMessageContent,
@@ -497,7 +525,8 @@ export const QuickResponseButtons = ({
     hasUserEngaged,
     lastMessageRole,
     hasPastConversations,
-    turnCount
+    turnCount,
+    councilMode
   );
 
   return (
@@ -521,6 +550,10 @@ export const QuickResponseButtons = ({
                       ? buildStoreKnowledgePrompt(lastMessageContent)
                     : response.label === "Draft my emails"
                     ? DRAFT_MY_EMAILS_PROMPT
+                    : response.label === COUNCIL_MOVE_FORWARD_BUTTON.label
+                      ? COUNCIL_MOVE_FORWARD_PROMPT
+                    : response.label === COUNCIL_PRINT_MINUTES_BUTTON.label
+                      ? COUNCIL_PRINT_MINUTES_PROMPT
                     : response.label
             )
           }
