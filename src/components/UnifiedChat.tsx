@@ -2364,15 +2364,30 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
             </div>
           </div>
 
-          {/* Unified Input Mode */}
-          <div className="flex bg-muted/30 rounded-lg p-1 gap-1">
-            <Button
-              variant="secondary"
-              size="sm"
-              className="h-6 px-2 text-[10px] sm:text-xs pointer-events-none"
-            >
-              Unified
-            </Button>
+          {/* Unified Badge / Live Camera (multimodal) */}
+          <div className="flex items-start">
+            {inputMode === 'multimodal' ? (
+              <LiveCameraProcessor
+                className="w-[220px] rounded-lg border border-border/50 bg-card/80 p-2"
+                isEnabled={liveVideoActive}
+                onEmotionDetected={(emotion, confidence) => {
+                  handleEmotionUpdate([{ name: emotion, score: confidence }], 'facial');
+                }}
+                onVisualContextUpdate={(context) => {
+                  console.log("Visual context:", context);
+                }}
+              />
+            ) : (
+              <div className="flex bg-muted/30 rounded-lg p-1 gap-1">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="h-6 px-2 text-[10px] sm:text-xs pointer-events-none"
+                >
+                  Unified
+                </Button>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
@@ -2625,22 +2640,6 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       <div className="flex-1 overflow-hidden">
         <ScrollArea ref={scrollAreaRef} className="h-full">
           <div className="space-y-4 p-4 xl:pr-40">
-            {/* Live Camera for Multimodal Mode */}
-            {inputMode === 'multimodal' && (
-              <div className="mb-4">
-                <LiveCameraProcessor
-                  isEnabled={liveVideoActive}
-                  onEmotionDetected={(emotion, confidence) => {
-                    handleEmotionUpdate([{ name: emotion, score: confidence }], 'facial');
-                  }}
-                  onVisualContextUpdate={(context) => {
-                    // Optionally store this context
-                    console.log("Visual context:", context);
-                  }}
-                />
-              </div>
-            )}
-
             {/* Office Clerk Loading Progress */}
             {officeClerkProgress && officeClerkProgress.status !== 'idle' && officeClerkProgress.status !== 'ready' && (
               <div className="bg-muted/50 border border-primary/30 rounded-lg p-4 space-y-3 animate-fade-in">
