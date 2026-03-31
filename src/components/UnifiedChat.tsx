@@ -2504,6 +2504,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
             lastMessageContent={messages.length > 0 ? messages[messages.length - 1].content : undefined}
             lastExecutive={messages.length > 0 ? (messages[messages.length - 1] as any).executive : undefined}
             turnCount={messages.length}
+            councilMode={councilMode}
           />
         </div>
       </div>
