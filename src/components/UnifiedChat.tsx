@@ -640,6 +640,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   const [autoAdvanceCountdown, setAutoAdvanceCountdown] = useState<number | null>(null);
   const autoAdvanceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pendingAutoAdvancePromptRef = useRef<string>('');
+  const FULL_AUTONOMY_AUTO_ADVANCE_SECONDS = 60;
   // Ref to handleSendMessage — avoids stale closure in setInterval callbacks
   // Updated BEFORE the interval fires via assignment in component body below
   const handleSendMessageRef = useRef<((msg?: string) => void) | undefined>(undefined);
@@ -670,7 +671,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
 
     clearAutoAdvanceTimer();
     pendingAutoAdvancePromptRef.current = prompt;
-    let remaining = 30;
+    let remaining = FULL_AUTONOMY_AUTO_ADVANCE_SECONDS;
     setAutoAdvanceCountdown(remaining);
 
     autoAdvanceTimerRef.current = setInterval(() => {
@@ -690,6 +691,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
     messages.length,
     councilMode,
     clearAutoAdvanceTimer,
+    FULL_AUTONOMY_AUTO_ADVANCE_SECONDS,
   ]);
 
 
@@ -2391,7 +2393,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
                     {fullAutonomyEnabled ? 'Full Autonomy Active' : 'Full Autonomy Off'}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    After each assistant response, you get 30 seconds to reply manually. If idle, the best quick-prompt is auto-selected.
+                    After each assistant response, you get 60 seconds to reply manually. If idle, the best quick-prompt is auto-selected.
                   </p>
                 </TooltipContent>
               </Tooltip>
@@ -2628,7 +2630,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
                   <div className="w-full bg-primary/20 rounded-full h-1">
                     <div
                       className="bg-primary h-1 rounded-full transition-all duration-1000"
-                      style={{ width: `${(1 - autoAdvanceCountdown / 30) * 100}%` }}
+                      style={{ width: `${(1 - autoAdvanceCountdown / FULL_AUTONOMY_AUTO_ADVANCE_SECONDS) * 100}%` }}
                     />
                   </div>
                 </div>
