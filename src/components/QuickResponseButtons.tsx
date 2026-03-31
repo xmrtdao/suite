@@ -15,6 +15,7 @@ interface QuickResponseButtonsProps {
   lastExecutive?: string;
   turnCount?: number;
   councilMode?: boolean;
+  fullAutonomyEnabled?: boolean;
 }
 
 interface QuickResponseContext {
@@ -25,6 +26,7 @@ interface QuickResponseContext {
   lastExecutive?: string;
   turnCount?: number;
   councilMode?: boolean;
+  fullAutonomyEnabled?: boolean;
 }
 
 const MAX_SUGGESTIVE_BUTTON_WORDS = 4;
@@ -391,6 +393,11 @@ const shouldShowStoreKnowledgeButton = (content: string | undefined): boolean =>
   );
 };
 
+const shouldSuppressStoreKnowledgeButton = (
+  councilMode: boolean,
+  fullAutonomyEnabled: boolean
+): boolean => councilMode && fullAutonomyEnabled;
+
 const draftEmailPreparedPatterns = [
   /prepared (a|an)?\s*draft email/i,
   /i('ve| have)\s+(prepared|drafted)\s+(a|an)?\s*email/i,
@@ -429,7 +436,8 @@ const getContextualButtons = (
   lastMessageRole: 'user' | 'assistant' | null | undefined,
   hasPastConversations: boolean,
   turnCount: number,
-  councilMode: boolean
+  councilMode: boolean,
+  fullAutonomyEnabled: boolean
 ): ButtonConfig[] => {
   const withCouncilButtons = (buttons: ButtonConfig[]): ButtonConfig[] => {
     if (!councilMode) return buttons;
@@ -471,7 +479,10 @@ const getContextualButtons = (
   // After AI response - build dynamic buttons
   const buttons: ButtonConfig[] = [];
 
-  if (shouldShowStoreKnowledgeButton(lastMessageContent)) {
+  if (
+    shouldShowStoreKnowledgeButton(lastMessageContent) &&
+    !shouldSuppressStoreKnowledgeButton(councilMode, fullAutonomyEnabled)
+  ) {
     buttons.push(STORE_IN_KNOWLEDGE_BUTTON);
   }
 
@@ -538,7 +549,8 @@ export const getPrimaryQuickResponsePrompt = (context: QuickResponseContext): st
     context.lastMessageRole,
     context.hasPastConversations ?? false,
     context.turnCount ?? 0,
-    context.councilMode ?? false
+    context.councilMode ?? false,
+    context.fullAutonomyEnabled ?? false
   );
 
   const primaryResponse = responses[0];
@@ -554,7 +566,8 @@ export const getQuickResponsePrompts = (context: QuickResponseContext): string[]
     context.lastMessageRole,
     context.hasPastConversations ?? false,
     context.turnCount ?? 0,
-    context.councilMode ?? false
+    context.councilMode ?? false,
+    context.fullAutonomyEnabled ?? false
   );
 
   return responses.map((response) =>
@@ -571,7 +584,8 @@ export const QuickResponseButtons = ({
   lastMessageContent,
   lastExecutive,
   turnCount = 0,
-  councilMode = false
+  councilMode = false,
+  fullAutonomyEnabled = false
 }: QuickResponseButtonsProps) => {
   const responses = getContextualButtons(
     lastMessageContent,
@@ -580,7 +594,8 @@ export const QuickResponseButtons = ({
     lastMessageRole,
     hasPastConversations,
     turnCount,
-    councilMode
+    councilMode,
+    fullAutonomyEnabled
   );
 
   return (

@@ -671,6 +671,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       lastExecutive: assistantMessage.executive,
       turnCount: messages.length + 1,
       councilMode,
+      fullAutonomyEnabled,
     };
 
     const prompt = isBreakoutTurn
@@ -2563,6 +2564,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
             lastExecutive={messages.length > 0 ? (messages[messages.length - 1] as any).executive : undefined}
             turnCount={messages.length}
             councilMode={councilMode}
+            fullAutonomyEnabled={fullAutonomyEnabled}
           />
         </div>
       </div>
