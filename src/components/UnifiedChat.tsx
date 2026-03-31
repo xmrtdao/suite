@@ -2569,6 +2569,58 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
         </div>
       </div>
 
+      {/* Top chat status bars for inverted chat layout */}
+      {(fullAutonomyEnabled && autoAdvanceCountdown !== null) || isProcessing ? (
+        <div className="px-4 pb-2 space-y-2">
+          {fullAutonomyEnabled && autoAdvanceCountdown !== null && (
+            <div className="animate-fade-in">
+              <div className="bg-primary/10 border border-primary/30 rounded-xl p-3">
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <div className="flex items-center gap-2 text-xs text-primary font-medium">
+                    <span>🤖</span>
+                    <span>Full Autonomy auto-selects a quick action in {autoAdvanceCountdown}s…</span>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-6 px-2 text-xs"
+                    onClick={clearAutoAdvanceTimer}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+                <div className="w-full bg-primary/20 rounded-full h-1">
+                  <div
+                    className="bg-primary h-1 rounded-full transition-all duration-1000"
+                    style={{ width: `${(1 - autoAdvanceCountdown / FULL_AUTONOMY_AUTO_ADVANCE_SECONDS) * 100}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {isProcessing && (
+            <div className="flex justify-start animate-fade-in">
+              <div className="bg-muted/50 text-foreground p-3 rounded-xl rounded-bl-sm border border-border/40">
+                <div className="flex items-center gap-3">
+                  <div className="flex space-x-1">
+                    <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce"></div>
+                    <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                    <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                  </div>
+                  <div>
+                    <span className="text-xs text-muted-foreground">Processing...</span>
+                    <p className="mt-1 hidden text-[11px] text-muted-foreground/80 xl:block">
+                      Check the sticky notes on the right for Eliza&apos;s progress.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : null}
+
       {/* Clean Messages Area */}
       <div className="flex-1 overflow-hidden">
         <ScrollArea ref={scrollAreaRef} className="h-full">
@@ -2638,53 +2690,6 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
               <ChatMessage key={message.id} message={message} />
             ))}
 
-            {/* Full Autonomy countdown banner */}
-            {fullAutonomyEnabled && autoAdvanceCountdown !== null && (
-              <div className="flex justify-center animate-fade-in">
-                <div className="bg-primary/10 border border-primary/30 rounded-xl p-3 max-w-[90%] w-full">
-                  <div className="flex items-center justify-between gap-3 mb-2">
-                    <div className="flex items-center gap-2 text-xs text-primary font-medium">
-                      <span>🤖</span>
-                      <span>Full Autonomy auto-selects a quick action in {autoAdvanceCountdown}s…</span>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-6 px-2 text-xs"
-                      onClick={clearAutoAdvanceTimer}
-                    >
-                      Cancel
-                    </Button>
-                  </div>
-                  <div className="w-full bg-primary/20 rounded-full h-1">
-                    <div
-                      className="bg-primary h-1 rounded-full transition-all duration-1000"
-                      style={{ width: `${(1 - autoAdvanceCountdown / FULL_AUTONOMY_AUTO_ADVANCE_SECONDS) * 100}%` }}
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {isProcessing && (
-              <div className="flex justify-start animate-fade-in">
-                <div className="bg-muted/50 text-foreground p-3 rounded-xl rounded-bl-sm border border-border/40">
-                  <div className="flex items-center gap-3">
-                    <div className="flex space-x-1">
-                      <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce"></div>
-                      <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                      <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                    </div>
-                    <div>
-                      <span className="text-xs text-muted-foreground">Processing...</span>
-                      <p className="mt-1 hidden text-[11px] text-muted-foreground/80 xl:block">
-                        Check the sticky notes on the right for Eliza's progress.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
             {/* Load Previous Conversation Button */}
             {hasMoreMessages && totalMessageCount > 0 && (
               <div className="flex justify-center pt-2">
