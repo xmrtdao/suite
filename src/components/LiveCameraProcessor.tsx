@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import { realTimeProcessingService } from '@/services/RealTimeProcessingService';
 import { emotionalIntelligenceService } from '@/services/EmotionalIntelligenceService';
-import { Camera, CameraOff, Eye, EyeOff } from 'lucide-react';
+import { Camera, Eye } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 interface LiveCameraProcessorProps {
@@ -183,23 +183,17 @@ export const LiveCameraProcessor: React.FC<LiveCameraProcessorProps> = ({
     <div className={`flex flex-col items-center space-y-3 ${className}`}>
       {/* Control Button */}
       <Button
-        variant={isActive ? "destructive" : "default"}
+        variant="default"
         size="sm"
         onClick={toggleCamera}
         disabled={!isEnabled}
-        className="w-full"
+        className={`h-8 w-8 p-0 rounded-md border border-blue-600 bg-blue-600 text-white hover:bg-blue-700 hover:border-blue-700 ${
+          isActive ? 'ring-2 ring-blue-300 ring-offset-2 ring-offset-background' : ''
+        }`}
+        aria-label={isActive ? 'Disable front-facing camera' : 'Enable front-facing camera'}
+        title={isActive ? 'Disable front-facing camera' : 'Enable front-facing camera'}
       >
-        {isActive ? (
-          <>
-            <CameraOff className="w-4 h-4 mr-2" />
-            Stop Camera
-          </>
-        ) : (
-          <>
-            <Camera className="w-4 h-4 mr-2" />
-            upgrade for multimodal features
-          </>
-        )}
+        <Camera className="w-4 h-4" />
       </Button>
 
       {/* Video Preview and Canvas */}
