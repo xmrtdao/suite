@@ -12,12 +12,12 @@ import { ReasoningSteps, type ReasoningStep } from './ReasoningSteps';
 import { GitHubPATInput } from './GitHubContributorRegistration';
 import { mobilePermissionService } from '@/services/mobilePermissionService';
 import { formatTime } from '@/utils/dateFormatter';
-import { Send, Volume2, VolumeX, Trash2, Wifi, Users, Vote, Paperclip, X, Mic, MicOff, Video, VideoOff, Copy, Check } from 'lucide-react';
+import { Send, Volume2, VolumeX, Trash2, Wifi, Users, Vote, Paperclip, X, Mic, MicOff, Video, VideoOff, Copy, Check, Bot } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { AttachmentPreview, type AttachmentFile } from './AttachmentPreview';
-import { QuickResponseButtons } from './QuickResponseButtons';
+import { QuickResponseButtons, getPrimaryQuickResponsePrompt } from './QuickResponseButtons';
 import { ExecutiveCouncilChat } from './ExecutiveCouncilChat';
 import { ImageResponsePreview, extractImagesFromResponse, isLargeResponse, sanitizeLargeResponse } from './ImageResponsePreview';
 import { GovernanceStatusBadge } from './GovernanceStatusBadge';
@@ -635,44 +635,62 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   // Council mode state - initialize from prop
   const [councilMode, setCouncilMode] = useState<boolean>(defaultCouncilMode);
 
-  // Auto-advance state — council meeting self-drives after each synthesis
+  // Full Autonomy state — auto-advances via suggested quick prompt after assistant replies
+  const [fullAutonomyEnabled, setFullAutonomyEnabled] = useState(false);
   const [autoAdvanceCountdown, setAutoAdvanceCountdown] = useState<number | null>(null);
-  const [autoAdvancePaused, setAutoAdvancePaused] = useState(false);
   const autoAdvanceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const pendingAutoAdvanceText = useRef<string>('');
+  const pendingAutoAdvancePromptRef = useRef<string>('');
   // Ref to handleSendMessage — avoids stale closure in setInterval callbacks
   // Updated BEFORE the interval fires via assignment in component body below
   const handleSendMessageRef = useRef<((msg?: string) => void) | undefined>(undefined);
 
-  /**
-   * Parse the synthesis output to extract the lead executive's next steps.
-   * Returns a structured prompt string the council can act on, or null if
-   * the synthesis is asking the user a direct question (which pauses auto-advance).
-   */
-  const extractNextCouncilStep = (synthesis: string): string | null => {
-    // If synthesis ends with a question directed at the user, let them answer
-    const lastSentences = synthesis.split(/[.!]/).slice(-3).join(' ').toLowerCase();
-    if (/\?/.test(lastSentences) && /(your|founder|you prefer|what is|which|shall we|do you)/.test(lastSentences)) {
-      return null; // User input genuinely needed
+  const clearAutoAdvanceTimer = useCallback(() => {
+    if (autoAdvanceTimerRef.current) {
+      clearInterval(autoAdvanceTimerRef.current);
+      autoAdvanceTimerRef.current = null;
     }
+    pendingAutoAdvancePromptRef.current = '';
+    setAutoAdvanceCountdown(null);
+  }, []);
 
-    // Extract Lead Executive
-    const leadMatch = synthesis.match(/\*\*Lead Executive:\*\*\s*([^\n]+)/i);
-    const leadName = leadMatch ? leadMatch[1].trim() : 'Lead Executive';
+  const scheduleFullAutonomyAdvance = useCallback((assistantMessage: UnifiedMessage) => {
+    if (!fullAutonomyEnabled || assistantMessage.sender !== 'assistant') return;
 
-    // Extract the numbered next steps from "Unified Recommendation" or end of synthesis
-    const recSection = synthesis.match(/(Unified Recommendation|next steps?|must now)[\s\S]*?(?=\*\*Lead Executive|$)/i)?.[0] || synthesis;
-    const bullets = recSection
-      .split('\n')
-      .filter(line => /^[\d•*\-]/.test(line.trim()) && line.trim().length > 10)
-      .slice(0, 3)
-      .map(line => line.replace(/^[\d.•*\-]+\s*/, '').replace(/\*\*/g, '').trim())
-      .filter(Boolean);
+    const prompt = getPrimaryQuickResponsePrompt({
+      lastMessageRole: 'assistant',
+      hasUserEngaged,
+      hasPastConversations: conversationSummaries.length > 0 || totalMessageCount > 0,
+      lastMessageContent: assistantMessage.content,
+      lastExecutive: assistantMessage.executive,
+      turnCount: messages.length + 1,
+      councilMode,
+    });
 
-    if (bullets.length === 0) return null;
+    if (!prompt) return;
 
-    return `${leadName}, please proceed: ${bullets.join(' | ')}. Move the meeting forward with decisive action.`;
-  };
+    clearAutoAdvanceTimer();
+    pendingAutoAdvancePromptRef.current = prompt;
+    let remaining = 30;
+    setAutoAdvanceCountdown(remaining);
+
+    autoAdvanceTimerRef.current = setInterval(() => {
+      remaining -= 1;
+      setAutoAdvanceCountdown(remaining);
+      if (remaining <= 0) {
+        const pendingPrompt = pendingAutoAdvancePromptRef.current;
+        clearAutoAdvanceTimer();
+        if (pendingPrompt) handleSendMessageRef.current?.(pendingPrompt);
+      }
+    }, 1000);
+  }, [
+    fullAutonomyEnabled,
+    hasUserEngaged,
+    conversationSummaries.length,
+    totalMessageCount,
+    messages.length,
+    councilMode,
+    clearAutoAdvanceTimer,
+  ]);
 
 
   // File attachment state
@@ -1120,6 +1138,12 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       if (autoAdvanceTimerRef.current) clearInterval(autoAdvanceTimerRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (!fullAutonomyEnabled) {
+      clearAutoAdvanceTimer();
+    }
+  }, [fullAutonomyEnabled, clearAutoAdvanceTimer]);
 
   useEffect(() => {
     if (isProcessing) {
@@ -1713,6 +1737,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
     const rawInput = quickMessage ?? textInput;
     const trimmedInput = rawInput.trim();
     if (!trimmedInput || isProcessing) return;
+    clearAutoAdvanceTimer();
     const messageText = formatUserMessageForDisplayAndParsing(trimmedInput);
 
 
@@ -1928,31 +1953,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
           console.log('Conversation persistence error:', error);
         }
 
-        // 🚀 AUTO-ADVANCE: parse next steps from synthesis and re-submit automatically
-        // This lets the lead executive drive the meeting without user having to say "proceed"
-        if (councilMode && !autoAdvancePaused) {
-          const nextStep = extractNextCouncilStep(deliberation.synthesis);
-          if (nextStep) {
-            pendingAutoAdvanceText.current = nextStep;
-            let remaining = 10;
-            setAutoAdvanceCountdown(remaining);
-
-            if (autoAdvanceTimerRef.current) clearInterval(autoAdvanceTimerRef.current);
-            autoAdvanceTimerRef.current = setInterval(() => {
-              remaining -= 1;
-              setAutoAdvanceCountdown(remaining);
-              if (remaining <= 0) {
-                clearInterval(autoAdvanceTimerRef.current!);
-                autoAdvanceTimerRef.current = null;
-                setAutoAdvanceCountdown(null);
-                const text = pendingAutoAdvanceText.current;
-                pendingAutoAdvanceText.current = '';
-                // Use ref to avoid stale closure — always gets the latest handler
-                if (text) handleSendMessageRef.current?.(text);
-              }
-            }, 1000);
-          }
-        }
+        scheduleFullAutonomyAdvance(elizaMessage);
         // Speak council synthesis with TTS (even if partial responses) - auto-initialize if needed
         if (voiceEnabled) {
           // Ensure TTS is initialized
@@ -2111,6 +2112,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
 
       setMessages(prev => [...prev, elizaMessage]);
       setLastElizaMessage(displayContent);
+      scheduleFullAutonomyAdvance(elizaMessage);
 
       // Store Eliza's response with full data integration
       try {
@@ -2371,6 +2373,30 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
               </Tooltip>
             </TooltipProvider>
 
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    onClick={() => setFullAutonomyEnabled((prev) => !prev)}
+                    variant={fullAutonomyEnabled ? 'default' : 'outline'}
+                    size="sm"
+                    className="text-xs h-7 px-1.5 sm:px-2 flex-shrink-0"
+                  >
+                    <Bot className="h-3 w-3 sm:mr-1" />
+                    <span className="hidden sm:inline">Full Autonomy</span>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="max-w-xs">
+                  <p className="font-medium text-sm mb-1">
+                    {fullAutonomyEnabled ? 'Full Autonomy Active' : 'Full Autonomy Off'}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    After each assistant response, you get 30 seconds to reply manually. If idle, the best quick-prompt is auto-selected.
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+
             {/* Governance Status Badge */}
             <GovernanceStatusBadge />
 
@@ -2467,6 +2493,9 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
               value={textInput}
               onChange={(e) => {
                 setTextInput(e.target.value);
+                if (e.target.value.trim().length > 0) {
+                  clearAutoAdvanceTimer();
+                }
                 // If user starts typing while assistant is speaking, interrupt
                 if (isSpeaking && e.target.value.length > 0) {
                   enhancedTTS.stop();
@@ -2578,51 +2607,31 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
               <ChatMessage key={message.id} message={message} />
             ))}
 
-            {/* 🚀 Auto-Advance Banner — shown during council countdown */}
-            {councilMode && autoAdvanceCountdown !== null && (
+            {/* Full Autonomy countdown banner */}
+            {fullAutonomyEnabled && autoAdvanceCountdown !== null && (
               <div className="flex justify-center animate-fade-in">
                 <div className="bg-primary/10 border border-primary/30 rounded-xl p-3 max-w-[90%] w-full">
                   <div className="flex items-center justify-between gap-3 mb-2">
                     <div className="flex items-center gap-2 text-xs text-primary font-medium">
-                      <span>👑</span>
-                      <span>Lead Executive advancing in {autoAdvanceCountdown}s…</span>
+                      <span>🤖</span>
+                      <span>Full Autonomy auto-selects a quick action in {autoAdvanceCountdown}s…</span>
                     </div>
                     <Button
                       size="sm"
                       variant="outline"
                       className="h-6 px-2 text-xs"
-                      onClick={() => {
-                        if (autoAdvanceTimerRef.current) {
-                          clearInterval(autoAdvanceTimerRef.current);
-                          autoAdvanceTimerRef.current = null;
-                        }
-                        setAutoAdvanceCountdown(null);
-                        setAutoAdvancePaused(true);
-                      }}
+                      onClick={clearAutoAdvanceTimer}
                     >
-                      ⏸ Pause
+                      Cancel
                     </Button>
                   </div>
                   <div className="w-full bg-primary/20 rounded-full h-1">
                     <div
                       className="bg-primary h-1 rounded-full transition-all duration-1000"
-                      style={{ width: `${(1 - autoAdvanceCountdown / 10) * 100}%` }}
+                      style={{ width: `${(1 - autoAdvanceCountdown / 30) * 100}%` }}
                     />
                   </div>
                 </div>
-              </div>
-            )}
-
-            {councilMode && autoAdvancePaused && !isProcessing && (
-              <div className="flex justify-center">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="text-xs gap-1 border-primary/30 text-primary"
-                  onClick={() => setAutoAdvancePaused(false)}
-                >
-                  ▶ Resume Auto-Advance
-                </Button>
               </div>
             )}
 

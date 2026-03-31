@@ -17,6 +17,16 @@ interface QuickResponseButtonsProps {
   councilMode?: boolean;
 }
 
+interface QuickResponseContext {
+  lastMessageRole?: 'user' | 'assistant' | null;
+  hasUserEngaged?: boolean;
+  hasPastConversations?: boolean;
+  lastMessageContent?: string;
+  lastExecutive?: string;
+  turnCount?: number;
+  councilMode?: boolean;
+}
+
 const MAX_SUGGESTIVE_BUTTON_WORDS = 4;
 
 const countWords = (label: string): number =>
@@ -508,6 +518,34 @@ const getContextualButtons = (
   return withCouncilButtons(buttons);
 };
 
+const resolveQuickResponsePrompt = (label: string, lastMessageContent?: string): string => {
+  if (label === GO_SURFING_BUTTON.label) return GO_SURFING_PROMPT;
+  if (label === GET_ER_DONE_BUTTON.label) return GET_ER_DONE_PROMPT;
+  if (label === GET_MY_EMAILS_BUTTON.label) return GET_MY_EMAILS_PROMPT;
+  if (label === SEND_EMAIL_BUTTON.label) return SEND_EMAIL_PROMPT;
+  if (label === STORE_IN_KNOWLEDGE_BUTTON.label) return buildStoreKnowledgePrompt(lastMessageContent);
+  if (label === "Draft my emails") return DRAFT_MY_EMAILS_PROMPT;
+  if (label === COUNCIL_MOVE_FORWARD_BUTTON.label) return COUNCIL_MOVE_FORWARD_PROMPT;
+  if (label === COUNCIL_PRINT_MINUTES_BUTTON.label) return COUNCIL_PRINT_MINUTES_PROMPT;
+  return label;
+};
+
+export const getPrimaryQuickResponsePrompt = (context: QuickResponseContext): string | null => {
+  const responses = getContextualButtons(
+    context.lastMessageContent,
+    context.lastExecutive,
+    context.hasUserEngaged ?? false,
+    context.lastMessageRole,
+    context.hasPastConversations ?? false,
+    context.turnCount ?? 0,
+    context.councilMode ?? false
+  );
+
+  const primaryResponse = responses[0];
+  if (!primaryResponse) return null;
+  return resolveQuickResponsePrompt(primaryResponse.label, context.lastMessageContent);
+};
+
 export const QuickResponseButtons = ({ 
   onQuickResponse, 
   disabled,
@@ -537,25 +575,7 @@ export const QuickResponseButtons = ({
           variant="outline"
           size="sm"
           onClick={() =>
-            onQuickResponse(
-              response.label === GO_SURFING_BUTTON.label
-                ? GO_SURFING_PROMPT
-                : response.label === GET_ER_DONE_BUTTON.label
-                  ? GET_ER_DONE_PROMPT
-                : response.label === GET_MY_EMAILS_BUTTON.label
-                  ? GET_MY_EMAILS_PROMPT
-                : response.label === SEND_EMAIL_BUTTON.label
-                    ? SEND_EMAIL_PROMPT
-                    : response.label === STORE_IN_KNOWLEDGE_BUTTON.label
-                      ? buildStoreKnowledgePrompt(lastMessageContent)
-                    : response.label === "Draft my emails"
-                    ? DRAFT_MY_EMAILS_PROMPT
-                    : response.label === COUNCIL_MOVE_FORWARD_BUTTON.label
-                      ? COUNCIL_MOVE_FORWARD_PROMPT
-                    : response.label === COUNCIL_PRINT_MINUTES_BUTTON.label
-                      ? COUNCIL_PRINT_MINUTES_PROMPT
-                    : response.label
-            )
+            onQuickResponse(resolveQuickResponsePrompt(response.label, lastMessageContent))
           }
           disabled={disabled}
           className="text-xs h-7 px-2 text-muted-foreground hover:text-foreground"
