@@ -17,7 +17,7 @@ import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { AttachmentPreview, type AttachmentFile } from './AttachmentPreview';
-import { QuickResponseButtons, getPrimaryQuickResponsePrompt } from './QuickResponseButtons';
+import { QuickResponseButtons, getQuickResponsePrompts } from './QuickResponseButtons';
 import { ExecutiveCouncilChat } from './ExecutiveCouncilChat';
 import { ImageResponsePreview, extractImagesFromResponse, isLargeResponse, sanitizeLargeResponse } from './ImageResponsePreview';
 import { GovernanceStatusBadge } from './GovernanceStatusBadge';
@@ -640,6 +640,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   const [autoAdvanceCountdown, setAutoAdvanceCountdown] = useState<number | null>(null);
   const autoAdvanceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pendingAutoAdvancePromptRef = useRef<string>('');
+  const lastAutoAdvancePromptRef = useRef<string>('');
   const fullAutonomyTurnCountRef = useRef(0);
   const FULL_AUTONOMY_AUTO_ADVANCE_SECONDS = 60;
   const FULL_AUTONOMY_BREAKOUT_PROMPT = 'But what new problems can we solve or what new features can we build? Use the internet if you need to, in order to find out what is most important right now.';
@@ -662,21 +663,31 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
     fullAutonomyTurnCountRef.current += 1;
     const isBreakoutTurn = fullAutonomyTurnCountRef.current % 4 === 0;
 
+    const quickResponseContext = {
+      lastMessageRole: 'assistant' as const,
+      hasUserEngaged,
+      hasPastConversations: conversationSummaries.length > 0 || totalMessageCount > 0,
+      lastMessageContent: assistantMessage.content,
+      lastExecutive: assistantMessage.executive,
+      turnCount: messages.length + 1,
+      councilMode,
+    };
+
     const prompt = isBreakoutTurn
       ? FULL_AUTONOMY_BREAKOUT_PROMPT
-      : getPrimaryQuickResponsePrompt({
-          lastMessageRole: 'assistant',
-          hasUserEngaged,
-          hasPastConversations: conversationSummaries.length > 0 || totalMessageCount > 0,
-          lastMessageContent: assistantMessage.content,
-          lastExecutive: assistantMessage.executive,
-          turnCount: messages.length + 1,
-          councilMode,
-        });
+      : (() => {
+          const quickPrompts = getQuickResponsePrompts(quickResponseContext);
+          if (quickPrompts.length === 0) return null;
+          const nextPrompt = quickPrompts.find(
+            (candidatePrompt) => candidatePrompt !== lastAutoAdvancePromptRef.current
+          );
+          return nextPrompt ?? null;
+        })();
 
     if (!prompt) return;
 
     clearAutoAdvanceTimer();
+    lastAutoAdvancePromptRef.current = prompt;
     pendingAutoAdvancePromptRef.current = prompt;
     let remaining = FULL_AUTONOMY_AUTO_ADVANCE_SECONDS;
     setAutoAdvanceCountdown(remaining);
@@ -1151,6 +1162,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
 
   useEffect(() => {
     fullAutonomyTurnCountRef.current = 0;
+    lastAutoAdvancePromptRef.current = '';
     if (!fullAutonomyEnabled) {
       clearAutoAdvanceTimer();
     }
