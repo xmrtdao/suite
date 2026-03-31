@@ -643,7 +643,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   const lastAutoAdvancePromptRef = useRef<string>('');
   const fullAutonomyTurnCountRef = useRef(0);
   const FULL_AUTONOMY_AUTO_ADVANCE_SECONDS = 60;
-  const FULL_AUTONOMY_BREAKOUT_PROMPT = 'But what new problems can we solve or what new features can we build? Use the internet if you need to, in order to find out what is most important right now.';
+  const FULL_AUTONOMY_BREAKOUT_PROMPT = 'But what new problems can we solve or what new features can we build? Use DuckDuckGo if you need to browse the internet in order to find out what is most important right now.';
   // Ref to handleSendMessage — avoids stale closure in setInterval callbacks
   // Updated BEFORE the interval fires via assignment in component body below
   const handleSendMessageRef = useRef<((msg?: string) => void) | undefined>(undefined);
