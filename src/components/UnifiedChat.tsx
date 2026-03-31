@@ -643,7 +643,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   const lastAutoAdvancePromptRef = useRef<string>('');
   const fullAutonomyTurnCountRef = useRef(0);
   const FULL_AUTONOMY_AUTO_ADVANCE_SECONDS = 60;
-  const FULL_AUTONOMY_BREAKOUT_PROMPT = 'But what new problems can we solve or what new features can we build? Use DuckDuckGo if you need to browse the internet in order to find out what is most important right now.';
+  const FULL_AUTONOMY_BREAKOUT_PROMPT = 'But what new problems can we solve or what new features can we build? Browse the web with DuckDuckGo to find out what is most important right now.';
   // Ref to handleSendMessage — avoids stale closure in setInterval callbacks
   // Updated BEFORE the interval fires via assignment in component body below
   const handleSendMessageRef = useRef<((msg?: string) => void) | undefined>(undefined);
@@ -661,7 +661,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
     if (!fullAutonomyEnabled || assistantMessage.sender !== 'assistant') return;
 
     fullAutonomyTurnCountRef.current += 1;
-    const isBreakoutTurn = fullAutonomyTurnCountRef.current % 4 === 0;
+    const isBreakoutTurn = !councilMode && fullAutonomyTurnCountRef.current % 4 === 0;
 
     const quickResponseContext = {
       lastMessageRole: 'assistant' as const,
@@ -677,11 +677,17 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       ? FULL_AUTONOMY_BREAKOUT_PROMPT
       : (() => {
           const quickPrompts = getQuickResponsePrompts(quickResponseContext);
-          if (quickPrompts.length === 0) return null;
-          const nextPrompt = quickPrompts.find(
+          const filteredPrompts = councilMode
+            ? quickPrompts.filter((candidatePrompt) =>
+                candidatePrompt === 'Proceed with plan' || candidatePrompt.startsWith('Move forward ⏭️')
+              )
+            : quickPrompts;
+
+          if (filteredPrompts.length === 0) return null;
+          const nextPrompt = filteredPrompts.find(
             (candidatePrompt) => candidatePrompt !== lastAutoAdvancePromptRef.current
           );
-          return nextPrompt ?? null;
+          return nextPrompt ?? filteredPrompts[0] ?? null;
         })();
 
     if (!prompt) return;
