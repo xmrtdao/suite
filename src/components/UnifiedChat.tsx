@@ -2312,14 +2312,14 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   return (
     <div className="relative overflow-visible">
       <ProcessingStickyNotes notes={processingNotes} />
-      <Card className={`bg-card border-border/60 flex flex-col h-[2500px] sm:h-[3000px] ${className}`}>
+      <Card className={`flex h-[calc(100vh-6rem)] min-h-[640px] flex-col overflow-hidden border-border/60 bg-card shadow-sm ${className}`}>
       {/* Voice Intelligence Toggle */}
       {/* Voice Intelligence Toggle Removed */}
 
       {/* Clean Header */}
-      <div className="px-4 py-3 border-b border-border/60">
-        <div className="flex items-center justify-between gap-2 sm:gap-4">
-          <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
+      <div className="border-b border-border/60 bg-gradient-to-b from-muted/30 to-card px-3 py-3 sm:px-4">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+          <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
             {/* Back button when in executive/council mode */}
             {onBack && (
               <Button
@@ -2365,10 +2365,10 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
           </div>
 
           {/* Unified Badge / Live Camera (multimodal) */}
-          <div className="flex items-start">
+          <div className="order-3 w-full sm:order-none sm:w-auto flex items-start">
             {inputMode === 'multimodal' ? (
               <LiveCameraProcessor
-                className="w-[220px] rounded-lg border border-border/50 bg-card/80 p-2"
+                className="w-full sm:w-[220px] rounded-lg border border-border/50 bg-card/80 p-2"
                 isEnabled={liveVideoActive}
                 onEmotionDetected={(emotion, confidence) => {
                   handleEmotionUpdate([{ name: emotion, score: confidence }], 'facial');
@@ -2390,7 +2390,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
             )}
           </div>
 
-          <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-1 sm:gap-2">
             {/* Council Mode Toggle with Tooltip */}
             <TooltipProvider>
               <Tooltip>
@@ -2403,6 +2403,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
                   >
                     <Users className="h-3 w-3 sm:mr-1" />
                     <span className="hidden sm:inline">{councilMode ? 'Council' : 'Eliza'}</span>
+                    <span className="sr-only">{councilMode ? 'Council mode enabled' : 'Eliza mode enabled'}</span>
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" className="max-w-xs">
@@ -2429,6 +2430,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
                   >
                     <Bot className="h-3 w-3 sm:mr-1" />
                     <span className="hidden sm:inline">Full Autonomy</span>
+                    <span className="sr-only">{fullAutonomyEnabled ? 'Disable full autonomy' : 'Enable full autonomy'}</span>
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" className="max-w-xs">
@@ -2459,10 +2461,11 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
                 onClick={handleClearConversation}
                 variant="ghost"
                 size="sm"
-                className="hidden sm:flex h-7 w-7 sm:h-8 sm:w-8 p-0 text-muted-foreground hover:text-destructive"
+                className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive sm:h-8 sm:w-8"
                 title="Clear conversation history"
               >
                 <Trash2 className="h-4 w-4" />
+                <span className="sr-only">Clear conversation history</span>
               </Button>
             )}
 
@@ -2485,8 +2488,8 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       </div>
 
       {/* Text Input Area (moved to hero/top section) */}
-      <div className="border-t border-border/60 bg-card/50">
-        <div className="p-4">
+      <div className="border-b border-border/60 bg-card/80">
+        <div className="space-y-3 p-3 sm:p-4">
           {/* Attachment Preview */}
           <AttachmentPreview
             attachments={attachments}
@@ -2494,7 +2497,8 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
             onClear={clearAttachments}
           />
 
-          <div className="flex gap-3 items-center">
+          <div className="rounded-2xl border border-primary/30 bg-gradient-to-r from-primary/5 via-background to-background p-2 shadow-[0_0_0_1px_rgba(99,102,241,0.08),0_8px_24px_rgba(15,23,42,0.08)] focus-within:border-primary/60 focus-within:shadow-[0_0_0_2px_rgba(99,102,241,0.25),0_10px_28px_rgba(15,23,42,0.12)]">
+            <div className="flex flex-wrap items-end gap-2 sm:flex-nowrap sm:gap-3">
             {/* File Attachment Button */}
             <input
               type="file"
@@ -2509,8 +2513,9 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
               size="sm"
               onClick={() => fileInputRef.current?.click()}
               disabled={isProcessing || attachments.length >= 5}
-              className="rounded-full min-h-[48px] min-w-[48px] hover:bg-muted/50"
+              className="min-h-[44px] min-w-[44px] rounded-xl border border-border/60 hover:bg-muted/50"
               title="Attach files (max 5)"
+              aria-label="Attach files"
             >
               <Paperclip className="h-4 w-4" />
             </Button>
@@ -2528,8 +2533,9 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
               size="sm"
               onClick={toggleRecording}
               disabled={isProcessing}
-              className={`rounded-full min-h-[48px] min-w-[48px] ${isRecording ? 'animate-pulse' : 'hover:bg-muted/50'}`}
+              className={`min-h-[44px] min-w-[44px] rounded-xl border border-border/60 ${isRecording ? 'animate-pulse' : 'hover:bg-muted/50'}`}
               title={isRecording ? "Stop Listening" : "Start Listening"}
+              aria-label={isRecording ? 'Stop listening' : 'Start listening'}
             >
               {isRecording ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
             </Button>
@@ -2555,17 +2561,19 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
                     ? `${attachments.length} file${attachments.length > 1 ? 's' : ''} attached`
                     : "Ask anything..."
               }
-              className="flex-1 rounded-lg border-border/60 bg-background min-h-[44px] max-h-48 text-sm px-4 py-3 resize-y"
+              className="min-h-[52px] max-h-48 flex-1 resize-y rounded-xl border-primary/40 bg-background px-4 py-3 text-sm shadow-inner focus-visible:ring-2 focus-visible:ring-primary/40"
               disabled={isProcessing}
             />
             <Button
               onClick={() => handleSendMessage()}
               disabled={(!textInput.trim() && attachments.length === 0) || isProcessing}
               size="sm"
-              className="rounded-lg min-h-[44px] min-w-[44px]"
+              className="min-h-[44px] min-w-[44px] rounded-xl px-4"
+              aria-label="Send message"
             >
               <Send className="h-4 w-4" />
             </Button>
+            </div>
           </div>
 
           {/* Quick Response Buttons */}
