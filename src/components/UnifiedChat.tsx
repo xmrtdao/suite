@@ -640,7 +640,9 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   const [autoAdvanceCountdown, setAutoAdvanceCountdown] = useState<number | null>(null);
   const autoAdvanceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pendingAutoAdvancePromptRef = useRef<string>('');
+  const fullAutonomyTurnCountRef = useRef(0);
   const FULL_AUTONOMY_AUTO_ADVANCE_SECONDS = 60;
+  const FULL_AUTONOMY_BREAKOUT_PROMPT = 'But what new problems can we solve or what new features can we build? Use the internet if you need to, in order to find out what is most important right now.';
   // Ref to handleSendMessage — avoids stale closure in setInterval callbacks
   // Updated BEFORE the interval fires via assignment in component body below
   const handleSendMessageRef = useRef<((msg?: string) => void) | undefined>(undefined);
@@ -657,15 +659,20 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   const scheduleFullAutonomyAdvance = useCallback((assistantMessage: UnifiedMessage) => {
     if (!fullAutonomyEnabled || assistantMessage.sender !== 'assistant') return;
 
-    const prompt = getPrimaryQuickResponsePrompt({
-      lastMessageRole: 'assistant',
-      hasUserEngaged,
-      hasPastConversations: conversationSummaries.length > 0 || totalMessageCount > 0,
-      lastMessageContent: assistantMessage.content,
-      lastExecutive: assistantMessage.executive,
-      turnCount: messages.length + 1,
-      councilMode,
-    });
+    fullAutonomyTurnCountRef.current += 1;
+    const isBreakoutTurn = fullAutonomyTurnCountRef.current % 4 === 0;
+
+    const prompt = isBreakoutTurn
+      ? FULL_AUTONOMY_BREAKOUT_PROMPT
+      : getPrimaryQuickResponsePrompt({
+          lastMessageRole: 'assistant',
+          hasUserEngaged,
+          hasPastConversations: conversationSummaries.length > 0 || totalMessageCount > 0,
+          lastMessageContent: assistantMessage.content,
+          lastExecutive: assistantMessage.executive,
+          turnCount: messages.length + 1,
+          councilMode,
+        });
 
     if (!prompt) return;
 
@@ -692,6 +699,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
     councilMode,
     clearAutoAdvanceTimer,
     FULL_AUTONOMY_AUTO_ADVANCE_SECONDS,
+    FULL_AUTONOMY_BREAKOUT_PROMPT,
   ]);
 
 
@@ -1142,6 +1150,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   }, []);
 
   useEffect(() => {
+    fullAutonomyTurnCountRef.current = 0;
     if (!fullAutonomyEnabled) {
       clearAutoAdvanceTimer();
     }
