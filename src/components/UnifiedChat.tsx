@@ -194,7 +194,7 @@ const ProcessingStickyNotes = React.memo(({ notes }: { notes: ProcessingStickyNo
   ];
 
   return (
-    <div className="pointer-events-none fixed right-2 top-24 z-40 sm:absolute sm:right-6 sm:top-36 sm:z-30">
+    <div className="pointer-events-none fixed right-2 top-36 z-40 sm:absolute sm:right-6 sm:top-44 sm:z-30">
       <div className="relative h-[248px] w-[152px] sm:h-[286px] sm:w-[220px]">
         {visibleNotes.map((note, index) => {
           const offset = stackOffsets[index] ?? {
@@ -258,7 +258,7 @@ const ContextTodoPaper = React.memo(({
 
   const visibleTodos = todos.slice(0, 6);
   return (
-    <div className="fixed right-2 top-[22.5rem] z-40 w-[176px] sm:absolute sm:right-6 sm:top-[22rem] sm:z-30 sm:w-[220px]">
+    <div className="fixed right-2 top-[34rem] z-40 w-[176px] sm:absolute sm:right-6 sm:top-[40rem] sm:z-30 sm:w-[220px]">
       <div className="relative rounded-[3px] border border-sky-200/80 bg-gradient-to-b from-white via-sky-50/25 to-white p-3 shadow-[0_16px_32px_rgba(37,99,235,0.16)]">
         <div className="pointer-events-none absolute inset-0 rounded-[3px] [background-image:repeating-linear-gradient(to_bottom,transparent_0px,transparent_22px,rgba(59,130,246,0.26)_23px)]" />
         <div className="pointer-events-none absolute left-5 top-0 h-full w-px bg-rose-200/70" />
