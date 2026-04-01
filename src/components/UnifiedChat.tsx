@@ -156,6 +156,12 @@ interface ContextTodoStore {
   [organizationId: string]: ContextTodoItem[];
 }
 
+interface CurrentContextPanelProps {
+  organizationName: string;
+  focusLine: string;
+  modeLabel: string;
+}
+
 const PROCESSING_STICKY_TEMPLATES: ProcessingStickyTemplate[] = [
   {
     id: 'tool-routing',
@@ -285,6 +291,19 @@ const ContextTodoPaper = React.memo(({
     </div>
   );
 });
+
+const CurrentContextPanel = React.memo(({
+  organizationName,
+  focusLine,
+  modeLabel,
+}: CurrentContextPanelProps) => (
+  <div className="w-full rounded-lg border border-border/60 bg-card/80 p-2 sm:w-[220px]">
+    <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-primary/80">Current Context</p>
+    <p className="mt-1 text-[11px] font-medium text-foreground/90">{organizationName}</p>
+    <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">{focusLine}</p>
+    <p className="mt-2 text-[10px] uppercase tracking-[0.12em] text-muted-foreground/90">{modeLabel}</p>
+  </div>
+));
 
 const normalizeStickyText = (value?: string | null) =>
   value?.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
@@ -720,6 +739,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   const [userContext, setUserContext] = useState<UserContext | null>(null);
   const [organizationContext, setOrganizationContext] = useState<any>(null);
   const [contextTodosByOrg, setContextTodosByOrg] = useState<ContextTodoStore>({});
+  const [visualContextSummary, setVisualContextSummary] = useState<string>('');
   const [lastElizaMessage, setLastElizaMessage] = useState<string>("");
 
   // Council mode state - initialize from prop
@@ -838,6 +858,11 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   const activeContextTodos = activeOrganizationId
     ? (contextTodosByOrg[activeOrganizationId] || [])
     : [];
+  const latestUserMessage = [...messages].reverse().find((msg) => msg.sender === 'user');
+  const currentContextFocusLine = visualContextSummary
+    || normalizeStickyText(latestUserMessage?.content)?.slice(0, 90)
+    || 'Awaiting active priorities from this chat.';
+  const currentContextModeLabel = councilMode ? 'Executive Council active' : 'Eliza direct mode';
 
   const persistContextTodos = useCallback((nextTodos: ContextTodoStore) => {
     localStorage.setItem(
@@ -2488,7 +2513,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
 
   return (
     <div className="relative overflow-visible">
-      {activeContextTodos.length === 0 && <ProcessingStickyNotes notes={processingNotes} />}
+      <ProcessingStickyNotes notes={processingNotes} />
       {activeContextTodos.length > 0 && (
         <ContextTodoPaper
           organizationName={activeOrganizationName}
@@ -2549,18 +2574,27 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
           </div>
 
           {/* Unified Badge / Live Camera (multimodal) */}
-          <div className="order-3 w-full sm:order-none sm:w-auto flex items-start">
+          <div className="order-3 flex w-full items-start gap-2 sm:order-none sm:w-auto">
             {inputMode === 'multimodal' ? (
-              <LiveCameraProcessor
-                className="w-full sm:w-[220px] rounded-lg border border-border/50 bg-card/80 p-2"
-                isEnabled={liveVideoActive}
-                onEmotionDetected={(emotion, confidence) => {
-                  handleEmotionUpdate([{ name: emotion, score: confidence }], 'facial');
-                }}
-                onVisualContextUpdate={(context) => {
-                  console.log("Visual context:", context);
-                }}
-              />
+              <>
+                <CurrentContextPanel
+                  organizationName={activeOrganizationName}
+                  focusLine={currentContextFocusLine}
+                  modeLabel={currentContextModeLabel}
+                />
+                <LiveCameraProcessor
+                  className="w-full sm:w-[220px] rounded-lg border border-border/50 bg-card/80 p-2"
+                  isEnabled={liveVideoActive}
+                  onEmotionDetected={(emotion, confidence) => {
+                    handleEmotionUpdate([{ name: emotion, score: confidence }], 'facial');
+                  }}
+                  onVisualContextUpdate={(context) => {
+                    const summarized = normalizeStickyText(context)?.slice(0, 90) || '';
+                    setVisualContextSummary(summarized);
+                    console.log("Visual context:", context);
+                  }}
+                />
+              </>
             ) : (
               <div className="flex bg-muted/30 rounded-lg p-1 gap-1">
                 <Button
