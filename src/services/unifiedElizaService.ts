@@ -225,6 +225,10 @@ export class UnifiedElizaService {
     console.log('🔒 Safe executives:', safeExecutives.length, 'available');
 
     // Try executives in priority order
+    const languageInstruction = language === 'es'
+      ? 'Responde completamente en español neutro.'
+      : 'Respond in clear English.';
+
     for (const executive of safeExecutives) {
       try {
         console.log(`📞 Calling ${executive}...`);
@@ -239,6 +243,9 @@ export class UnifiedElizaService {
 
           // Append Metadata and Context as JSON strings
           formData.append('messages', JSON.stringify([{
+            role: 'system',
+            content: languageInstruction
+          }, {
             role: 'user',
             content: userInput || 'Hello'
           }]));
@@ -248,6 +255,8 @@ export class UnifiedElizaService {
           }
 
           formData.append('timestamp', new Date().toISOString());
+          formData.append('language', language);
+          formData.append('preferred_language', language);
 
           if (context.isLiveCameraFeed) {
             formData.append('isLiveCameraFeed', 'true');
@@ -282,11 +291,16 @@ export class UnifiedElizaService {
           const payload = {
             message: userInput || 'Hello',
             messages: [{
+              role: 'system',
+              content: languageInstruction
+            }, {
               role: 'user',
               content: userInput || 'Hello'
             }],
             organizationContext: context.organizationContext,
             timestamp: new Date().toISOString(),
+            language,
+            preferred_language: language,
             user_id: userIdForPayload,
             user_email: userContext.userEmail,
             // ✅ CRITICAL FIX: Include images if they exist in the context
@@ -339,17 +353,24 @@ export class UnifiedElizaService {
   private static async callSingleExecutive(
     functionId: string,
     userInput: string,
-    context: ElizaContext
+    context: ElizaContext,
+    language: 'en' | 'es' = 'en'
   ): Promise<string | null> {
+    const languageInstruction = language === 'es'
+      ? 'Responde completamente en español neutro.'
+      : 'Respond in clear English.';
     const userContext = await this.getCurrentUserContext();
     const userIdForPayload = userContext.userEmail || userContext.userId;
     const payload = {
       message: userInput,
       messages: [
+        { role: 'system', content: languageInstruction },
         { role: 'user', content: userInput },
       ],
       organizationContext: context.organizationContext,
       timestamp: new Date().toISOString(),
+      language,
+      preferred_language: language,
       user_id: userIdForPayload,
       user_email: userContext.userEmail,
       images: context.images || undefined,
@@ -395,7 +416,7 @@ export class UnifiedElizaService {
       if (safeContext.targetExecutive && EXECUTIVE_PERSONA_PROMPTS[safeContext.targetExecutive] && !hasVisualOrAttachmentInput) {
         console.log(`🎭 Persona-locked mode: routing to ${safeContext.targetExecutive}`);
         const personaResponse = await this.callSingleExecutive(
-          safeContext.targetExecutive, safeInput, safeContext
+          safeContext.targetExecutive, safeInput, safeContext, language as 'en' | 'es'
         );
         if (personaResponse) return personaResponse;
         // If that function is down, fall through to waterfall below

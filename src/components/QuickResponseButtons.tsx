@@ -1,4 +1,5 @@
 import { Button } from './ui/button';
+import { useLanguage } from '@/contexts/LanguageContext';
 
 interface ButtonConfig {
   label: string;
@@ -27,6 +28,7 @@ interface QuickResponseContext {
   turnCount?: number;
   councilMode?: boolean;
   fullAutonomyEnabled?: boolean;
+  language?: 'en' | 'es';
 }
 
 const MAX_SUGGESTIVE_BUTTON_WORDS = 4;
@@ -529,15 +531,23 @@ const getContextualButtons = (
   return withCouncilButtons(buttons);
 };
 
-const resolveQuickResponsePrompt = (label: string, lastMessageContent?: string): string => {
-  if (label === GO_SURFING_BUTTON.label) return GO_SURFING_PROMPT;
-  if (label === GET_ER_DONE_BUTTON.label) return GET_ER_DONE_PROMPT;
-  if (label === GET_MY_EMAILS_BUTTON.label) return GET_MY_EMAILS_PROMPT;
-  if (label === SEND_EMAIL_BUTTON.label) return SEND_EMAIL_PROMPT;
-  if (label === STORE_IN_KNOWLEDGE_BUTTON.label) return buildStoreKnowledgePrompt(lastMessageContent);
-  if (label === "Draft my emails") return DRAFT_MY_EMAILS_PROMPT;
-  if (label === COUNCIL_MOVE_FORWARD_BUTTON.label) return COUNCIL_MOVE_FORWARD_PROMPT;
-  if (label === COUNCIL_PRINT_MINUTES_BUTTON.label) return COUNCIL_PRINT_MINUTES_PROMPT;
+const resolveQuickResponsePrompt = (
+  label: string,
+  lastMessageContent?: string,
+  language: 'en' | 'es' = 'en'
+): string => {
+  if (label === GO_SURFING_BUTTON.label) return language === 'es' ? SPANISH_PROMPTS.goSurfing : GO_SURFING_PROMPT;
+  if (label === GET_ER_DONE_BUTTON.label) return language === 'es' ? SPANISH_PROMPTS.createWorkflow : GET_ER_DONE_PROMPT;
+  if (label === GET_MY_EMAILS_BUTTON.label) return language === 'es' ? SPANISH_PROMPTS.getMyEmails : GET_MY_EMAILS_PROMPT;
+  if (label === SEND_EMAIL_BUTTON.label) return language === 'es' ? SPANISH_PROMPTS.sendEmail : SEND_EMAIL_PROMPT;
+  if (label === STORE_IN_KNOWLEDGE_BUTTON.label) {
+    return language === 'es'
+      ? SPANISH_PROMPTS.storeKnowledge
+      : buildStoreKnowledgePrompt(lastMessageContent);
+  }
+  if (label === "Draft my emails") return language === 'es' ? SPANISH_PROMPTS.draftEmails : DRAFT_MY_EMAILS_PROMPT;
+  if (label === COUNCIL_MOVE_FORWARD_BUTTON.label) return language === 'es' ? SPANISH_PROMPTS.moveForward : COUNCIL_MOVE_FORWARD_PROMPT;
+  if (label === COUNCIL_PRINT_MINUTES_BUTTON.label) return language === 'es' ? SPANISH_PROMPTS.printMinutes : COUNCIL_PRINT_MINUTES_PROMPT;
   return label;
 };
 
@@ -555,7 +565,7 @@ export const getPrimaryQuickResponsePrompt = (context: QuickResponseContext): st
 
   const primaryResponse = responses[0];
   if (!primaryResponse) return null;
-  return resolveQuickResponsePrompt(primaryResponse.label, context.lastMessageContent);
+  return resolveQuickResponsePrompt(primaryResponse.label, context.lastMessageContent, context.language ?? 'en');
 };
 
 export const getQuickResponsePrompts = (context: QuickResponseContext): string[] => {
@@ -571,7 +581,7 @@ export const getQuickResponsePrompts = (context: QuickResponseContext): string[]
   );
 
   return responses.map((response) =>
-    resolveQuickResponsePrompt(response.label, context.lastMessageContent)
+    resolveQuickResponsePrompt(response.label, context.lastMessageContent, context.language ?? 'en')
   );
 };
 
@@ -587,6 +597,7 @@ export const QuickResponseButtons = ({
   councilMode = false,
   fullAutonomyEnabled = false
 }: QuickResponseButtonsProps) => {
+  const { language } = useLanguage();
   const responses = getContextualButtons(
     lastMessageContent,
     lastExecutive,
@@ -606,12 +617,12 @@ export const QuickResponseButtons = ({
           variant="outline"
           size="sm"
           onClick={() =>
-            onQuickResponse(resolveQuickResponsePrompt(response.label, lastMessageContent))
+            onQuickResponse(resolveQuickResponsePrompt(response.label, lastMessageContent, language))
           }
           disabled={disabled}
           className="text-xs h-7 px-2 text-muted-foreground hover:text-foreground"
         >
-          {response.emoji} {response.label}
+          {response.emoji} {translateQuickPromptLabel(response.label, language)}
         </Button>
       ))}
     </div>
@@ -619,3 +630,81 @@ export const QuickResponseButtons = ({
 };
 
 export default QuickResponseButtons;
+const QUICK_PROMPT_TRANSLATIONS: Record<string, string> = {
+  "What can you do?": "¿Qué puedes hacer?",
+  "Plan my next move": "Planifica mi próximo paso",
+  "Create a Workflow": "Crear un flujo de trabajo",
+  "Where were we?": "¿Dónde nos quedamos?",
+  "Show recent changes": "Mostrar cambios recientes",
+  "Draft my emails": "Redactar mis correos",
+  "Find related docs": "Buscar documentos relacionados",
+  "Check open issues": "Revisar issues abiertos",
+  "Queue next actions": "Poner en cola próximas acciones",
+  "Proceed with fix": "Continuar con la corrección",
+  "Review changed code": "Revisar código modificado",
+  "Run focused tests": "Ejecutar pruebas enfocadas",
+  "Scan security gaps": "Revisar brechas de seguridad",
+  "Continue analysis": "Continuar análisis",
+  "Analyze another image": "Analizar otra imagen",
+  "Extract key text": "Extraer texto clave",
+  "Reveal key patterns": "Mostrar patrones clave",
+  "Proceed with insights": "Continuar con insights",
+  "Pull deeper metrics": "Profundizar métricas",
+  "Highlight top risks": "Resaltar principales riesgos",
+  "Recommend next actions": "Recomendar próximas acciones",
+  "Advance this strategy": "Avanzar esta estrategia",
+  "Pick my next step": "Elegir mi próximo paso",
+  "Coordinate council votes": "Coordinar votos del consejo",
+  "Build action roadmap": "Crear hoja de ruta",
+  "Proceed with plan": "Continuar con el plan",
+  "Tell me more": "Cuéntame más",
+  "Try another workflow": "Probar otro flujo de trabajo",
+  "Inspect error logs": "Inspeccionar logs de errores",
+  "Ship the patch": "Desplegar el parche",
+  "Run diagnostics now": "Ejecutar diagnósticos ahora",
+  "Review active blockers": "Revisar bloqueos activos",
+  "List available agents": "Listar agentes disponibles",
+  "Prioritize urgent work": "Priorizar trabajo urgente",
+  "Show task pipeline": "Mostrar pipeline de tareas",
+  "Assign next tasks": "Asignar próximas tareas",
+  "Resolve blocked work": "Resolver trabajo bloqueado",
+  "Review pending proposals": "Revisar propuestas pendientes",
+  "Show executive votes": "Mostrar votos ejecutivos",
+  "Submit my vote": "Enviar mi voto",
+  "Review mining stats": "Revisar estadísticas de minería",
+  "Show hashrate trends": "Mostrar tendencias de hashrate",
+  "Optimize mining setup": "Optimizar configuración de minería",
+  "Run deeper analysis": "Ejecutar análisis más profundo",
+  "Compare last week": "Comparar con la semana pasada",
+  "Export this dataset": "Exportar este dataset",
+  "Go Surfing": "Ir a explorar",
+  "Get my emails": "Obtener mis correos",
+  "Send Email": "Enviar correo",
+  "Store in your Knowledge": "Guardar en tu conocimiento",
+  "Move forward": "Avanzar",
+  "Print the Minutes": "Imprimir las minutas",
+};
+
+const translateQuickPromptLabel = (label: string, language: 'en' | 'es'): string => {
+  if (language !== 'es') return label;
+  return QUICK_PROMPT_TRANSLATIONS[label] || label;
+};
+
+const SPANISH_PROMPTS = {
+  goSurfing:
+    "Ir a explorar 🏄‍♀️ — Eliza, usa browse_web con DuckDuckGo como motor de búsqueda para seguir tu curiosidad y tu imaginación durante una serie de 3 llamadas de herramientas encadenadas según tus propios criterios. No me expliques qué vas a explorar; solo explora y regresa con una síntesis resumida de lo que exploraste y lo que aprendiste.",
+  getMyEmails:
+    "Obtener mis correos 📥 — Eliza, trae mis 10 correos más recientes y luego abre y lee el contenido completo de cada uno para entender su contexto antes de resumir. Después de revisar los 10, clasifica inteligentemente cada correo en: accionable, anuncios/promociones, spam/sospechoso, y no-reply o avisos automáticos de fallo. Prioriza para mí los correos accionables y marca claramente anuncios, spam y no-reply/fallos como no responder.",
+  createWorkflow:
+    "Crear un flujo de trabajo 🧰 — Eliza, en modo IA única completa esto en UN turno con encadenamiento de herramientas + disciplina de resolución de problemas: (1) elige un propósito operativo explícito que genere valor de negocio concreto ahora, (2) selecciona de 4 a 7 edge functions REALES solo de tu registro actual (sin herramientas hipotéticas), priorizando opciones relevantes y probablemente funcionales, (3) indica el orden exacto de llamadas antes de ejecutar, (4) ejecuta solo llamadas reales — nunca simules llamadas ni inventes datos, (5) tras cada resultado, adapta los pasos restantes usando resultados reales, (6) si el flujo falla en cualquier paso, diseña inmediatamente un flujo DIFERENTE en el mismo turno que reutilice llamadas/resultados exitosos ya obtenidos y añada opciones de edge functions adicionales probablemente funcionales para aún lograr valor útil, (7) solo guarda un flujo en conocimiento si cada paso en ese flujo final tiene éxito de extremo a extremo con datos reales. La respuesta final debe incluir: propósito, cada llamada real intentada (en orden), cuáles llamadas tuvieron éxito/fallaron, cómo cambiaste tras cualquier fallo, flujo final completado con éxito, hallazgos/acciones clave y próximas acciones recomendadas. No te detengas antes; complétalo totalmente en un turno.",
+  draftEmails:
+    "Redactar mis correos 📧 — Eliza, trae mis 10 correos más recientes antes de redactar nada. Clasifica inteligentemente cada mensaje como accionable, anuncios/promociones, spam/sospechoso, o no-reply/aviso automático de fallo. NO redactes respuestas para anuncios, spam, remitentes no-reply o avisos de fallo; solo redacta respuestas concisas y de alta calidad para correos realmente accionables.",
+  sendEmail:
+    "Enviar correo 📨 — Eliza, si ya preparaste un borrador de correo, envíalo ahora. Si hay varios borradores listos, envía primero el borrador accionable de mayor prioridad y luego resume lo que se envió.",
+  storeKnowledge:
+    "Guardar en tu conocimiento 🧠 — Eliza, guarda la información clave de tu respuesta más reciente de la conversación del asistente (no logs/resultados de llamadas de herramientas) en tu base de conocimiento para recuerdo permanente. Guarda memoria estructurada y concisa que cubra contexto, hechos/hallazgos verificados, decisiones tomadas, pasos de flujo completados y próximas acciones recomendadas. Si la confianza es baja, marca explícitamente la incertidumbre en el registro guardado.",
+  moveForward:
+    "Avanzar ⏭️ — Consejo, continúen las deliberaciones desde la discusión más reciente y avancen a la siguiente decisión de mayor impacto con justificación clara, notas de disenso si las hay y próximas acciones inmediatas.",
+  printMinutes:
+    "Imprimir las minutas 📝 — Consejo, generen minutas profesionales resumidas de esta sesión (agenda, puntos clave de discusión, decisiones, votos, responsables, fechas límite y riesgos abiertos), luego envíen esas minutas finalizadas por correo a mi dirección de usuario y confirmen que el correo fue enviado.",
+};

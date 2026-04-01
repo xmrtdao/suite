@@ -643,7 +643,9 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   const lastAutoAdvancePromptRef = useRef<string>('');
   const fullAutonomyTurnCountRef = useRef(0);
   const FULL_AUTONOMY_AUTO_ADVANCE_SECONDS = 60;
-  const FULL_AUTONOMY_BREAKOUT_PROMPT = 'But what new problems can we solve or what new features can we build? Browse the web with DuckDuckGo to find out what is most important right now.';
+  const FULL_AUTONOMY_BREAKOUT_PROMPT = language === 'es'
+    ? '¿Qué nuevos problemas podemos resolver o qué nuevas funciones podemos construir? Navega en la web con DuckDuckGo para identificar qué es lo más importante ahora.'
+    : 'But what new problems can we solve or what new features can we build? Browse the web with DuckDuckGo to find out what is most important right now.';
   // Ref to handleSendMessage — avoids stale closure in setInterval callbacks
   // Updated BEFORE the interval fires via assignment in component body below
   const handleSendMessageRef = useRef<((msg?: string) => void) | undefined>(undefined);
@@ -672,6 +674,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       turnCount: messages.length + 1,
       councilMode,
       fullAutonomyEnabled,
+      language,
     };
 
     const prompt = isBreakoutTurn
@@ -680,7 +683,10 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
           const quickPrompts = getQuickResponsePrompts(quickResponseContext);
           const filteredPrompts = councilMode
             ? quickPrompts.filter((candidatePrompt) =>
-                candidatePrompt === 'Proceed with plan' || candidatePrompt.startsWith('Move forward ⏭️')
+                candidatePrompt.includes('Proceed with plan') ||
+                candidatePrompt.includes('Continuar con el plan') ||
+                candidatePrompt.startsWith('Move forward ⏭️') ||
+                candidatePrompt.startsWith('Avanzar ⏭️')
               )
             : quickPrompts;
 
@@ -718,6 +724,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
     clearAutoAdvanceTimer,
     FULL_AUTONOMY_AUTO_ADVANCE_SECONDS,
     FULL_AUTONOMY_BREAKOUT_PROMPT,
+    language,
   ]);
 
 
@@ -1226,7 +1233,8 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       isFounder: userContext?.isFounder,
       conversationSummary: cachedSummary?.summary || (conversationSummaries.length > 0 ? conversationSummaries[conversationSummaries.length - 1].summaryText : undefined),
       totalMessageCount: cachedSummary?.messageCount || totalMessageCount,
-      miningStats
+      miningStats,
+      language
     });
 
     const greeting: UnifiedMessage = {
@@ -1299,7 +1307,9 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       // Fallback: show a simple message
       setMessages(prev => [...prev, {
         id: `workflow-fallback-${workflow.id}`,
-        content: `✅ Background task "${workflow.name}" completed. Check the Task Visualizer for details.`,
+        content: language === 'es'
+          ? `✅ La tarea en segundo plano "${workflow.name}" se completó. Revisa el Visualizador de Tareas para ver los detalles.`
+          : `✅ Background task "${workflow.name}" completed. Check the Task Visualizer for details.`,
         sender: 'assistant',
         timestamp: new Date()
       }]);
@@ -1307,7 +1317,9 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   };
 
   const handleClearConversation = async () => {
-    if (!confirm('Are you sure you want to clear the entire conversation history? This cannot be undone.')) {
+    if (!confirm(language === 'es'
+      ? '¿Seguro que quieres borrar todo el historial de conversación? Esta acción no se puede deshacer.'
+      : 'Are you sure you want to clear the entire conversation history? This cannot be undone.')) {
       return;
     }
 
@@ -1326,7 +1338,9 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       if (userContext) {
         const greeting: UnifiedMessage = {
           id: 'fresh-greeting',
-          content: "Hello! I'm Eliza, your XMRT assistant. How can I help you today?",
+          content: language === 'es'
+            ? "¡Hola! Soy Eliza, tu asistente de XMRT. ¿Cómo puedo ayudarte hoy?"
+            : "Hello! I'm Eliza, your XMRT assistant. How can I help you today?",
           sender: 'assistant',
           timestamp: new Date()
         };
