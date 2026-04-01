@@ -145,6 +145,17 @@ interface ProcessingStickyNote extends ProcessingStickyTemplate {
   variant?: 'default' | 'error';
 }
 
+interface ContextTodoItem {
+  id: string;
+  text: string;
+  completed: boolean;
+  updatedAt: number;
+}
+
+interface ContextTodoStore {
+  [organizationId: string]: ContextTodoItem[];
+}
+
 const PROCESSING_STICKY_TEMPLATES: ProcessingStickyTemplate[] = [
   {
     id: 'tool-routing',
@@ -228,8 +239,86 @@ const ProcessingStickyNotes = React.memo(({ notes }: { notes: ProcessingStickyNo
   );
 });
 
+const ContextTodoPaper = React.memo(({
+  organizationName,
+  todos,
+  onToggle,
+}: {
+  organizationName: string;
+  todos: ContextTodoItem[];
+  onToggle: (todoId: string) => void;
+}) => {
+  if (!todos.length) return null;
+
+  const visibleTodos = todos.slice(0, 6);
+  return (
+    <div className="fixed right-2 top-[22.5rem] z-40 w-[176px] sm:absolute sm:right-6 sm:top-[22rem] sm:z-30 sm:w-[220px]">
+      <div className="relative rounded-[3px] border border-sky-200/80 bg-gradient-to-b from-white via-sky-50/25 to-white p-3 shadow-[0_16px_32px_rgba(37,99,235,0.16)]">
+        <div className="pointer-events-none absolute inset-0 rounded-[3px] [background-image:repeating-linear-gradient(to_bottom,transparent_0px,transparent_22px,rgba(59,130,246,0.26)_23px)]" />
+        <div className="pointer-events-none absolute left-5 top-0 h-full w-px bg-rose-200/70" />
+        <div className="relative pl-6">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-sky-800/80">To Do List</p>
+          <p className="mt-1 text-[10px] text-sky-900/70">{organizationName}</p>
+          <ul className="mt-2 space-y-1.5">
+            {visibleTodos.map((todo) => (
+              <li key={todo.id} className="flex items-start gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => onToggle(todo.id)}
+                  className={`mt-0.5 h-3.5 w-3.5 rounded-sm border text-[9px] leading-[1] transition-colors ${
+                    todo.completed
+                      ? 'border-sky-400 bg-sky-500 text-white'
+                      : 'border-sky-500/70 bg-white text-transparent hover:bg-sky-50'
+                  }`}
+                  aria-label={`Mark task ${todo.completed ? 'incomplete' : 'complete'}: ${todo.text}`}
+                >
+                  ✓
+                </button>
+                <span className={`text-[11px] leading-snug ${todo.completed ? 'text-sky-900/45 line-through' : 'text-sky-950/90'}`}>
+                  {todo.text}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+});
+
 const normalizeStickyText = (value?: string | null) =>
   value?.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+const buildContextTodoStorageKey = (profileId?: string | null) =>
+  `suite-context-todos:${profileId ?? 'anon'}`;
+
+const ensureContextTodo = (
+  current: ContextTodoItem[],
+  text: string,
+): ContextTodoItem[] => {
+  const normalizedText = normalizeStickyText(text);
+  if (!normalizedText) return current;
+
+  const existing = current.find(
+    (todo) => todo.text.toLowerCase() === normalizedText.toLowerCase(),
+  );
+
+  if (existing) {
+    return current.map((todo) =>
+      todo.id === existing.id ? { ...todo, updatedAt: Date.now() } : todo
+    );
+  }
+
+  return [
+    {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      text: normalizedText,
+      completed: false,
+      updatedAt: Date.now(),
+    },
+    ...current,
+  ].slice(0, 10);
+};
 
 const CODE_KEYWORD_PATTERN = /\b(function|const|let|var|class|import|export|return|if|else|for|while|try|catch|def|async|await|SELECT|INSERT|UPDATE|DELETE|FROM|WHERE)\b/;
 const CODE_SYMBOL_PATTERN = /[{}[\]();=<>]|=>|::|#include|<\/?[a-z][\s\S]*?>/i;
@@ -630,6 +719,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   const [miningStats, setMiningStats] = useState<MiningStats | null>(externalMiningStats || null);
   const [userContext, setUserContext] = useState<UserContext | null>(null);
   const [organizationContext, setOrganizationContext] = useState<any>(null);
+  const [contextTodosByOrg, setContextTodosByOrg] = useState<ContextTodoStore>({});
   const [lastElizaMessage, setLastElizaMessage] = useState<string>("");
 
   // Council mode state - initialize from prop
@@ -743,6 +833,46 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
     pendingNoteTimeoutsRef.current = [];
   }, []);
 
+  const activeOrganizationId = profile?.selected_organization_id || '';
+  const activeOrganizationName = organizationContext?.name || 'Selected context';
+  const activeContextTodos = activeOrganizationId
+    ? (contextTodosByOrg[activeOrganizationId] || [])
+    : [];
+
+  const persistContextTodos = useCallback((nextTodos: ContextTodoStore) => {
+    localStorage.setItem(
+      buildContextTodoStorageKey(profile?.id),
+      JSON.stringify(nextTodos),
+    );
+  }, [profile?.id]);
+
+  const upsertContextTodo = useCallback((todoText: string) => {
+    if (!activeOrganizationId) return;
+
+    setContextTodosByOrg((prev) => {
+      const current = prev[activeOrganizationId] || [];
+      const updated = ensureContextTodo(current, todoText);
+      const next = { ...prev, [activeOrganizationId]: updated };
+      persistContextTodos(next);
+      return next;
+    });
+  }, [activeOrganizationId, persistContextTodos]);
+
+  const toggleContextTodo = useCallback((todoId: string) => {
+    if (!activeOrganizationId) return;
+    setContextTodosByOrg((prev) => {
+      const current = prev[activeOrganizationId] || [];
+      const next = {
+        ...prev,
+        [activeOrganizationId]: current.map((todo) =>
+          todo.id === todoId ? { ...todo, completed: !todo.completed, updatedAt: Date.now() } : todo
+        ),
+      };
+      persistContextTodos(next);
+      return next;
+    });
+  }, [activeOrganizationId, persistContextTodos]);
+
   const enqueueProcessingNote = useCallback((text: string, variant: ProcessingStickyNote['variant'] = 'default') => {
     const normalizedText = normalizeStickyText(text);
     if (!normalizedText) return;
@@ -778,7 +908,11 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       setProcessingNotes((prev) => prev.filter((note) => note.id !== noteToRemoveId));
     }, 900);
     pendingNoteTimeoutsRef.current.push(timeout);
-  }, []);
+
+    if (activeOrganizationId) {
+      upsertContextTodo(text);
+    }
+  }, [activeOrganizationId, upsertContextTodo]);
 
   const dropOldestProcessingNote = useCallback(() => {
     let noteToRemoveId: string | null = null;
@@ -1030,6 +1164,35 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
     };
     fetchOrgContext();
   }, [profile?.selected_organization_id]);
+
+  useEffect(() => {
+    const raw = localStorage.getItem(buildContextTodoStorageKey(profile?.id));
+    if (!raw) {
+      setContextTodosByOrg({});
+      return;
+    }
+    try {
+      const parsed = JSON.parse(raw) as ContextTodoStore;
+      setContextTodosByOrg(parsed || {});
+    } catch {
+      setContextTodosByOrg({});
+    }
+  }, [profile?.id]);
+
+  useEffect(() => {
+    if (!activeOrganizationId || !organizationContext?.name) return;
+    upsertContextTodo(`Review priorities for ${organizationContext.name}`);
+    upsertContextTodo(`Capture follow-ups linked to ${organizationContext.name}`);
+  }, [activeOrganizationId, organizationContext?.name, upsertContextTodo]);
+
+  useEffect(() => {
+    if (!activeOrganizationId || messages.length === 0) return;
+    const latestUserMessage = [...messages].reverse().find((msg) => msg.sender === 'user');
+    if (!latestUserMessage) return;
+    const concise = normalizeStickyText(latestUserMessage.content)?.slice(0, 80);
+    if (!concise) return;
+    upsertContextTodo(`Address: ${concise}`);
+  }, [messages, activeOrganizationId, upsertContextTodo]);
 
   // Set up realtime subscriptions for live updates
   useEffect(() => {
@@ -2325,7 +2488,14 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
 
   return (
     <div className="relative overflow-visible">
-      <ProcessingStickyNotes notes={processingNotes} />
+      {activeContextTodos.length === 0 && <ProcessingStickyNotes notes={processingNotes} />}
+      {activeContextTodos.length > 0 && (
+        <ContextTodoPaper
+          organizationName={activeOrganizationName}
+          todos={activeContextTodos}
+          onToggle={toggleContextTodo}
+        />
+      )}
       <Card className={`flex h-[calc(100vh-6rem)] min-h-[640px] flex-col overflow-hidden border-border/60 bg-card shadow-sm ${className}`}>
       {/* Voice Intelligence Toggle */}
       {/* Voice Intelligence Toggle Removed */}
