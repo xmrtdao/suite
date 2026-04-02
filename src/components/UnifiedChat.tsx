@@ -258,7 +258,7 @@ const ContextTodoPaper = React.memo(({
 }) => {
   const visibleTodos = todos.slice(0, 6);
   return (
-    <div className="fixed right-2 top-[32rem] z-40 w-[130px] sm:absolute sm:right-6 sm:top-[40rem] sm:z-30 sm:w-[220px]">
+    <div className="w-full sm:absolute sm:right-6 sm:top-[40rem] sm:z-30 sm:w-[220px]">
       <div className="relative rounded-[3px] border border-sky-200/80 bg-gradient-to-b from-white via-sky-50/25 to-white p-2 sm:p-3 shadow-[0_16px_32px_rgba(37,99,235,0.16)]">
         <div className="pointer-events-none absolute inset-0 rounded-[3px] [background-image:repeating-linear-gradient(to_bottom,transparent_0px,transparent_18px,rgba(59,130,246,0.26)_19px)] sm:[background-image:repeating-linear-gradient(to_bottom,transparent_0px,transparent_22px,rgba(59,130,246,0.26)_23px)]" />
         <div className="pointer-events-none absolute left-4 sm:left-5 top-0 h-full w-px bg-rose-200/70" />
@@ -305,7 +305,7 @@ const FocusAreasPaper = React.memo(({
   if (!items.length) return null;
 
   return (
-    <div className="fixed right-2 top-[22rem] z-40 w-[130px] sm:absolute sm:right-[15.5rem] sm:top-[31rem] sm:z-30 sm:w-[220px]">
+    <div className="w-full sm:absolute sm:right-[15.5rem] sm:top-[31rem] sm:z-30 sm:w-[220px]">
       <div className="relative rounded-[3px] border border-sky-200/80 bg-gradient-to-b from-white via-sky-50/25 to-white p-2 sm:p-3 shadow-[0_16px_32px_rgba(37,99,235,0.16)]">
         <div className="pointer-events-none absolute inset-0 rounded-[3px] [background-image:repeating-linear-gradient(to_bottom,transparent_0px,transparent_18px,rgba(59,130,246,0.26)_19px)] sm:[background-image:repeating-linear-gradient(to_bottom,transparent_0px,transparent_22px,rgba(59,130,246,0.26)_23px)]" />
         <div className="pointer-events-none absolute left-4 sm:left-5 top-0 h-full w-px bg-rose-200/70" />
@@ -2747,19 +2747,23 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   return (
     <div className="relative overflow-visible">
       <ProcessingStickyNotes notes={processingNotes} />
-      <FocusAreasPaper
-        items={activePriorityChecklist.length > 0 ? activePriorityChecklist : focusAreaBullets.map((bullet) => ({
-          id: `focus-${activeContextScopeId}-${bullet.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 32)}`,
-          text: bullet,
-          completed: false,
-          updatedAt: 0,
-        }))}
-        onToggle={togglePriorityChecklistItem}
-      />
-      <ContextTodoPaper
-        todos={activeContextTodos}
-        onToggle={toggleContextTodo}
-      />
+      
+      {/* Responsive container for floating papers */}
+      <div className="fixed right-2 top-[22rem] z-40 flex w-[130px] flex-col gap-4 sm:static sm:block sm:w-auto">
+        <FocusAreasPaper
+          items={activePriorityChecklist.length > 0 ? activePriorityChecklist : focusAreaBullets.map((bullet) => ({
+            id: `focus-${activeContextScopeId}-${bullet.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 32)}`,
+            text: bullet,
+            completed: false,
+            updatedAt: 0,
+          }))}
+          onToggle={togglePriorityChecklistItem}
+        />
+        <ContextTodoPaper
+          todos={activeContextTodos}
+          onToggle={toggleContextTodo}
+        />
+      </div>
       <Card className={`flex h-[calc(100vh-6rem)] min-h-[640px] flex-col overflow-hidden border-border/60 bg-card shadow-sm ${className}`}>
       {/* Voice Intelligence Toggle */}
       {/* Voice Intelligence Toggle Removed */}
