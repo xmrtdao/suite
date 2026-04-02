@@ -142,7 +142,7 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'],
     supportsTools: true,
     timeoutMs: 90000,
-    priority: 1,
+    priority: 2,
     fallbackOnly: false,
     maxRetries: 2,
     retryDelayMs: 1000
@@ -160,22 +160,22 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     ],
     supportsTools: true,
     timeoutMs: 90000,
-    priority: 2,
+    priority: 3,
     fallbackOnly: false,
     maxRetries: 2,
     retryDelayMs: 2000
   },
   deepseek: {
     name: 'DeepSeek',
-    enabled: !!DEEPSEEK_API_KEY,
+    enabled: true, // Force enabled as it's the primary source
     apiKey: DEEPSEEK_API_KEY,
     endpoint: 'https://api.deepseek.com/v1/chat/completions',
     models: ['deepseek-chat', 'deepseek-coder'],
     supportsTools: true,
     timeoutMs: 90000,
-    priority: 3,
+    priority: 1, // Move to top priority
     fallbackOnly: false,
-    maxRetries: 2,
+    maxRetries: 3,
     retryDelayMs: 1500
   },
   anthropic: {
@@ -3463,6 +3463,7 @@ class EnhancedProviderCascade {
     
     if (!response.ok) {
       const errorText = await response.text();
+      console.error(`\u274c DeepSeek API error: ${response.status} - ${errorText}`);
       return {
         success: false,
         provider: 'deepseek',
