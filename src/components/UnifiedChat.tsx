@@ -156,6 +156,10 @@ interface ContextTodoStore {
   [organizationId: string]: ContextTodoItem[];
 }
 
+interface PriorityChecklistStore {
+  [scopeId: string]: ContextTodoItem[];
+}
+
 interface CurrentContextPanelProps {
   organizationName: string;
   focusLine: string;
@@ -252,8 +256,6 @@ const ContextTodoPaper = React.memo(({
   todos: ContextTodoItem[];
   onToggle: (todoId: string) => void;
 }) => {
-  if (!todos.length) return null;
-
   const visibleTodos = todos.slice(0, 6);
   return (
     <div className="fixed right-2 top-[34rem] z-40 w-[176px] sm:absolute sm:right-6 sm:top-[40rem] sm:z-30 sm:w-[220px]">
@@ -262,35 +264,45 @@ const ContextTodoPaper = React.memo(({
         <div className="pointer-events-none absolute left-5 top-0 h-full w-px bg-rose-200/70" />
         <div className="relative pl-6">
           <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-sky-800/80">Recent Actions</p>
-          <ul className="mt-2 space-y-1.5">
-            {visibleTodos.map((todo) => (
-              <li key={todo.id} className="flex items-start gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => onToggle(todo.id)}
-                  className={`mt-0.5 h-3.5 w-3.5 rounded-sm border text-[9px] leading-[1] transition-colors ${
-                    todo.completed
-                      ? 'border-sky-400 bg-sky-500 text-white'
-                      : 'border-sky-500/70 bg-white text-transparent hover:bg-sky-50'
-                  }`}
-                  aria-label={`Mark task ${todo.completed ? 'incomplete' : 'complete'}: ${todo.text}`}
-                >
-                  ✓
-                </button>
-                <span className={`text-[11px] leading-snug ${todo.completed ? 'text-sky-900/45 line-through' : 'text-sky-950/90'}`}>
-                  {todo.text}
-                </span>
-              </li>
-            ))}
-          </ul>
+          {visibleTodos.length > 0 ? (
+            <ul className="mt-2 space-y-1.5">
+              {visibleTodos.map((todo) => (
+                <li key={todo.id} className="flex items-start gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => onToggle(todo.id)}
+                    className={`mt-0.5 h-3.5 w-3.5 rounded-sm border text-[9px] leading-[1] transition-colors ${
+                      todo.completed
+                        ? 'border-sky-400 bg-sky-500 text-white'
+                        : 'border-sky-500/70 bg-white text-transparent hover:bg-sky-50'
+                    }`}
+                    aria-label={`Mark task ${todo.completed ? 'incomplete' : 'complete'}: ${todo.text}`}
+                  >
+                    ✓
+                  </button>
+                  <span className={`text-[11px] leading-snug ${todo.completed ? 'text-sky-900/45 line-through' : 'text-sky-950/90'}`}>
+                    {todo.text}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-2 text-[11px] leading-snug text-sky-900/60">Tracking actions will appear here as work progresses.</p>
+          )}
         </div>
       </div>
     </div>
   );
 });
 
-const FocusAreasPaper = React.memo(({ bullets }: { bullets: string[] }) => {
-  if (!bullets.length) return null;
+const FocusAreasPaper = React.memo(({
+  items,
+  onToggle,
+}: {
+  items: ContextTodoItem[];
+  onToggle: (todoId: string) => void;
+}) => {
+  if (!items.length) return null;
 
   return (
     <div className="fixed right-[11.5rem] top-[26rem] z-40 w-[176px] sm:absolute sm:right-[15.5rem] sm:top-[31rem] sm:z-30 sm:w-[220px]">
@@ -299,10 +311,24 @@ const FocusAreasPaper = React.memo(({ bullets }: { bullets: string[] }) => {
         <div className="pointer-events-none absolute left-5 top-0 h-full w-px bg-rose-200/70" />
         <div className="relative pl-6">
           <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-sky-800/80">Focus Areas</p>
-          <ul className="mt-2 list-disc space-y-1.5 pl-4">
-            {bullets.slice(0, 4).map((bullet, index) => (
-              <li key={`${index}-${bullet.slice(0, 20)}`} className="text-[11px] leading-snug text-sky-950/90">
-                {bullet}
+          <ul className="mt-2 space-y-1.5">
+            {items.slice(0, 6).map((item) => (
+              <li key={item.id} className="flex items-start gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => onToggle(item.id)}
+                  className={`mt-0.5 h-3.5 w-3.5 rounded-sm border text-[9px] leading-[1] transition-colors ${
+                    item.completed
+                      ? 'border-sky-400 bg-sky-500 text-white'
+                      : 'border-sky-500/70 bg-white text-transparent hover:bg-sky-50'
+                  }`}
+                  aria-label={`Mark priority ${item.completed ? 'incomplete' : 'complete'}: ${item.text}`}
+                >
+                  ✓
+                </button>
+                <span className={`text-[11px] leading-snug ${item.completed ? 'text-sky-900/45 line-through' : 'text-sky-950/90'}`}>
+                  {item.text}
+                </span>
               </li>
             ))}
           </ul>
@@ -372,6 +398,89 @@ const extractFocusAreaBullets = (assistantOutput?: string | null): string[] => {
 
 const buildContextTodoStorageKey = (profileId?: string | null) =>
   `suite-context-todos:${profileId ?? 'anon'}`;
+
+const getScopeStorageId = (organizationId?: string | null) =>
+  organizationId || 'global';
+
+const buildPriorityChecklistStorageKey = (profileId?: string | null) =>
+  `suite-priority-checklist:${profileId ?? 'anon'}`;
+
+const extractPriorityChecklistCandidates = (assistantOutput?: string | null): string[] => {
+  const source = (assistantOutput || '').trim();
+  if (!source) return [];
+
+  const lines = source
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const taskLikeLines = lines
+    .filter((line) => /^[-*•]|\d+[.)]|\[[ xX]\]/.test(line))
+    .map((line) => line.replace(/^[-*•\d.)\s[\]xX]+/, '').trim())
+    .filter((line) =>
+      line.length > 6
+      && !/^(hi|hello|thanks|great question|certainly|absolutely|sure)\b/i.test(line)
+      && /\b(next|priority|phase|task|assign|owner|follow[- ]?up|deliver|ship|implement|review)\b/i.test(line)
+    );
+
+  if (taskLikeLines.length > 0) return taskLikeLines.slice(0, 8);
+
+  return source
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/[#>*`]/g, ' ')
+    .replace(/\[(.*?)\]\((.*?)\)/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length >= 16 && s.length <= 180)
+    .filter((sentence) => /\b(next steps?|next phases?|priorit(?:y|ies)|unassigned|ongoing work|action items?)\b/i.test(sentence))
+    .map((sentence) => sentence.replace(/^[-\d.)\s]+/, '').trim())
+    .slice(0, 6);
+};
+
+const reconcilePriorityChecklist = (
+  current: ContextTodoItem[],
+  candidates: string[],
+  assistantOutput: string,
+  autoClearCompleted: boolean,
+): ContextTodoItem[] => {
+  let next = [...current];
+
+  candidates.forEach((candidate) => {
+    const normalized = normalizeStickyText(candidate);
+    if (!normalized) return;
+    const existing = next.find((item) => item.text.toLowerCase() === normalized.toLowerCase());
+    if (existing) {
+      next = next.map((item) =>
+        item.id === existing.id ? { ...item, updatedAt: Date.now() } : item
+      );
+      return;
+    }
+
+    next = [{
+      id: `prio-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      text: normalized,
+      completed: false,
+      updatedAt: Date.now(),
+    }, ...next];
+  });
+
+  const completionSignals = assistantOutput.toLowerCase();
+  if (/\b(completed|done|finished|resolved|closed|shipped|deployed)\b/.test(completionSignals)) {
+    next = next.map((item) => {
+      const itemTokens = item.text.toLowerCase().split(/\W+/).filter((token) => token.length > 4).slice(0, 4);
+      const hasTokenMatch = itemTokens.some((token) => completionSignals.includes(token));
+      return hasTokenMatch ? { ...item, completed: true, updatedAt: Date.now() } : item;
+    });
+  }
+
+  if (autoClearCompleted) {
+    next = next.filter((item) => !item.completed);
+  }
+
+  return next.slice(0, 12);
+};
 
 const ensureContextTodo = (
   current: ContextTodoItem[],
@@ -801,6 +910,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   const [userContext, setUserContext] = useState<UserContext | null>(null);
   const [organizationContext, setOrganizationContext] = useState<any>(null);
   const [contextTodosByOrg, setContextTodosByOrg] = useState<ContextTodoStore>({});
+  const [priorityChecklistByScope, setPriorityChecklistByScope] = useState<PriorityChecklistStore>({});
   const [visualContextSummary, setVisualContextSummary] = useState<string>('');
   const [lastElizaMessage, setLastElizaMessage] = useState<string>("");
 
@@ -916,10 +1026,9 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   }, []);
 
   const activeOrganizationId = profile?.selected_organization_id || '';
+  const activeContextScopeId = getScopeStorageId(activeOrganizationId);
   const activeOrganizationName = organizationContext?.name || 'Selected context';
-  const activeContextTodos = activeOrganizationId
-    ? (contextTodosByOrg[activeOrganizationId] || [])
-    : [];
+  const activeContextTodos = contextTodosByOrg[activeContextScopeId] || [];
   const latestUserMessage = [...messages].reverse().find((msg) => msg.sender === 'user');
   const latestAssistantMessage = [...messages].reverse().find((msg) => msg.sender === 'assistant');
   const currentContextFocusLine = visualContextSummary
@@ -930,6 +1039,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
     () => extractFocusAreaBullets(latestAssistantMessage?.content),
     [latestAssistantMessage?.content],
   );
+  const activePriorityChecklist = priorityChecklistByScope[activeContextScopeId] || [];
 
   const persistContextTodos = useCallback((nextTodos: ContextTodoStore) => {
     localStorage.setItem(
@@ -938,32 +1048,50 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
     );
   }, [profile?.id]);
 
-  const upsertContextTodo = useCallback((todoText: string) => {
-    if (!activeOrganizationId) return;
+  const persistPriorityChecklist = useCallback((nextChecklist: PriorityChecklistStore) => {
+    localStorage.setItem(
+      buildPriorityChecklistStorageKey(profile?.id),
+      JSON.stringify(nextChecklist),
+    );
+  }, [profile?.id]);
 
+  const upsertContextTodo = useCallback((todoText: string) => {
     setContextTodosByOrg((prev) => {
-      const current = prev[activeOrganizationId] || [];
+      const current = prev[activeContextScopeId] || [];
       const updated = ensureContextTodo(current, todoText);
-      const next = { ...prev, [activeOrganizationId]: updated };
+      const next = { ...prev, [activeContextScopeId]: updated };
       persistContextTodos(next);
       return next;
     });
-  }, [activeOrganizationId, persistContextTodos]);
+  }, [activeContextScopeId, persistContextTodos]);
 
   const toggleContextTodo = useCallback((todoId: string) => {
-    if (!activeOrganizationId) return;
     setContextTodosByOrg((prev) => {
-      const current = prev[activeOrganizationId] || [];
+      const current = prev[activeContextScopeId] || [];
       const next = {
         ...prev,
-        [activeOrganizationId]: current.map((todo) =>
+        [activeContextScopeId]: current.map((todo) =>
           todo.id === todoId ? { ...todo, completed: !todo.completed, updatedAt: Date.now() } : todo
         ),
       };
       persistContextTodos(next);
       return next;
     });
-  }, [activeOrganizationId, persistContextTodos]);
+  }, [activeContextScopeId, persistContextTodos]);
+
+  const togglePriorityChecklistItem = useCallback((todoId: string) => {
+    setPriorityChecklistByScope((prev) => {
+      const current = prev[activeContextScopeId] || [];
+      const next = {
+        ...prev,
+        [activeContextScopeId]: current.map((item) =>
+          item.id === todoId ? { ...item, completed: !item.completed, updatedAt: Date.now() } : item
+        ),
+      };
+      persistPriorityChecklist(next);
+      return next;
+    });
+  }, [activeContextScopeId, persistPriorityChecklist]);
 
   const enqueueProcessingNote = useCallback((text: string, variant: ProcessingStickyNote['variant'] = 'default') => {
     const normalizedText = normalizeStickyText(text);
@@ -1001,10 +1129,8 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
     }, 900);
     pendingNoteTimeoutsRef.current.push(timeout);
 
-    if (activeOrganizationId) {
-      upsertContextTodo(text);
-    }
-  }, [activeOrganizationId, upsertContextTodo]);
+    upsertContextTodo(text);
+  }, [upsertContextTodo]);
 
   const dropOldestProcessingNote = useCallback(() => {
     let noteToRemoveId: string | null = null;
@@ -1272,19 +1398,59 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   }, [profile?.id]);
 
   useEffect(() => {
-    if (!activeOrganizationId || !organizationContext?.name) return;
-    upsertContextTodo(`Review priorities for ${organizationContext.name}`);
-    upsertContextTodo(`Capture follow-ups linked to ${organizationContext.name}`);
-  }, [activeOrganizationId, organizationContext?.name, upsertContextTodo]);
+    const raw = localStorage.getItem(buildPriorityChecklistStorageKey(profile?.id));
+    if (!raw) {
+      setPriorityChecklistByScope({});
+      return;
+    }
+    try {
+      const parsed = JSON.parse(raw) as PriorityChecklistStore;
+      setPriorityChecklistByScope(parsed || {});
+    } catch {
+      setPriorityChecklistByScope({});
+    }
+  }, [profile?.id]);
 
   useEffect(() => {
-    if (!activeOrganizationId || messages.length === 0) return;
+    if (!organizationContext?.name) return;
+    upsertContextTodo(`Review priorities for ${organizationContext.name}`);
+    upsertContextTodo(`Capture follow-ups linked to ${organizationContext.name}`);
+  }, [organizationContext?.name, upsertContextTodo]);
+
+  useEffect(() => {
+    if (messages.length === 0) return;
     const latestUserMessage = [...messages].reverse().find((msg) => msg.sender === 'user');
     if (!latestUserMessage) return;
     const concise = normalizeStickyText(latestUserMessage.content)?.slice(0, 80);
     if (!concise) return;
     upsertContextTodo(`Address: ${concise}`);
-  }, [messages, activeOrganizationId, upsertContextTodo]);
+  }, [messages, upsertContextTodo]);
+
+  useEffect(() => {
+    if (!latestAssistantMessage?.content) return;
+
+    const candidates = extractPriorityChecklistCandidates(latestAssistantMessage.content);
+    if (candidates.length === 0) return;
+
+    setPriorityChecklistByScope((prev) => {
+      const current = prev[activeContextScopeId] || [];
+      const updated = reconcilePriorityChecklist(
+        current,
+        candidates,
+        latestAssistantMessage.content,
+        fullAutonomyEnabled,
+      );
+      const next = { ...prev, [activeContextScopeId]: updated };
+      persistPriorityChecklist(next);
+      return next;
+    });
+  }, [
+    latestAssistantMessage?.id,
+    latestAssistantMessage?.content,
+    activeContextScopeId,
+    fullAutonomyEnabled,
+    persistPriorityChecklist,
+  ]);
 
   // Set up realtime subscriptions for live updates
   useEffect(() => {
@@ -2581,13 +2747,19 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   return (
     <div className="relative overflow-visible">
       <ProcessingStickyNotes notes={processingNotes} />
-      <FocusAreasPaper bullets={focusAreaBullets} />
-      {activeContextTodos.length > 0 && (
-        <ContextTodoPaper
-          todos={activeContextTodos}
-          onToggle={toggleContextTodo}
-        />
-      )}
+      <FocusAreasPaper
+        items={activePriorityChecklist.length > 0 ? activePriorityChecklist : focusAreaBullets.map((bullet) => ({
+          id: `focus-${activeContextScopeId}-${bullet.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 32)}`,
+          text: bullet,
+          completed: false,
+          updatedAt: 0,
+        }))}
+        onToggle={togglePriorityChecklistItem}
+      />
+      <ContextTodoPaper
+        todos={activeContextTodos}
+        onToggle={toggleContextTodo}
+      />
       <Card className={`flex h-[calc(100vh-6rem)] min-h-[640px] flex-col overflow-hidden border-border/60 bg-card shadow-sm ${className}`}>
       {/* Voice Intelligence Toggle */}
       {/* Voice Intelligence Toggle Removed */}
