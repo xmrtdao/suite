@@ -258,12 +258,12 @@ const ContextTodoPaper = React.memo(({
 }) => {
   const visibleTodos = todos.slice(0, 6);
   return (
-    <div className="fixed right-2 top-[34rem] z-40 w-[176px] sm:absolute sm:right-6 sm:top-[40rem] sm:z-30 sm:w-[220px]">
-      <div className="relative rounded-[3px] border border-sky-200/80 bg-gradient-to-b from-white via-sky-50/25 to-white p-3 shadow-[0_16px_32px_rgba(37,99,235,0.16)]">
-        <div className="pointer-events-none absolute inset-0 rounded-[3px] [background-image:repeating-linear-gradient(to_bottom,transparent_0px,transparent_22px,rgba(59,130,246,0.26)_23px)]" />
-        <div className="pointer-events-none absolute left-5 top-0 h-full w-px bg-rose-200/70" />
-        <div className="relative pl-6">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-sky-800/80">Recent Actions</p>
+    <div className="fixed right-2 top-[32rem] z-40 w-[130px] sm:absolute sm:right-6 sm:top-[40rem] sm:z-30 sm:w-[220px]">
+      <div className="relative rounded-[3px] border border-sky-200/80 bg-gradient-to-b from-white via-sky-50/25 to-white p-2 sm:p-3 shadow-[0_16px_32px_rgba(37,99,235,0.16)]">
+        <div className="pointer-events-none absolute inset-0 rounded-[3px] [background-image:repeating-linear-gradient(to_bottom,transparent_0px,transparent_18px,rgba(59,130,246,0.26)_19px)] sm:[background-image:repeating-linear-gradient(to_bottom,transparent_0px,transparent_22px,rgba(59,130,246,0.26)_23px)]" />
+        <div className="pointer-events-none absolute left-4 sm:left-5 top-0 h-full w-px bg-rose-200/70" />
+        <div className="relative pl-4 sm:pl-6">
+          <p className="text-[9px] sm:text-[10px] font-semibold uppercase tracking-[0.15em] text-sky-800/80">Recent Actions</p>
           {visibleTodos.length > 0 ? (
             <ul className="mt-2 space-y-1.5">
               {visibleTodos.map((todo) => (
@@ -280,7 +280,7 @@ const ContextTodoPaper = React.memo(({
                   >
                     ✓
                   </button>
-                  <span className={`text-[11px] leading-snug ${todo.completed ? 'text-sky-900/45 line-through' : 'text-sky-950/90'}`}>
+                  <span className={`text-[9px] sm:text-[11px] leading-snug ${todo.completed ? 'text-sky-900/45 line-through' : 'text-sky-950/90'}`}>
                     {todo.text}
                   </span>
                 </li>
@@ -305,12 +305,12 @@ const FocusAreasPaper = React.memo(({
   if (!items.length) return null;
 
   return (
-    <div className="fixed right-[11.5rem] top-[26rem] z-40 w-[176px] sm:absolute sm:right-[15.5rem] sm:top-[31rem] sm:z-30 sm:w-[220px]">
-      <div className="relative rounded-[3px] border border-sky-200/80 bg-gradient-to-b from-white via-sky-50/25 to-white p-3 shadow-[0_16px_32px_rgba(37,99,235,0.16)]">
-        <div className="pointer-events-none absolute inset-0 rounded-[3px] [background-image:repeating-linear-gradient(to_bottom,transparent_0px,transparent_22px,rgba(59,130,246,0.26)_23px)]" />
-        <div className="pointer-events-none absolute left-5 top-0 h-full w-px bg-rose-200/70" />
-        <div className="relative pl-6">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-sky-800/80">Focus Areas</p>
+    <div className="fixed right-2 top-[22rem] z-40 w-[130px] sm:absolute sm:right-[15.5rem] sm:top-[31rem] sm:z-30 sm:w-[220px]">
+      <div className="relative rounded-[3px] border border-sky-200/80 bg-gradient-to-b from-white via-sky-50/25 to-white p-2 sm:p-3 shadow-[0_16px_32px_rgba(37,99,235,0.16)]">
+        <div className="pointer-events-none absolute inset-0 rounded-[3px] [background-image:repeating-linear-gradient(to_bottom,transparent_0px,transparent_18px,rgba(59,130,246,0.26)_19px)] sm:[background-image:repeating-linear-gradient(to_bottom,transparent_0px,transparent_22px,rgba(59,130,246,0.26)_23px)]" />
+        <div className="pointer-events-none absolute left-4 sm:left-5 top-0 h-full w-px bg-rose-200/70" />
+        <div className="relative pl-4 sm:pl-6">
+          <p className="text-[9px] sm:text-[10px] font-semibold uppercase tracking-[0.15em] text-sky-800/80">Focus Areas</p>
           <ul className="mt-2 space-y-1.5">
             {items.slice(0, 6).map((item) => (
               <li key={item.id} className="flex items-start gap-1.5">
@@ -326,7 +326,7 @@ const FocusAreasPaper = React.memo(({
                 >
                   ✓
                 </button>
-                <span className={`text-[11px] leading-snug ${item.completed ? 'text-sky-900/45 line-through' : 'text-sky-950/90'}`}>
+                <span className={`text-[9px] sm:text-[11px] leading-snug ${item.completed ? 'text-sky-900/45 line-through' : 'text-sky-950/90'}`}>
                   {item.text}
                 </span>
               </li>
