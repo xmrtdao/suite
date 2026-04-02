@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Card } from './ui/card';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
@@ -246,11 +246,9 @@ const ProcessingStickyNotes = React.memo(({ notes }: { notes: ProcessingStickyNo
 });
 
 const ContextTodoPaper = React.memo(({
-  organizationName,
   todos,
   onToggle,
 }: {
-  organizationName: string;
   todos: ContextTodoItem[];
   onToggle: (todoId: string) => void;
 }) => {
@@ -263,8 +261,7 @@ const ContextTodoPaper = React.memo(({
         <div className="pointer-events-none absolute inset-0 rounded-[3px] [background-image:repeating-linear-gradient(to_bottom,transparent_0px,transparent_22px,rgba(59,130,246,0.26)_23px)]" />
         <div className="pointer-events-none absolute left-5 top-0 h-full w-px bg-rose-200/70" />
         <div className="relative pl-6">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-sky-800/80">To Do List</p>
-          <p className="mt-1 text-[10px] text-sky-900/70">{organizationName}</p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-sky-800/80">Recent Actions</p>
           <ul className="mt-2 space-y-1.5">
             {visibleTodos.map((todo) => (
               <li key={todo.id} className="flex items-start gap-1.5">
@@ -292,6 +289,29 @@ const ContextTodoPaper = React.memo(({
   );
 });
 
+const FocusAreasPaper = React.memo(({ bullets }: { bullets: string[] }) => {
+  if (!bullets.length) return null;
+
+  return (
+    <div className="fixed right-[11.5rem] top-[26rem] z-40 w-[176px] sm:absolute sm:right-[15.5rem] sm:top-[31rem] sm:z-30 sm:w-[220px]">
+      <div className="relative rounded-[3px] border border-sky-200/80 bg-gradient-to-b from-white via-sky-50/25 to-white p-3 shadow-[0_16px_32px_rgba(37,99,235,0.16)]">
+        <div className="pointer-events-none absolute inset-0 rounded-[3px] [background-image:repeating-linear-gradient(to_bottom,transparent_0px,transparent_22px,rgba(59,130,246,0.26)_23px)]" />
+        <div className="pointer-events-none absolute left-5 top-0 h-full w-px bg-rose-200/70" />
+        <div className="relative pl-6">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-sky-800/80">Focus Areas</p>
+          <ul className="mt-2 list-disc space-y-1.5 pl-4">
+            {bullets.slice(0, 4).map((bullet, index) => (
+              <li key={`${index}-${bullet.slice(0, 20)}`} className="text-[11px] leading-snug text-sky-950/90">
+                {bullet}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+});
+
 const CurrentContextPanel = React.memo(({
   organizationName,
   focusLine,
@@ -307,6 +327,48 @@ const CurrentContextPanel = React.memo(({
 
 const normalizeStickyText = (value?: string | null) =>
   value?.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+const extractFocusAreaBullets = (assistantOutput?: string | null): string[] => {
+  const source = (assistantOutput || '').trim();
+  if (!source) return [];
+
+  const normalized = source
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/[#>*`]/g, ' ')
+    .replace(/\[(.*?)\]\((.*?)\)/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!normalized) return [];
+
+  const sentenceCandidates = normalized
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const scored = sentenceCandidates
+    .map((sentence) => {
+      const lower = sentence.toLowerCase();
+      let score = 0;
+      if (/\b(next|recommend|should|priority|action|consensus|align|agree|plan|follow up)\b/.test(lower)) score += 2;
+      if (/\b(we|team|stakeholders|everyone|all)\b/.test(lower)) score += 1;
+      if (sentence.length < 140) score += 1;
+      return { sentence, score };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  const picks = scored
+    .slice(0, 4)
+    .map(({ sentence }) => sentence.replace(/^[-\d.)\s]+/, '').trim())
+    .filter((line) => line.length > 0 && line.length <= 140);
+
+  if (picks.length > 0) return picks;
+
+  return sentenceCandidates
+    .slice(0, 3)
+    .map((s) => s.replace(/^[-\d.)\s]+/, '').trim())
+    .filter(Boolean);
+};
 
 const buildContextTodoStorageKey = (profileId?: string | null) =>
   `suite-context-todos:${profileId ?? 'anon'}`;
@@ -859,10 +921,15 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
     ? (contextTodosByOrg[activeOrganizationId] || [])
     : [];
   const latestUserMessage = [...messages].reverse().find((msg) => msg.sender === 'user');
+  const latestAssistantMessage = [...messages].reverse().find((msg) => msg.sender === 'assistant');
   const currentContextFocusLine = visualContextSummary
     || normalizeStickyText(latestUserMessage?.content)?.slice(0, 90)
     || 'Awaiting active priorities from this chat.';
   const currentContextModeLabel = councilMode ? 'Executive Council active' : 'Eliza direct mode';
+  const focusAreaBullets = useMemo(
+    () => extractFocusAreaBullets(latestAssistantMessage?.content),
+    [latestAssistantMessage?.content],
+  );
 
   const persistContextTodos = useCallback((nextTodos: ContextTodoStore) => {
     localStorage.setItem(
@@ -2514,9 +2581,9 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   return (
     <div className="relative overflow-visible">
       <ProcessingStickyNotes notes={processingNotes} />
+      <FocusAreasPaper bullets={focusAreaBullets} />
       {activeContextTodos.length > 0 && (
         <ContextTodoPaper
-          organizationName={activeOrganizationName}
           todos={activeContextTodos}
           onToggle={toggleContextTodo}
         />
