@@ -45,9 +45,9 @@ import { knowledgeEntityService } from '@/services/knowledgeEntityService';
 
 // Debug environment variables on component load
 console.log('UnifiedChat Environment Check:', {
-  VITE_GEMINI_API_KEY_exists: !!import.meta.env.VITE_GEMINI_API_KEY,
-  VITE_GEMINI_API_KEY_length: import.meta.env.VITE_GEMINI_API_KEY?.length || 0,
-  VITE_ELEVENLABS_API_KEY_exists: !!import.meta.env.VITE_ELEVENLABS_API_KEY,
+  DEEPSEEK_API_KEY_exists: !!import.meta.env.DEEPSEEK_API_KEY,
+  DEEPSEEK_API_KEY_length: import.meta.env.DEEPSEEK_API_KEY?.length || 0,
+  ELEVENLABS_API_KEY_exists: !!import.meta.env.ELEVENLABS_API_KEY,
   all_env_vars: Object.keys(import.meta.env).filter(key => key.startsWith('VITE_'))
 });
 
@@ -839,7 +839,7 @@ const GeneratedVideoPreview = React.memo(({ url, index }: { url: string; index: 
 // Internal component using ElevenLabs and Gemini
 
 const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
-  apiKey = import.meta.env.VITE_GEMINI_API_KEY || "",
+  apiKey = import.meta.env.DEEPSEEK_API_KEY || "",
   className = '',
   miningStats: externalMiningStats,
   enableMiningStats = true,
@@ -1687,11 +1687,10 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       const fullContext = await conversationPersistence.getFullConversationContext();
 
       const response = await UnifiedElizaService.generateResponse(prompt, {
-        miningStats,
         userContext,
         inputMode: 'text',
-        shouldSpeak: false,
-        enableBrowsing: false,
+        shouldSpeak: true,
+        enableBrowsing: true,
         conversationContext: fullContext,
         councilMode: false
       }, language);
