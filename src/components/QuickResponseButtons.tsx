@@ -218,7 +218,7 @@ const executiveButtonSets: Record<string, {
     ]
   },
   'lovable-chat': { // Default Eliza
-    feedbackButton: { label: "Proceed with plan", emoji: "✅" },
+    feedbackButton: { label: "Proceed Intelligently", emoji: "✅" },
     contextualButtons: [
       { label: "Tell me more", emoji: "🔄" },
       { label: "Try another workflow", emoji: "❓" },
@@ -315,8 +315,7 @@ const GET_ER_DONE_PROMPT =
 const INSPECT_ERROR_LOGS_PROMPT =
   "Inspect error logs 📋 — Eliza, execute a complete production observability sweep right now using REAL tool calls only. Use this exact sequence and do not skip steps: (1) call list-available-functions (or search-edge-functions) to verify current tool/function names for supabase-integration and related diagnostics endpoints, (2) invoke supabase-integration to fetch platform-wide logs for ALL edge functions (errors + warnings + recent executions) with a broad time window first, then narrowed windows around failures, (3) invoke supabase-integration to fetch PostgreSQL-side signals (Postgres logs/events, slow queries, lock contention, connection saturation, failed statements, replication/performance health if available), (4) invoke supabase-integration to pull all key operational datapoints (HTTP status patterns, latency percentiles, timeout counts, auth failures, queue/backlog signals, cron/scheduled task failures, rate limit events, storage/network anomalies), (5) cross-correlate timestamps, function names, request IDs, and user/session context across all returned sources to identify root-cause chains, (6) if data is incomplete, make additional targeted supabase-integration calls until coverage is sufficient across functions + Postgres + platform health, (7) produce an incident-grade report with: confirmed findings, likely root cause, impacted components, blast radius, immediate mitigations, concrete permanent fix plan, and exact follow-up calls to validate recovery. Never simulate logs; only report real returned data and explicitly mark unknowns.";
 
-const PROCEED_WITH_PLAN_PROMPT =
-  "Proceed with plan ✅ — Eliza, execute the current plan autonomously and maximize real-world deliverables in this single turn using all relevant system tools and edge functions. Requirements: (1) restate the objective as a concrete deliverable with success criteria, (2) select the strongest available real tools/functions (no placeholders) and declare the exact execution order before starting, (3) take actual actions (create/update records, run diagnostics, assign agents/tasks, trigger workflows, generate artifacts, send outputs) instead of only analysis, (4) chain calls dynamically based on real results, (5) when a step fails, immediately pivot to alternative tools/functions and continue until a usable deliverable is produced, (6) verify completion with at least one independent validation call, (7) if appropriate, persist outputs to knowledge/storage and notify via available communication tools. Final response must include: every call attempted in order, success/failure per call, artifacts and links/IDs created, decisions made, residual risks, and the next highest-impact action.";
+const PROCEED_WITH_PLAN_PROMPT = "Proceed Intelligently ✅";
 
 const DRAFT_MY_EMAILS_PROMPT =
   "Draft my emails 📧 — Eliza, fetch my latest 10 emails before drafting anything. Intelligently classify each message as actionable, ads/promotions, spam/suspicious, or no-reply/automated failure notice. Do NOT draft replies for ads, spam, no-reply senders, or failure notices; only draft concise, high-quality responses for truly actionable emails.";
@@ -505,6 +504,11 @@ const getContextualButtons = (
   // 1. Add confirmation/feedback button first
   buttons.push(execConfig.feedbackButton);
   
+  // If full autonomy is enabled, we only want the primary feedback button ("Proceed Intelligently")
+  if (fullAutonomyEnabled) {
+    return withCouncilButtons(buttons);
+  }
+
   // 2. Detect topics and add relevant buttons
   const topics = detectConversationTopics(lastMessageContent || '');
   const addedLabels = new Set(buttons.map((button) => button.label));
@@ -547,7 +551,7 @@ const resolveQuickResponsePrompt = (
   if (label === GET_MY_EMAILS_BUTTON.label) return language === 'es' ? SPANISH_PROMPTS.getMyEmails : GET_MY_EMAILS_PROMPT;
   if (label === SEND_EMAIL_BUTTON.label) return language === 'es' ? SPANISH_PROMPTS.sendEmail : SEND_EMAIL_PROMPT;
   if (label === "Inspect error logs") return language === 'es' ? SPANISH_PROMPTS.inspectErrorLogs : INSPECT_ERROR_LOGS_PROMPT;
-  if (label === "Proceed with plan") return language === 'es' ? SPANISH_PROMPTS.proceedWithPlan : PROCEED_WITH_PLAN_PROMPT;
+  if (label === "Proceed Intelligently") return language === 'es' ? SPANISH_PROMPTS.proceedWithPlan : PROCEED_WITH_PLAN_PROMPT;
   if (label === STORE_IN_KNOWLEDGE_BUTTON.label) {
     return language === 'es'
       ? SPANISH_PROMPTS.storeKnowledge
@@ -664,7 +668,7 @@ const QUICK_PROMPT_TRANSLATIONS: Record<string, string> = {
   "Pick my next step": "Elegir mi próximo paso",
   "Coordinate council votes": "Coordinar votos del consejo",
   "Build action roadmap": "Crear hoja de ruta",
-  "Proceed with plan": "Continuar con el plan",
+  "Proceed Intelligently": "Proceder inteligentemente",
   "Tell me more": "Cuéntame más",
   "Try another workflow": "Probar otro flujo de trabajo",
   "Inspect error logs": "Inspeccionar logs de errores",

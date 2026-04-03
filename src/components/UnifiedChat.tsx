@@ -965,7 +965,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
           const quickPrompts = getQuickResponsePrompts(quickResponseContext);
           const filteredPrompts = councilMode
             ? quickPrompts.filter((candidatePrompt) =>
-                candidatePrompt.includes('Proceed with plan') ||
+                candidatePrompt.includes('Proceed Intelligently') ||
                 candidatePrompt.includes('Continuar con el plan') ||
                 candidatePrompt.startsWith('Move forward ⏭️') ||
                 candidatePrompt.startsWith('Avanzar ⏭️')
