@@ -926,8 +926,8 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   const fullAutonomyTurnCountRef = useRef(0);
   const FULL_AUTONOMY_AUTO_ADVANCE_SECONDS = 60;
   const FULL_AUTONOMY_BREAKOUT_PROMPT = language === 'es'
-    ? '¿Qué nuevos problemas podemos resolver o qué nuevas funciones podemos construir? Navega en la web con DuckDuckGo para identificar qué es lo más importante ahora.'
-    : 'But what new problems can we solve or what new features can we build? Browse the web with DuckDuckGo to find out what is most important right now.';
+    ? 'Audita tu progreso para asegurar que se está realizando trabajo real: revisa tu base de conocimientos para confirmar que guardaste lo que creías haber guardado, revisa tu código en GitHub, tu esquema en Supabase y tu frontend en Vercel.'
+    : 'Audit your progress to ensure real work is being done - check your knowledgebase to ensure you stored things you thought you stored, check your codebase through github, your schema through supabase, and your frontend through vercel.';
   // Ref to handleSendMessage — avoids stale closure in setInterval callbacks
   // Updated BEFORE the interval fires via assignment in component body below
   const handleSendMessageRef = useRef<((msg?: string) => void) | undefined>(undefined);
@@ -945,7 +945,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
     if (!fullAutonomyEnabled || assistantMessage.sender !== 'assistant') return;
 
     fullAutonomyTurnCountRef.current += 1;
-    const isBreakoutTurn = !councilMode && fullAutonomyTurnCountRef.current % 4 === 0;
+    const isBreakoutTurn = !councilMode && fullAutonomyTurnCountRef.current % 10 === 0;
 
     const quickResponseContext = {
       lastMessageRole: 'assistant' as const,
