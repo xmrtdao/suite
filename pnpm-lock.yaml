@@ -4296,8 +4296,8 @@ packages:
   lodash.merge@4.6.2:
     resolution: {integrity: sha512-0KpjqXRVvrYyCsX1swR/XTK0va6VQkQM6MNo7PqW77ByjAhoARA8EfrP1N4+KlKj8YS0ZUCtRT/YUuhyYDujIQ==}
 
-  lodash@4.17.23:
-    resolution: {integrity: sha512-LgVTMpQtIopCi79SJeDiP0TfWi5CNEc/L/aRdTh3yIvmZXTnheWpKjSZhnvMl8iXbC1tFg9gdHHDMLoV7CnG+w==}
+  lodash@4.18.1:
+    resolution: {integrity: sha512-dMInicTPVE8d1e5otfwmmjlxkZoUpiVLwyeTdUsi/Caj/gfzzblBcCE5sRHV/AsjuCmxWrte2TNGSYuCeCq+0Q==}
 
   loglevel@1.9.2:
     resolution: {integrity: sha512-HgMmCqIJSAKqo68l0rS2AanEWfkxaZ5wNiEFb5ggm08lDs9Xl2KxBlX3PTcaD2chBM1gXAYf491/M2Rv8Jwayg==}
@@ -4899,8 +4899,8 @@ packages:
   preact@10.24.2:
     resolution: {integrity: sha512-1cSoF0aCC8uaARATfrlz4VCBqE8LwZwRfLgkxJOQwAlQt6ayTmi0D9OF7nXid1POI5SZidFuG9CnlXbDfLqY/Q==}
 
-  preact@10.29.0:
-    resolution: {integrity: sha512-wSAGyk2bYR1c7t3SZ3jHcM6xy0lcBcDel6lODcs9ME6Th++Dx2KU+6D3HD8wMMKGA8Wpw7OMd3/4RGzYRpzwRg==}
+  preact@10.29.1:
+    resolution: {integrity: sha512-gQCLc/vWroE8lIpleXtdJhTFDogTdZG9AjMUpVkDf2iTCNwYNWA+u16dL41TqUDJO4gm2IgrcMv3uTpjd4Pwmg==}
 
   prelude-ls@1.2.1:
     resolution: {integrity: sha512-vkcDPrRZo1QZLbn5RLGPpg/WmIQ65qoWWhcGKf/b5eplkkarX0m9z8ppCat4mlOqUsWpyNuYgO3VRyrYHSzX5g==}
@@ -6130,7 +6130,7 @@ snapshots:
       eth-json-rpc-filters: 6.0.1
       eventemitter3: 5.0.4
       keccak: 3.0.4
-      preact: 10.29.0
+      preact: 10.29.1
       sha.js: 2.4.12
     transitivePeerDependencies:
       - supports-color
@@ -6891,7 +6891,7 @@ snapshots:
       '@types/debug': 4.1.13
       '@types/lodash': 4.17.24
       debug: 4.4.3
-      lodash: 4.17.23
+      lodash: 4.18.1
       pony-cause: 2.1.11
       semver: 7.7.4
       uuid: 9.0.1
@@ -11471,7 +11471,7 @@ snapshots:
 
   lodash.merge@4.6.2: {}
 
-  lodash@4.17.23: {}
+  lodash@4.18.1: {}
 
   loglevel@1.9.2: {}
 
@@ -12178,7 +12178,7 @@ snapshots:
 
   preact@10.24.2: {}
 
-  preact@10.29.0: {}
+  preact@10.29.1: {}
 
   prelude-ls@1.2.1: {}
 
@@ -12427,7 +12427,7 @@ snapshots:
     dependencies:
       clsx: 2.1.1
       eventemitter3: 4.0.7
-      lodash: 4.17.23
+      lodash: 4.18.1
       react: 18.3.1
       react-dom: 18.3.1(react@18.3.1)
       react-is: 18.3.1
