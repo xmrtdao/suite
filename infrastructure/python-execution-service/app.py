@@ -147,6 +147,7 @@ def cleanup_session(session_id: str):
 def run_code(
     code: str,
     stdin: str = '',
+    args: list | None = None,
     timeout_sec: float = 30.0,
     work_dir: str | None = None,
     stateless: bool = True,
@@ -176,7 +177,7 @@ def run_code(
             env.pop(key, None)
 
         process = subprocess.Popen(
-            [sys.executable, script_path],
+            [sys.executable, script_path] + (args or []),
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -324,11 +325,29 @@ def execute():
             return jsonify({"error": "No code provided"}), 400
 
         stdin = data.get('stdin', '')
+        args = data.get('args', [])
+        if isinstance(args, str):
+            try:
+                # Handle case where args might be a JSON string from caller
+                parsed_args = json.loads(args)
+                if isinstance(parsed_args, list):
+                    args = [str(a) for a in parsed_args]
+                else:
+                    args = [str(args)]
+            except:
+                args = [args]
+        elif isinstance(args, list):
+            args = [str(a) for a in args]
+        else:
+            args = []
+
         timeout_ms = data.get('run_timeout', 30000)
         timeout_sec = min(timeout_ms / 1000.0, MAX_TIMEOUT_SEC)
         session_id = data.get('session_id', None)
 
-        logger.info(f"[{exec_id}] Execute request: {len(code)} chars, session={session_id}, timeout={timeout_sec}s")
+        logger.info(f"[{exec_id}] Execute request: {len(code)} chars, session={session_id}, args={len(args)}, timeout={timeout_sec}s")
+
+        logger.info(f"[{exec_id}] Code to execute: {code}")
 
         # ── Security check ───────────────────────────────────────────────────
         is_safe, reason = security_check(code)
@@ -353,19 +372,51 @@ def execute():
             session["cell_count"] += 1
             stateless = False
         else:
-            work_dir = None
+            work_dir = tempfile.mkdtemp(prefix="exec_")
             stateless = True
 
+        # ── Write additional files if provided ───────────────────────────────
+        files = data.get('files', [])
+        if isinstance(files, list):
+            for file_info in files:
+                if not isinstance(file_info, dict):
+                    continue
+                name = file_info.get('name')
+                content = file_info.get('content', '')
+                if not name or name == 'main.py' or '..' in name or '/' in name:
+                    continue
+                
+                try:
+                    with open(os.path.join(work_dir, name), 'w', encoding='utf-8') as f:
+                        f.write(content)
+                except Exception as e:
+                    logger.error(f"[{exec_id}] Failed to write additional file {name}: {e}")
+
         # ── Execute ──────────────────────────────────────────────────────────
-        result = run_code(
-            code=code,
-            stdin=stdin,
-            timeout_sec=timeout_sec,
-            work_dir=work_dir,
-            stateless=stateless,
-        )
+        try:
+            result = run_code(
+                code=code,
+                stdin=stdin,
+                args=args,
+                timeout_sec=timeout_sec,
+                work_dir=work_dir,
+                stateless=stateless,
+            )
+        except Exception as e:
+            logger.error(f"[{exec_id}] Exception in run_code: {e}\n{traceback.format_exc()}")
+            return jsonify({
+                "run": {
+                    "stdout": "",
+                    "stderr": f"Internal Service Error: {str(e)}",
+                    "code": 1,
+                },
+                "language": "python",
+                "version": sys.version.split()[0],
+            }), 500
 
         exit_code = result["exit_code"]
+        if exit_code != 0:
+            logger.error(f"[{exec_id}] Execution failed with exit code {exit_code}: {result['stderr']}")
         logger.info(f"[{exec_id}] Done: exit_code={exit_code}, stdout={len(result['stdout'])}b, stderr={len(result['stderr'])}b")
 
         return jsonify({

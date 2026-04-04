@@ -182,6 +182,7 @@ async function executePiston(opts: {
 async function executeCloudRun(opts: {
   code: string;
   stdin: string;
+  args: any;
   timeoutMs: number;
 }): Promise<{ stdout: string; stderr: string; exitCode: number; backend: string; blocked?: boolean; blockReason?: string }> {
   const resp = await fetch(`${CLOUD_RUN_URL}/execute`, {
@@ -192,6 +193,7 @@ async function executeCloudRun(opts: {
       version: '3.11',
       files: [{ name: 'main.py', content: opts.code }],
       stdin: opts.stdin,
+      args: opts.args,
       run_timeout: opts.timeoutMs,
     }),
     signal: AbortSignal.timeout(opts.timeoutMs + 5000),
@@ -340,7 +342,12 @@ Deno.serve(async (req) => {
         if (!CLOUD_RUN_URL) {
           throw new Error('PISTON_URL (Cloud Run) not configured');
         }
-        result = await executeCloudRun({ code: String(code), stdin: String(stdin), timeoutMs: Number(timeout_ms) });
+        result = await executeCloudRun({
+          code: String(code),
+          stdin: String(stdin),
+          args: args,
+          timeoutMs: Number(timeout_ms),
+        });
       } else {
         // Private Piston sandbox
         result = await executePiston({
