@@ -1,4 +1,5 @@
 // FIXED VERSION - Proper response extraction for frontend compatibility
+// UPDATED: Properly handles file attachments by converting to Base64
 import { supabase } from '@/integrations/supabase/client'
 import { executiveCouncilService } from './executiveCouncilService'
 import { FallbackAIService } from './fallbackAIService'
@@ -64,6 +65,14 @@ You are Ms. Akari Tanaka, Chief People Officer (CPO) of XMRT-DAO — Executive #
 Stay in character as Ms. Akari Tanaka (CPO) at all times.`,
 };
 
+export interface ProcessedAttachment {
+  name: string;
+  type: string;
+  size: number;
+  base64: string;  // Base64 encoded content
+  dataUrl: string; // Full data URL for embedding (e.g., data:image/png;base64,...)
+}
+
 export interface ElizaContext {
   miningStats?: any;
   userContext?: any;
@@ -78,8 +87,9 @@ export interface ElizaContext {
     interactionPatterns?: any;
   };
   emotionalContext?: any;
-  images?: any[];
-  attachments?: File[]; // NEW: Support for raw file attachments
+  images?: any[];  // Keep for backward compatibility
+  attachments?: File[]; // Raw file attachments (will be processed)
+  processedAttachments?: ProcessedAttachment[]; // NEW: Processed attachments ready for LLM
   isLiveCameraFeed?: boolean;
   targetExecutive?: string;
   councilMode?: boolean;
@@ -96,6 +106,110 @@ export interface ElizaContext {
 }
 
 export class UnifiedElizaService {
+  
+  /**
+   * NEW: Process file attachments into Base64 format suitable for LLM consumption
+   * This handles images, documents, and other file types
+   */
+  private static async processAttachments(files: File[]): Promise<ProcessedAttachment[]> {
+    const processed: ProcessedAttachment[] = [];
+    
+    for (const file of files) {
+      try {
+        console.log(`📎 Processing attachment: ${file.name} (${file.type}, ${file.size} bytes)`);
+        
+        // Convert file to Base64
+        const base64 = await this.fileToBase64(file);
+        
+        // Create data URL for embedding
+        const dataUrl = `data:${file.type};base64,${base64}`;
+        
+        processed.push({
+          name: file.name,
+          type: file.type,
+          size: file.size,
+          base64: base64,
+          dataUrl: dataUrl
+        });
+        
+        console.log(`✅ Processed ${file.name} successfully (${base64.length} chars base64)`);
+      } catch (error) {
+        console.error(`❌ Failed to process attachment ${file.name}:`, error);
+      }
+    }
+    
+    return processed;
+  }
+  
+  /**
+   * Convert a File to Base64 string
+   */
+  private static fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => {
+        // Remove the data URL prefix (e.g., "data:image/png;base64,")
+        const result = reader.result as string;
+        const base64 = result.split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = (error) => reject(error);
+    });
+  }
+  
+  /**
+   * NEW: Build attachment descriptions for the LLM
+   * Creates a structured representation of attachments for the AI to understand
+   */
+  private static buildAttachmentContext(attachments: ProcessedAttachment[]): string {
+    if (!attachments || attachments.length === 0) return '';
+    
+    const imageTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'];
+    const pdfTypes = ['application/pdf'];
+    const textTypes = ['text/plain', 'text/markdown', 'text/csv', 'application/json'];
+    
+    const images = attachments.filter(a => imageTypes.includes(a.type));
+    const pdfs = attachments.filter(a => pdfTypes.includes(a.type));
+    const texts = attachments.filter(a => textTypes.includes(a.type));
+    const others = attachments.filter(a => !imageTypes.includes(a.type) && !pdfTypes.includes(a.type) && !textTypes.includes(a.type));
+    
+    let context = '\n\n--- ATTACHMENTS ---\n';
+    
+    if (images.length > 0) {
+      context += `\n📷 **Images (${images.length}):**\n`;
+      images.forEach(img => {
+        context += `- ${img.name} (${(img.size / 1024).toFixed(2)} KB)\n`;
+      });
+      context += `\n*Note: Images are available for vision analysis. The user has shared these images with you.*\n`;
+    }
+    
+    if (pdfs.length > 0) {
+      context += `\n📄 **PDF Documents (${pdfs.length}):**\n`;
+      pdfs.forEach(pdf => {
+        context += `- ${pdf.name} (${(pdf.size / 1024).toFixed(2)} KB)\n`;
+      });
+      context += `\n*Note: PDF content extraction may be limited. Please request specific information if needed.*\n`;
+    }
+    
+    if (texts.length > 0) {
+      context += `\n📝 **Text Files (${texts.length}):**\n`;
+      texts.forEach(text => {
+        context += `- ${text.name} (${(text.size / 1024).toFixed(2)} KB)\n`;
+      });
+    }
+    
+    if (others.length > 0) {
+      context += `\n📎 **Other Files (${others.length}):**\n`;
+      others.forEach(other => {
+        context += `- ${other.name} (${other.type}, ${(other.size / 1024).toFixed(2)} KB)\n`;
+      });
+    }
+    
+    context += '\n--- END ATTACHMENTS ---\n';
+    return context;
+  }
+
   private static async getCurrentUserContext(): Promise<{ userId?: string; userEmail?: string }> {
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -207,6 +321,7 @@ export class UnifiedElizaService {
   /**
    * Route request to the best available executive
    * Production routing with response extraction
+   * UPDATED: Handles processed attachments properly
    */
   private static async routeToExecutive(
     userInput: string,
@@ -229,91 +344,87 @@ export class UnifiedElizaService {
       ? 'Responde completamente en español neutro.'
       : 'Respond in clear English.';
 
+    // Process attachments if they exist
+    let processedAttachments = context.processedAttachments;
+    if (context.attachments && context.attachments.length > 0 && !processedAttachments) {
+      console.log(`📎 Processing ${context.attachments.length} attachments for LLM consumption...`);
+      processedAttachments = await this.processAttachments(context.attachments);
+      console.log(`✅ Processed ${processedAttachments.length} attachments successfully`);
+    }
+    
+    // Build attachment context for the LLM
+    const attachmentContext = processedAttachments && processedAttachments.length > 0 
+      ? this.buildAttachmentContext(processedAttachments)
+      : '';
+
+    // Combine user input with attachment context
+    let finalUserInput = userInput || 'Hello';
+    if (attachmentContext) {
+      finalUserInput = userInput 
+        ? `${userInput}${attachmentContext}` 
+        : `Please analyze these attachments.${attachmentContext}`;
+    }
+
     for (const executive of safeExecutives) {
       try {
         console.log(`📞 Calling ${executive}...`);
 
         let data, error;
 
-        // Check if we need multipart/form-data (for file attachments)
-        if (context.attachments && context.attachments.length > 0) {
-          console.log(`📎 Uploading ${context.attachments.length} attachments via multipart/form-data...`);
-          const formData = new FormData();
-          formData.append('userQuery', userInput || 'Hello');
-
-          // Append Metadata and Context as JSON strings
-          formData.append('messages', JSON.stringify([{
-            role: 'system',
-            content: languageInstruction
-          }, {
-            role: 'user',
-            content: userInput || 'Hello'
-          }]));
-
-          if (context.organizationContext) {
-            formData.append('organizationContext', JSON.stringify(context.organizationContext));
+        // Check if we need multipart/form-data (for file uploads to edge functions)
+        // Note: Even with attachments, we now send Base64 in JSON rather than FormData
+        // This avoids multipart complexity and works better with most LLM APIs
+        
+        const userContext = await this.getCurrentUserContext();
+        const userIdForPayload = userContext.userEmail || userContext.userId;
+        
+        // Build the messages array with proper context
+        const messages = [
+          { role: 'system', content: languageInstruction },
+          { role: 'user', content: finalUserInput }
+        ];
+        
+        // If we have processed attachments, include them in the payload
+        const payload: any = {
+          message: finalUserInput,
+          messages: messages,
+          organizationContext: context.organizationContext,
+          timestamp: new Date().toISOString(),
+          language,
+          preferred_language: language,
+          user_id: userIdForPayload,
+          user_email: userContext.userEmail,
+          images: context.images || undefined,
+          isLiveCameraFeed: context.isLiveCameraFeed || undefined,
+        };
+        
+        // Include processed attachments for vision-capable models
+        if (processedAttachments && processedAttachments.length > 0) {
+          // For vision models, include image attachments as data URLs
+          const imageAttachments = processedAttachments.filter(a => 
+            a.type.startsWith('image/')
+          );
+          
+          if (imageAttachments.length > 0) {
+            payload.images = imageAttachments.map(img => img.dataUrl);
+            console.log(`🖼️ Including ${imageAttachments.length} images for vision analysis`);
           }
-
-          formData.append('timestamp', new Date().toISOString());
-          formData.append('language', language);
-          formData.append('preferred_language', language);
-
-          if (context.isLiveCameraFeed) {
-            formData.append('isLiveCameraFeed', 'true');
-          }
-
-          // ✅ Ensure user context is always included for downstream payload packaging.
-          // Use email as user_id for google-cloud-auth context routing.
-          const userContext = await this.getCurrentUserContext();
-          const userIdForPayload = userContext.userEmail || userContext.userId;
-          if (userIdForPayload) formData.append('user_id', userIdForPayload);
-          if (userContext.userEmail) formData.append('user_email', userContext.userEmail);
-          // Pass any stored session ID for memory continuity
-          const storedSession = localStorage.getItem('eliza_session_id');
-          if (storedSession) formData.append('session_id', storedSession);
-
-          // Append all files
-          context.attachments.forEach(file => {
-            formData.append('file', file);
-          });
-
-          // Execute request with FormData
-          const response = await supabase.functions.invoke(executive, {
-            body: formData
-          });
-          data = response.data;
-          error = response.error;
-
-        } else {
-          // Standard JSON payload
-          const userContext = await this.getCurrentUserContext();
-          const userIdForPayload = userContext.userEmail || userContext.userId;
-          const payload = {
-            message: userInput || 'Hello',
-            messages: [{
-              role: 'system',
-              content: languageInstruction
-            }, {
-              role: 'user',
-              content: userInput || 'Hello'
-            }],
-            organizationContext: context.organizationContext,
-            timestamp: new Date().toISOString(),
-            language,
-            preferred_language: language,
-            user_id: userIdForPayload,
-            user_email: userContext.userEmail,
-            // ✅ CRITICAL FIX: Include images if they exist in the context
-            images: context.images || undefined, // Pass the images array (Base64 strings)
-            isLiveCameraFeed: context.isLiveCameraFeed || undefined // Pass the live camera feed flag
-          };
-
-          const response = await supabase.functions.invoke(executive, {
-            body: payload
-          });
-          data = response.data;
-          error = response.error;
+          
+          // Include all attachments metadata for reference
+          payload.attachments = processedAttachments.map(a => ({
+            name: a.name,
+            type: a.type,
+            size: a.size,
+            // Include base64 for text files that might need analysis
+            content: a.type.startsWith('text/') ? a.base64 : undefined
+          }));
         }
+
+        const response = await supabase.functions.invoke(executive, {
+          body: payload
+        });
+        data = response.data;
+        error = response.error;
 
         if (error) {
           console.error(`❌ ${executive} error:`, error);
@@ -350,6 +461,7 @@ export class UnifiedElizaService {
   // built-in system prompt / persona. We call each function directly so their
   // persona is determined by the function's own system prompt (not Eliza's).
   // DO NOT route through ai-chat — that replaces Eliza's full system prompt.
+  // UPDATED: Handles attachments properly
   private static async callSingleExecutive(
     functionId: string,
     userInput: string,
@@ -361,11 +473,30 @@ export class UnifiedElizaService {
       : 'Respond in clear English.';
     const userContext = await this.getCurrentUserContext();
     const userIdForPayload = userContext.userEmail || userContext.userId;
-    const payload = {
-      message: userInput,
+    
+    // Process attachments if they exist
+    let processedAttachments = context.processedAttachments;
+    if (context.attachments && context.attachments.length > 0 && !processedAttachments) {
+      processedAttachments = await this.processAttachments(context.attachments);
+    }
+    
+    // Build attachment context
+    const attachmentContext = processedAttachments && processedAttachments.length > 0 
+      ? this.buildAttachmentContext(processedAttachments)
+      : '';
+    
+    let finalUserInput = userInput;
+    if (attachmentContext) {
+      finalUserInput = userInput 
+        ? `${userInput}${attachmentContext}` 
+        : `Please analyze these attachments.${attachmentContext}`;
+    }
+    
+    const payload: any = {
+      message: finalUserInput,
       messages: [
         { role: 'system', content: languageInstruction },
-        { role: 'user', content: userInput },
+        { role: 'user', content: finalUserInput },
       ],
       organizationContext: context.organizationContext,
       timestamp: new Date().toISOString(),
@@ -376,6 +507,19 @@ export class UnifiedElizaService {
       images: context.images || undefined,
       isLiveCameraFeed: context.isLiveCameraFeed || undefined,
     };
+    
+    // Include processed attachments
+    if (processedAttachments && processedAttachments.length > 0) {
+      const imageAttachments = processedAttachments.filter(a => a.type.startsWith('image/'));
+      if (imageAttachments.length > 0) {
+        payload.images = imageAttachments.map(img => img.dataUrl);
+      }
+      payload.attachments = processedAttachments.map(a => ({
+        name: a.name,
+        type: a.type,
+        size: a.size,
+      }));
+    }
 
     try {
       console.log(`🎭 Calling ${functionId} (own persona)...`);
@@ -390,6 +534,14 @@ export class UnifiedElizaService {
     }
   }
 
+  /**
+   * NEW: Pre-process attachments before generating response
+   * Call this separately if you want to handle attachments before the main call
+   */
+  public static async prepareAttachments(attachments: File[]): Promise<ProcessedAttachment[]> {
+    return this.processAttachments(attachments);
+  }
+
   // MAIN METHOD: Returns STRING or OBJECT as expected by frontend
   public static async generateResponse(
     userInput: string,
@@ -401,40 +553,51 @@ export class UnifiedElizaService {
     try {
       const safeInput = (typeof userInput === 'string' && userInput.trim()) ? userInput.trim() : 'Hello';
       const safeContext = (context && typeof context === 'object') ? context : {};
+      
+      // NEW: Process attachments if they exist and haven't been processed yet
+      let processedContext = { ...safeContext };
+      if (safeContext.attachments && safeContext.attachments.length > 0 && !safeContext.processedAttachments) {
+        console.log(`📎 Pre-processing ${safeContext.attachments.length} attachments...`);
+        const processed = await this.processAttachments(safeContext.attachments);
+        processedContext.processedAttachments = processed;
+        console.log(`✅ Pre-processed ${processed.length} attachments`);
+      }
+      
       const hasVisualOrAttachmentInput =
-        safeContext.inputMode === 'vision' ||
-        !!safeContext.isLiveCameraFeed ||
-        !!(safeContext.images && safeContext.images.length > 0) ||
-        !!(safeContext.attachments && safeContext.attachments.length > 0);
+        processedContext.inputMode === 'vision' ||
+        !!processedContext.isLiveCameraFeed ||
+        !!(processedContext.images && processedContext.images.length > 0) ||
+        !!(processedContext.processedAttachments && processedContext.processedAttachments.length > 0);
 
       console.log('📋 Safe input length:', safeInput.length);
+      console.log('📎 Has attachments:', !!(processedContext.processedAttachments?.length));
 
       // ── PERSONA-LOCKED single-executive mode ─────────────────────────────
       // When targetExecutive is set (council page individual chats), skip the
       // health-check waterfall entirely and call that one function directly,
       // with the executive's character injected as a system message.
-      if (safeContext.targetExecutive && EXECUTIVE_PERSONA_PROMPTS[safeContext.targetExecutive] && !hasVisualOrAttachmentInput) {
-        console.log(`🎭 Persona-locked mode: routing to ${safeContext.targetExecutive}`);
+      if (processedContext.targetExecutive && EXECUTIVE_PERSONA_PROMPTS[processedContext.targetExecutive] && !hasVisualOrAttachmentInput) {
+        console.log(`🎭 Persona-locked mode: routing to ${processedContext.targetExecutive}`);
         const personaResponse = await this.callSingleExecutive(
-          safeContext.targetExecutive, safeInput, safeContext, language as 'en' | 'es'
+          processedContext.targetExecutive, safeInput, processedContext, language as 'en' | 'es'
         );
         if (personaResponse) return personaResponse;
         // If that function is down, fall through to waterfall below
-        console.warn(`⚠️ ${safeContext.targetExecutive} unavailable, falling back to waterfall`);
-      } else if (safeContext.targetExecutive && hasVisualOrAttachmentInput) {
-        console.log(`📎 Attachment/vision input detected; bypassing persona-locked routing for ${safeContext.targetExecutive} so backend attachment analysis can run`);
+        console.warn(`⚠️ ${processedContext.targetExecutive} unavailable, falling back to waterfall`);
+      } else if (processedContext.targetExecutive && hasVisualOrAttachmentInput) {
+        console.log(`📎 Attachment/vision input detected; processing with ${processedContext.targetExecutive} (attachments included in payload)`);
       }
 
       // ── Vision / attachment override ───────────────────────────────────────
-      if (safeContext.inputMode === 'vision' || (safeContext.attachments && safeContext.attachments.length > 0)) {
-        console.log('👁️ Vision/Attachment detected - Prioritizing Backend AI Gateway');
+      if (processedContext.inputMode === 'vision' || (processedContext.processedAttachments && processedContext.processedAttachments.length > 0)) {
+        console.log('👁️ Vision/Attachment detected - Including in payload for Backend AI Gateway');
       }
 
       // ── Executive council mode ─────────────────────────────────────────────
-      if (safeContext.councilMode) {
+      if (processedContext.councilMode) {
         console.log('🏛️ Trying executive council...');
         try {
-          const councilResult = await executiveCouncilService.deliberate(safeInput, safeContext);
+          const councilResult = await executiveCouncilService.deliberate(safeInput, processedContext);
           if (councilResult && councilResult.synthesis) {
             console.log('✅ Council deliberation successful with', councilResult.responses.length, 'executives');
             return councilResult.synthesis;
@@ -454,7 +617,7 @@ export class UnifiedElizaService {
         : ['ai-chat', ...executiveFallbacks.filter(e => e !== 'ai-chat')];
       console.log('💚 Routing order (Eliza first):', elizaFirstRouting);
 
-      const result = await this.routeToExecutive(safeInput, safeContext, elizaFirstRouting, language);
+      const result = await this.routeToExecutive(safeInput, processedContext, elizaFirstRouting, language);
       console.log('✨ Response generated successfully, type:', typeof result);
       return result;
 
