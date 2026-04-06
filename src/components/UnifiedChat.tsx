@@ -2865,10 +2865,10 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
                     onClick={() => setCouncilMode(!councilMode)}
                     variant={councilMode ? 'default' : 'outline'}
                     size="sm"
-                    className="text-xs h-7 px-1.5 sm:px-2 flex-shrink-0"
+                    className={`h-8 px-3 sm:h-9 sm:px-4 gap-2 flex-shrink-0 font-medium ${councilMode ? '' : 'text-muted-foreground'}`}
                   >
-                    <Users className="h-3 w-3 sm:mr-1" />
-                    <span className="hidden sm:inline">{councilMode ? (language === 'es' ? 'Consejo' : 'Council') : 'Eliza'}</span>
+                    <Users className="h-4 w-4" />
+                    <span className="text-xs sm:text-sm">{councilMode ? (language === 'es' ? 'Consejo' : 'Council') : 'Eliza'}</span>
                     <span className="sr-only">{councilMode ? (language === 'es' ? 'Modo consejo activado' : 'Council mode enabled') : (language === 'es' ? 'Modo Eliza activado' : 'Eliza mode enabled')}</span>
                   </Button>
                 </TooltipTrigger>
@@ -2892,10 +2892,10 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
                     onClick={() => setFullAutonomyEnabled((prev) => !prev)}
                     variant={fullAutonomyEnabled ? 'default' : 'outline'}
                     size="sm"
-                    className="text-xs h-7 px-1.5 sm:px-2 flex-shrink-0"
+                    className={`h-8 px-3 sm:h-9 sm:px-4 gap-2 flex-shrink-0 font-medium ${fullAutonomyEnabled ? '' : 'text-muted-foreground'}`}
                   >
-                    <Bot className="h-3 w-3 sm:mr-1" />
-                    <span className="hidden sm:inline">{language === 'es' ? 'Autonomía Total' : 'Full Autonomy'}</span>
+                    <Bot className="h-4 w-4" />
+                    <span className="text-xs sm:text-sm">{language === 'es' ? 'Autonomía' : 'Autonomy'}</span>
                     <span className="sr-only">{fullAutonomyEnabled ? (language === 'es' ? 'Desactivar autonomía total' : 'Disable full autonomy') : (language === 'es' ? 'Activar autonomía total' : 'Enable full autonomy')}</span>
                   </Button>
                 </TooltipTrigger>
@@ -2923,19 +2923,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
               </Badge>
             )}
 
-            {/* Clear Conversation Button */}
-            {totalMessageCount > 0 && (
-              <Button
-                onClick={handleClearConversation}
-                variant="ghost"
-                size="sm"
-                className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive sm:h-8 sm:w-8"
-                title={language === 'es' ? 'Borrar historial de conversación' : 'Clear conversation history'}
-              >
-                <Trash2 className="h-4 w-4" />
-                <span className="sr-only">{language === 'es' ? 'Borrar historial de conversación' : 'Clear conversation history'}</span>
-              </Button>
-            )}
+
 
             {/* Voice Toggle */}
             <Button
@@ -3165,17 +3153,29 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
               <ChatMessage key={message.id} message={message} />
             ))}
 
-            {/* Load Previous Conversation Button */}
-            {hasMoreMessages && totalMessageCount > 0 && (
-              <div className="flex justify-center pt-2">
+            {/* Load Previous Conversation & Clear History Buttons */}
+            {totalMessageCount > 0 && (
+              <div className="flex flex-col items-center gap-2 pt-2">
+                {hasMoreMessages && (
+                  <Button
+                    onClick={loadMoreMessages}
+                    disabled={loadingMoreMessages}
+                    variant="outline"
+                    size="sm"
+                    className="text-xs"
+                  >
+                    {loadingMoreMessages ? 'Loading...' : `View Older Conversation (${totalMessageCount} messages)`}
+                  </Button>
+                )}
                 <Button
-                  onClick={loadMoreMessages}
-                  disabled={loadingMoreMessages}
-                  variant="outline"
+                  onClick={handleClearConversation}
+                  variant="ghost"
                   size="sm"
-                  className="text-xs"
+                  className="text-xs text-muted-foreground hover:text-destructive flex items-center gap-1.5"
+                  title={language === 'es' ? 'Borrar historial de conversación' : 'Clear conversation history'}
                 >
-                  {loadingMoreMessages ? 'Loading...' : `View Older Conversation (${totalMessageCount} messages)`}
+                  <Trash2 className="h-3.5 w-3.5" />
+                  <span>{language === 'es' ? 'Borrar historial' : 'Clear history'}</span>
                 </Button>
               </div>
             )}
