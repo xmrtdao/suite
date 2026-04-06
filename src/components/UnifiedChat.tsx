@@ -1268,10 +1268,12 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   // to be called synchronously within a user gesture (no async gaps allowed).
   useEffect(() => {
     if (simplifiedVoiceService.isSupported()) {
-      simplifiedVoiceService.prepareInstance();
+      simplifiedVoiceService.prepareInstance({
+        language: language === 'es' ? 'es-ES' : 'en-US'
+      });
       console.log('🎤 SpeechRecognition pre-built and ready');
     }
-  }, []);
+  }, [language]);
 
   // Subscribe to Office Clerk (WebLLM) progress
   useEffect(() => {
@@ -1991,11 +1993,13 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
         }, (error) => {
           setIsRecording(false);
 
-          let userMsg = `🎤 Voice input error: ${error}`;
+          let userMsg = t('chat.error.microphone') + `: ${error}`;
           if (error.includes('not supported')) {
-            userMsg = `❌ Voice input is not supported in this browser. Please use Chrome, Edge, or Safari.`;
+            userMsg = language === 'es' 
+              ? `❌ La entrada de voz no es compatible con este navegador. Por favor, usa Chrome, Edge o Safari.`
+              : `❌ Voice input is not supported in this browser. Please use Chrome, Edge, or Safari.`;
           } else if (error.includes('not-allowed') || error.includes('permission')) {
-            userMsg = `🎤 Microphone access denied. Please allow microphone permissions in your browser settings.`;
+            userMsg = t('chat.permissions.needed');
           }
 
           const errorMessage: UnifiedMessage = {
@@ -2012,9 +2016,11 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
           console.error("Failed to start voice:", result.error);
           setIsRecording(false);
 
-          let initMsg = `❌ Could not start voice input: ${result.error}`;
+          let initMsg = (language === 'es' ? `❌ No se pudo iniciar la entrada de voz: ` : `❌ Could not start voice input: `) + result.error;
           if (result.error?.includes('not supported')) {
-            initMsg = `❌ Voice input is not supported in this browser. Please use Chrome, Edge, or Safari.`;
+            initMsg = language === 'es'
+              ? `❌ La entrada de voz no es compatible con este navegador. Por favor, usa Chrome, Edge o Safari.`
+              : `❌ Voice input is not supported in this browser. Please use Chrome, Edge, or Safari.`;
           }
 
           const errorMessage: UnifiedMessage = {
@@ -2186,7 +2192,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       console.error('Failed to process voice input:', error);
       const errorMessage: UnifiedMessage = {
         id: `error-${Date.now()}`,
-        content: 'I apologize, but I\'m having trouble processing your voice input right now.',
+        content: language === 'es' ? 'Lo siento, pero tengo problemas para procesar su entrada de voz en este momento.' : 'I apologize, but I\'m having trouble processing your voice input right now.',
         sender: 'assistant',
         timestamp: new Date()
       };
@@ -2555,7 +2561,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
 
       // If it's a workflow initiation, show a brief acknowledgment instead
       const displayContent = isWorkflowInitiation
-        ? '🔄 Processing your request in the background. I\'ll share the results shortly...'
+        ? (language === 'es' ? '🔄 Procesando su solicitud en segundo plano. Compartiré los resultados en breve...' : '🔄 Processing your request in the background. I\'ll share the results shortly...')
         : cleanResponse;
 
       const elizaMessage: UnifiedMessage = {
@@ -2735,7 +2741,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
     // Add a success message to chat
     const successMessage: UnifiedMessage = {
       id: `success-${Date.now()}`,
-      content: 'Great! Your API key has been validated and saved. Full AI capabilities have been restored. How can I help you?',
+      content: language === 'es' ? '¡Genial! Su clave API ha sido validada y guardada. Se han restaurado todas las capacidades de IA. ¿Cómo puedo ayudarle?' : 'Great! Your API key has been validated and saved. Full AI capabilities have been restored. How can I help you?',
       sender: 'assistant',
       timestamp: new Date()
     };
@@ -2802,14 +2808,14 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
                 <>
                   <h3 className="font-medium text-foreground text-sm sm:text-base truncate flex items-center gap-2">
                     <Users className="h-4 w-4 text-primary" />
-                    Executive Council
+                    {language === 'es' ? 'Consejo Ejecutivo' : 'Executive Council'}
                   </h3>
-                  <p className="text-[11px] text-muted-foreground truncate">All 5 executives deliberating</p>
+                  <p className="text-[11px] text-muted-foreground truncate">{language === 'es' ? 'Los 5 ejecutivos deliberando' : 'All 5 executives deliberating'}</p>
                 </>
               ) : (
                 <>
-                  <h3 className="font-medium text-foreground text-sm sm:text-base truncate">Suite Assistant</h3>
-                  <p className="text-[11px] text-muted-foreground truncate">Enterprise AI</p>
+                  <h3 className="font-medium text-foreground text-sm sm:text-base truncate">{language === 'es' ? 'Asistente Suite' : 'Suite Assistant'}</h3>
+                  <p className="text-[11px] text-muted-foreground truncate">{language === 'es' ? 'IA Empresarial' : 'Enterprise AI'}</p>
                 </>
               )}
             </div>
@@ -2844,7 +2850,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
                   size="sm"
                   className="h-6 px-2 text-[10px] sm:text-xs pointer-events-none"
                 >
-                  Unified
+                  {language === 'es' ? 'Unificado' : 'Unified'}
                 </Button>
               </div>
             )}
@@ -2862,18 +2868,18 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
                     className="text-xs h-7 px-1.5 sm:px-2 flex-shrink-0"
                   >
                     <Users className="h-3 w-3 sm:mr-1" />
-                    <span className="hidden sm:inline">{councilMode ? 'Council' : 'Eliza'}</span>
-                    <span className="sr-only">{councilMode ? 'Council mode enabled' : 'Eliza mode enabled'}</span>
+                    <span className="hidden sm:inline">{councilMode ? (language === 'es' ? 'Consejo' : 'Council') : 'Eliza'}</span>
+                    <span className="sr-only">{councilMode ? (language === 'es' ? 'Modo consejo activado' : 'Council mode enabled') : (language === 'es' ? 'Modo Eliza activado' : 'Eliza mode enabled')}</span>
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" className="max-w-xs">
                   <p className="font-medium text-sm mb-1">
-                    {councilMode ? 'Council Mode Active' : 'Eliza Mode Active'}
+                    {councilMode ? (language === 'es' ? 'Modo Consejo Activo' : 'Council Mode Active') : (language === 'es' ? 'Modo Eliza Activo' : 'Eliza Mode Active')}
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {councilMode
-                      ? 'Get perspectives from all 5 AI executives (CSO, CTO, CIO, CAO, COO) before a unified response.'
-                      : 'Chat with Eliza directly. Toggle to consult all executives.'}
+                      ? (language === 'es' ? 'Obtenga perspectivas de los 5 ejecutivos de IA (CSO, CTO, CIO, CAO, COO) antes de una respuesta unificada.' : 'Get perspectives from all 5 AI executives (CSO, CTO, CIO, CAO, COO) before a unified response.')
+                      : (language === 'es' ? 'Chatea con Eliza directamente. Cambia para consultar a todos los ejecutivos.' : 'Chat with Eliza directly. Toggle to consult all executives.')}
                   </p>
                 </TooltipContent>
               </Tooltip>
@@ -2889,16 +2895,18 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
                     className="text-xs h-7 px-1.5 sm:px-2 flex-shrink-0"
                   >
                     <Bot className="h-3 w-3 sm:mr-1" />
-                    <span className="hidden sm:inline">Full Autonomy</span>
-                    <span className="sr-only">{fullAutonomyEnabled ? 'Disable full autonomy' : 'Enable full autonomy'}</span>
+                    <span className="hidden sm:inline">{language === 'es' ? 'Autonomía Total' : 'Full Autonomy'}</span>
+                    <span className="sr-only">{fullAutonomyEnabled ? (language === 'es' ? 'Desactivar autonomía total' : 'Disable full autonomy') : (language === 'es' ? 'Activar autonomía total' : 'Enable full autonomy')}</span>
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" className="max-w-xs">
                   <p className="font-medium text-sm mb-1">
-                    {fullAutonomyEnabled ? 'Full Autonomy Active' : 'Full Autonomy Off'}
+                    {fullAutonomyEnabled ? (language === 'es' ? 'Autonomía Total Activa' : 'Full Autonomy Active') : (language === 'es' ? 'Autonomía Total Desactivada' : 'Full Autonomy Off')}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    After each assistant response, you get 60 seconds to reply manually. If idle, the best quick-prompt is auto-selected.
+                    {language === 'es' 
+                      ? 'Después de cada respuesta del asistente, tienes 60 segundos para responder manualmente. Si estás inactivo, se selecciona automáticamente el mejor prompt rápido.'
+                      : 'After each assistant response, you get 60 seconds to reply manually. If idle, the best quick-prompt is auto-selected.'}
                   </p>
                 </TooltipContent>
               </Tooltip>
@@ -2911,7 +2919,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
             {realtimeConnected && (
               <Badge variant="outline" className="text-[10px] hidden sm:flex items-center gap-1 bg-suite-success/10 text-suite-success border-suite-success/30">
                 <Wifi className="h-3 w-3" />
-                <span>Live</span>
+                <span>{language === 'es' ? 'En vivo' : 'Live'}</span>
               </Badge>
             )}
 
@@ -2922,10 +2930,10 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
                 variant="ghost"
                 size="sm"
                 className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive sm:h-8 sm:w-8"
-                title="Clear conversation history"
+                title={language === 'es' ? 'Borrar historial de conversación' : 'Clear conversation history'}
               >
                 <Trash2 className="h-4 w-4" />
-                <span className="sr-only">Clear conversation history</span>
+                <span className="sr-only">{language === 'es' ? 'Borrar historial de conversación' : 'Clear conversation history'}</span>
               </Button>
             )}
 
@@ -2938,10 +2946,10 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
                 ? ''
                 : 'text-muted-foreground'
                 }`}
-              title={`${voiceEnabled ? 'Disable' : 'Enable'} voice`}
+              title={`${voiceEnabled ? (language === 'es' ? 'Desactivar' : 'Disable') : (language === 'es' ? 'Activar' : 'Enable')} ${language === 'es' ? 'voz' : 'voice'}`}
             >
               {voiceEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
-              <span className="text-xs sm:text-sm">{voiceEnabled ? 'Voice On' : 'Voice Off'}</span>
+              <span className="text-xs sm:text-sm">{voiceEnabled ? (language === 'es' ? 'Voz On' : 'Voice On') : (language === 'es' ? 'Voz Off' : 'Voice Off')}</span>
             </Button>
           </div>
         </div>
@@ -2983,7 +2991,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
             {/* Interim Transcript Feedback */}
             {interimTranscript && (
               <div className="absolute bottom-full left-0 right-0 p-2 bg-background/80 backdrop-blur-sm text-sm text-muted-foreground animate-pulse border-t border-border">
-                Listening: "{interimTranscript}..."
+                {language === 'es' ? 'Escuchando' : 'Listening'}: "{interimTranscript}..."
               </div>
             )}
 
@@ -2994,8 +3002,8 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
               onClick={toggleRecording}
               disabled={isProcessing}
               className={`min-h-[44px] min-w-[44px] rounded-xl border border-border/60 ${isRecording ? 'animate-pulse' : 'hover:bg-muted/50'}`}
-              title={isRecording ? "Stop Listening" : "Start Listening"}
-              aria-label={isRecording ? 'Stop listening' : 'Start listening'}
+              title={isRecording ? (language === 'es' ? 'Detener escucha' : 'Stop Listening') : (language === 'es' ? 'Iniciar escucha' : 'Start Listening')}
+              aria-label={isRecording ? (language === 'es' ? 'Detener escucha' : 'Stop listening') : (language === 'es' ? 'Iniciar escucha' : 'Start listening')}
             >
               {isRecording ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
             </Button>
@@ -3016,10 +3024,10 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
               onKeyDown={handleKeyPress}
               placeholder={
                 needsAPIKey
-                  ? "Configure API key to continue..."
+                  ? (language === 'es' ? "Configura la clave API para continuar..." : "Configure API key to continue...")
                   : attachments.length > 0
-                    ? `${attachments.length} file${attachments.length > 1 ? 's' : ''} attached`
-                    : "Ask anything..."
+                    ? (language === 'es' ? `${attachments.length} archivo${attachments.length > 1 ? 's' : ''} adjunto${attachments.length > 1 ? 's' : ''}` : `${attachments.length} file${attachments.length > 1 ? 's' : ''} attached`)
+                    : (language === 'es' ? "Pregunta cualquier cosa..." : "Ask anything...")
               }
               className="min-h-[52px] max-h-48 flex-1 resize-y rounded-xl border-primary/40 bg-background px-4 py-3 text-sm shadow-inner focus-visible:ring-2 focus-visible:ring-primary/40"
               disabled={isProcessing}
@@ -3061,7 +3069,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
                 <div className="flex items-center justify-between gap-3 mb-2">
                   <div className="flex items-center gap-2 text-xs text-primary font-medium">
                     <span>🤖</span>
-                    <span>Full Autonomy auto-selects a quick action in {autoAdvanceCountdown}s…</span>
+                    <span>{language === 'es' ? `La Autonomía Total seleccionará una acción rápida en ${autoAdvanceCountdown}s…` : `Full Autonomy auto-selects a quick action in ${autoAdvanceCountdown}s…`}</span>
                   </div>
                   <Button
                     size="sm"

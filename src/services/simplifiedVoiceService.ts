@@ -19,6 +19,15 @@ export class SimplifiedVoiceService {
   private static onResultCallback: ((result: VoiceRecognitionResult) => void) | null = null;
   private static onErrorCallback: ((error: string) => void) | null = null;
   private static config: VoiceServiceConfig = {};
+  private static currentLanguage: string = 'en-US';
+
+  static setLanguage(lang: 'en' | 'es'): void {
+    this.currentLanguage = lang === 'es' ? 'es-ES' : 'en-US';
+    // If we have an existing instance, we need to re-prepare it with the new language
+    if (this.recognition) {
+      this.prepareInstance({ ...this.config, language: this.currentLanguage });
+    }
+  }
 
   static isSupported(): boolean {
     return !!(window.SpeechRecognition || window.webkitSpeechRecognition);
@@ -45,7 +54,7 @@ export class SimplifiedVoiceService {
 
       r.continuous = config.continuous ?? false;
       r.interimResults = config.interimResults ?? true;
-      r.lang = config.language ?? 'en-US';
+      r.lang = config.language ?? this.currentLanguage;
 
       r.onstart = () => {
         console.log('🎤 Voice recognition started');
