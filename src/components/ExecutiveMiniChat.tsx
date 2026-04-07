@@ -105,7 +105,7 @@ export const ExecutiveMiniChat = ({ executive, className = '' }: ExecutiveMiniCh
 
     return (
       <div className="relative group my-2">
-        <div className="absolute right-1 top-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="absolute left-1 top-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
           <Button
             size="icon"
             variant="secondary"

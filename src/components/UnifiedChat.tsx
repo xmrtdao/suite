@@ -614,7 +614,7 @@ const MessageCodeBlock = React.memo(({ code, language, ...props }: { code: strin
 
   return (
     <div className="relative group my-4">
-      <div className="absolute right-2 top-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="absolute left-2 top-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
         <Button
           size="icon"
           variant="secondary"
@@ -686,10 +686,10 @@ const markdownComponents = {
   }
 };
 
-const ChatMessage = React.memo(({ message }: { message: UnifiedMessage }) => {
+const ChatMessage = React.memo(({ message, isLatest }: { message: UnifiedMessage; isLatest?: boolean }) => {
   return (
     <div
-      className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'} flex-col gap-2 animate-fade-in`}
+      className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'} flex-col gap-2 animate-fade-in ${isLatest ? 'scale-[1.01] origin-left transition-transform duration-300' : ''}`}
     >
       {message.sender === 'assistant' && message.isCouncilDeliberation && message.councilDeliberation && (
         <div className="max-w-[95%]">
@@ -709,7 +709,7 @@ const ChatMessage = React.memo(({ message }: { message: UnifiedMessage }) => {
             className={`group p-3 rounded-xl ${message.sender === 'user'
               ? 'bg-white text-gray-900 rounded-br-sm border border-gray-300 shadow-sm'
               : 'bg-gray-50 text-gray-900 rounded-bl-sm border border-gray-300'
-              }`}
+              } ${isLatest ? 'ring-2 ring-primary/20 shadow-md border-primary/30' : ''}`}
           >
             {message.attachments?.images && message.attachments.images.length > 0 && (
               <div className="flex flex-wrap gap-2 mb-2">
@@ -1283,14 +1283,22 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
     return () => unsubscribe();
   }, []);
 
-  // Keep newest content visible directly under the top composer.
+  // Keep newest content visible at the bottom of the chat.
   useEffect(() => {
-    if (messages.length > 0 && !isProcessing) {
-      setTimeout(() => {
+    if (messages.length > 0) {
+      const scrollToBottom = () => {
         if (scrollAreaRef.current) {
-          scrollAreaRef.current.scrollTop = 0;
+          const scrollContainer = scrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]');
+          if (scrollContainer) {
+            scrollContainer.scrollTop = scrollContainer.scrollHeight;
+          }
         }
-      }, 100);
+      };
+      
+      // Scroll immediately and also after a short delay to account for layout shifts
+      scrollToBottom();
+      const timeoutId = setTimeout(scrollToBottom, 100);
+      return () => clearTimeout(timeoutId);
     }
   }, [messages, isProcessing]);
 
@@ -3149,8 +3157,12 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
               </div>
             )}
 
-            {[...messages].reverse().map((message) => (
-              <ChatMessage key={message.id} message={message} />
+            {messages.map((message, index) => (
+              <ChatMessage 
+                key={message.id} 
+                message={message} 
+                isLatest={index === messages.length - 1}
+              />
             ))}
 
             {/* Load Previous Conversation & Clear History Buttons */}
