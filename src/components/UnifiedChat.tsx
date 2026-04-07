@@ -1283,22 +1283,17 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
     return () => unsubscribe();
   }, []);
 
-  // Keep newest content visible at the bottom of the chat.
+  // Keep newest content visible directly under the top composer.
   useEffect(() => {
-    if (messages.length > 0) {
-      const scrollToBottom = () => {
+    if (messages.length > 0 && !isProcessing) {
+      setTimeout(() => {
         if (scrollAreaRef.current) {
           const scrollContainer = scrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]');
           if (scrollContainer) {
-            scrollContainer.scrollTop = scrollContainer.scrollHeight;
+            scrollContainer.scrollTop = 0;
           }
         }
-      };
-      
-      // Scroll immediately and also after a short delay to account for layout shifts
-      scrollToBottom();
-      const timeoutId = setTimeout(scrollToBottom, 100);
-      return () => clearTimeout(timeoutId);
+      }, 100);
     }
   }, [messages, isProcessing]);
 
@@ -3157,11 +3152,11 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
               </div>
             )}
 
-            {messages.map((message, index) => (
+            {[...messages].reverse().map((message, index) => (
               <ChatMessage 
                 key={message.id} 
                 message={message} 
-                isLatest={index === messages.length - 1}
+                isLatest={index === 0}
               />
             ))}
 
