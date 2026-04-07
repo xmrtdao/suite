@@ -1,5 +1,6 @@
 // FIXED VERSION - Proper response extraction for frontend compatibility
 // UPDATED: Properly handles file attachments by converting to Base64
+// FIX: Added surgical logging for attachment extraction debugging
 import { supabase } from '@/integrations/supabase/client'
 import { executiveCouncilService } from './executiveCouncilService'
 import { FallbackAIService } from './fallbackAIService'
@@ -319,9 +320,96 @@ export class UnifiedElizaService {
   }
 
   /**
+   * SURGICAL FIX: Extract attachments from message with comprehensive field checking
+   * This addresses the silent extraction failure when field names don't match
+   */
+  private static extractAttachmentsFromMessage(message: any, context: ElizaContext): File[] {
+    console.log('🔍 [CHECKPOINT 1] Raw incoming message object:', {
+      type: typeof message,
+      hasAttachments: !!message?.attachments,
+      hasFiles: !!message?.files,
+      hasFileList: !!message?.fileList,
+      hasDataTransfer: !!message?.dataTransfer,
+      keys: message ? Object.keys(message) : [],
+      contextAttachments: context?.attachments?.length || 0,
+      contextFiles: context?.files?.length || 0,
+      contextImages: context?.images?.length || 0
+    });
+
+    const extractedFiles: File[] = [];
+
+    // Check all possible attachment field names (field name mismatch is a common bug)
+    const possibleFields = [
+      message?.attachments,
+      message?.files,
+      message?.fileList,
+      message?.dataTransfer?.files,
+      message?.target?.files,
+      message?.currentTarget?.files
+    ];
+
+    for (const field of possibleFields) {
+      if (field && typeof field === 'object') {
+        // Check if it's a FileList or array-like object
+        if (typeof field.length === 'number' && field.length > 0) {
+          console.log(`📎 Found attachments in field with ${field.length} items`);
+          for (let i = 0; i < field.length; i++) {
+            const file = field[i];
+            if (file instanceof File || (file?.name && file?.size !== undefined)) {
+              extractedFiles.push(file);
+              console.log(`  - Extracted: ${file.name} (${file.type || 'unknown type'})`);
+            }
+          }
+        }
+        // Check if it's an array directly
+        else if (Array.isArray(field) && field.length > 0) {
+          console.log(`📎 Found attachments array with ${field.length} items`);
+          field.forEach(file => {
+            if (file instanceof File || (file?.name && file?.size !== undefined)) {
+              extractedFiles.push(file);
+              console.log(`  - Extracted: ${file.name} (${file.type || 'unknown type'})`);
+            }
+          });
+        }
+      }
+    }
+
+    // Also check context.attachments (already File[])
+    if (context?.attachments && Array.isArray(context.attachments) && context.attachments.length > 0) {
+      console.log(`📎 Found ${context.attachments.length} attachments in context`);
+      context.attachments.forEach(file => {
+        if (file instanceof File) {
+          extractedFiles.push(file);
+          console.log(`  - From context: ${file.name} (${file.type})`);
+        }
+      });
+    }
+
+    // Also check context.files (alternative field name)
+    if (context?.files && Array.isArray(context.files) && context.files.length > 0) {
+      console.log(`📎 Found ${context.files.length} files in context.files`);
+      context.files.forEach(file => {
+        if (file instanceof File) {
+          extractedFiles.push(file);
+          console.log(`  - From context.files: ${file.name} (${file.type})`);
+        }
+      });
+    }
+
+    console.log(`📊 [CHECKPOINT 2] Post-extraction: ${extractedFiles.length} total attachments extracted`);
+    if (extractedFiles.length > 0) {
+      extractedFiles.forEach((f, idx) => {
+        console.log(`  [${idx}] ${f.name} | type: ${f.type || 'unknown'} | size: ${f.size} bytes`);
+      });
+    }
+
+    return extractedFiles;
+  }
+
+  /**
    * Route request to the best available executive
    * Production routing with response extraction
-   * UPDATED: Handles processed attachments properly
+   * UPDATED: Handles processed attachments properly with surgical logging
    */
   private static async routeToExecutive(
     userInput: string,
@@ -339,17 +427,26 @@ export class UnifiedElizaService {
 
     console.log('🔒 Safe executives:', safeExecutives.length, 'available');
 
-    // Try executives in priority order
+    // Language instruction
     const languageInstruction = language === 'es'
       ? 'Responde completamente en español neutro.'
       : 'Respond in clear English.';
 
-    // Process attachments if they exist
+    // SURGICAL FIX: Extract attachments from message/context comprehensively
+    let extractedAttachments = this.extractAttachmentsFromMessage(userInput, context);
+    
+    // Process attachments if we found any
     let processedAttachments = context.processedAttachments;
-    if (context.attachments && context.attachments.length > 0 && !processedAttachments) {
-      console.log(`📎 Processing ${context.attachments.length} attachments for LLM consumption...`);
-      processedAttachments = await this.processAttachments(context.attachments);
+    if (extractedAttachments.length > 0 && !processedAttachments) {
+      console.log(`📎 Processing ${extractedAttachments.length} extracted attachments for LLM consumption...`);
+      processedAttachments = await this.processAttachments(extractedAttachments);
       console.log(`✅ Processed ${processedAttachments.length} attachments successfully`);
+    }
+    
+    // Also check if attachments were already in context.processedAttachments
+    if (context.processedAttachments && context.processedAttachments.length > 0 && !processedAttachments) {
+      processedAttachments = context.processedAttachments;
+      console.log(`📎 Using pre-processed attachments (${processedAttachments.length}) from context`);
     }
     
     // Build attachment context for the LLM
@@ -371,10 +468,6 @@ export class UnifiedElizaService {
 
         let data, error;
 
-        // Check if we need multipart/form-data (for file uploads to edge functions)
-        // Note: Even with attachments, we now send Base64 in JSON rather than FormData
-        // This avoids multipart complexity and works better with most LLM APIs
-        
         const userContext = await this.getCurrentUserContext();
         const userIdForPayload = userContext.userEmail || userContext.userId;
         
@@ -384,7 +477,7 @@ export class UnifiedElizaService {
           { role: 'user', content: finalUserInput }
         ];
         
-        // If we have processed attachments, include them in the payload
+        // Build payload
         const payload: any = {
           message: finalUserInput,
           messages: messages,
@@ -420,6 +513,21 @@ export class UnifiedElizaService {
           }));
         }
 
+        // [CHECKPOINT 3] Final tool-call payload verification
+        console.log(`🔍 [CHECKPOINT 3] Final payload for ${executive}:`, {
+          hasAttachmentsInPayload: !!(payload.attachments?.length),
+          attachmentsCount: payload.attachments?.length || 0,
+          hasImagesInPayload: !!(payload.images?.length),
+          imagesCount: payload.images?.length || 0,
+          messageLength: payload.message?.length,
+          attachmentsDetail: payload.attachments?.map((a: any) => ({
+            name: a.name,
+            type: a.type,
+            hasContent: !!a.content,
+            size: a.size
+          }))
+        });
+
         const response = await supabase.functions.invoke(executive, {
           body: payload
         });
@@ -436,8 +544,6 @@ export class UnifiedElizaService {
 
         if (content && content.length > 0) {
           console.log(`✅ ${executive} SUCCESS! Extracted content:`, content.substring(0, 100) + '...');
-
-          // Return as STRING (what frontend expects)
           return content;
         }
 
@@ -452,7 +558,6 @@ export class UnifiedElizaService {
     // All executives failed - use FallbackAIService (Office Clerk)
     console.log('🚨 All executives failed, falling back to Office Clerk...');
     const fallbackResult = await FallbackAIService.generateResponse(userInput, context);
-    // Return full object to preserve method/confidence
     return fallbackResult;
   }
 
@@ -461,7 +566,7 @@ export class UnifiedElizaService {
   // built-in system prompt / persona. We call each function directly so their
   // persona is determined by the function's own system prompt (not Eliza's).
   // DO NOT route through ai-chat — that replaces Eliza's full system prompt.
-  // UPDATED: Handles attachments properly
+  // UPDATED: Handles attachments properly with surgical extraction
   private static async callSingleExecutive(
     functionId: string,
     userInput: string,
@@ -474,10 +579,18 @@ export class UnifiedElizaService {
     const userContext = await this.getCurrentUserContext();
     const userIdForPayload = userContext.userEmail || userContext.userId;
     
-    // Process attachments if they exist
+    // SURGICAL FIX: Extract attachments from message/context comprehensively
+    let extractedAttachments = this.extractAttachmentsFromMessage(userInput, context);
+    
+    // Process attachments if we found any
     let processedAttachments = context.processedAttachments;
-    if (context.attachments && context.attachments.length > 0 && !processedAttachments) {
-      processedAttachments = await this.processAttachments(context.attachments);
+    if (extractedAttachments.length > 0 && !processedAttachments) {
+      processedAttachments = await this.processAttachments(extractedAttachments);
+    }
+    
+    // Also check if attachments were already in context.processedAttachments
+    if (context.processedAttachments && context.processedAttachments.length > 0 && !processedAttachments) {
+      processedAttachments = context.processedAttachments;
     }
     
     // Build attachment context
@@ -521,6 +634,14 @@ export class UnifiedElizaService {
       }));
     }
 
+    // [CHECKPOINT 3] Final tool-call payload verification for single executive
+    console.log(`🔍 [CHECKPOINT 3] Final payload for ${functionId}:`, {
+      hasAttachmentsInPayload: !!(payload.attachments?.length),
+      attachmentsCount: payload.attachments?.length || 0,
+      hasImagesInPayload: !!(payload.images?.length),
+      imagesCount: payload.images?.length || 0
+    });
+
     try {
       console.log(`🎭 Calling ${functionId} (own persona)...`);
       const { data, error } = await supabase.functions.invoke(functionId, { body: payload });
@@ -554,13 +675,19 @@ export class UnifiedElizaService {
       const safeInput = (typeof userInput === 'string' && userInput.trim()) ? userInput.trim() : 'Hello';
       const safeContext = (context && typeof context === 'object') ? context : {};
       
-      // NEW: Process attachments if they exist and haven't been processed yet
+      // SURGICAL FIX: Extract attachments from message/context comprehensively
+      let extractedAttachments = this.extractAttachmentsFromMessage(safeInput, safeContext);
+      
+      // Process attachments if found
       let processedContext = { ...safeContext };
-      if (safeContext.attachments && safeContext.attachments.length > 0 && !safeContext.processedAttachments) {
-        console.log(`📎 Pre-processing ${safeContext.attachments.length} attachments...`);
-        const processed = await this.processAttachments(safeContext.attachments);
+      if (extractedAttachments.length > 0 && !safeContext.processedAttachments) {
+        console.log(`📎 Pre-processing ${extractedAttachments.length} extracted attachments...`);
+        const processed = await this.processAttachments(extractedAttachments);
         processedContext.processedAttachments = processed;
         console.log(`✅ Pre-processed ${processed.length} attachments`);
+      } else if (safeContext.processedAttachments && safeContext.processedAttachments.length > 0) {
+        processedContext.processedAttachments = safeContext.processedAttachments;
+        console.log(`📎 Using existing processed attachments (${safeContext.processedAttachments.length})`);
       }
       
       const hasVisualOrAttachmentInput =
@@ -571,6 +698,7 @@ export class UnifiedElizaService {
 
       console.log('📋 Safe input length:', safeInput.length);
       console.log('📎 Has attachments:', !!(processedContext.processedAttachments?.length));
+      console.log('📎 Attachment count:', processedContext.processedAttachments?.length || 0);
 
       // ── PERSONA-LOCKED single-executive mode ─────────────────────────────
       // When targetExecutive is set (council page individual chats), skip the
