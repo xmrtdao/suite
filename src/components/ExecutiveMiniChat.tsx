@@ -371,12 +371,12 @@ export const ExecutiveMiniChat = ({ executive, className = '' }: ExecutiveMiniCh
                       <MarkdownContent content={message.content} />
                     </div>
                     <div className="flex items-center justify-between mt-1">
-                      <span className="block text-[9px] opacity-40">
-                        {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </span>
                       {message.role === 'assistant' && (
                         <CopyButton content={message.content} />
                       )}
+                      <span className="block text-[9px] opacity-40 ml-auto">
+                        {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
                     </div>
                   </div>
                 </div>

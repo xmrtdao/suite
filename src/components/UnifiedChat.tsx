@@ -752,7 +752,7 @@ const ChatMessage = React.memo(({ message, isLatest }: { message: UnifiedMessage
             </div>
 
             {message.sender === 'assistant' && (
-              <div className="mt-2 flex justify-end">
+              <div className="mt-2 flex justify-start">
                 <MessageCopyButton content={message.content} />
               </div>
             )}
