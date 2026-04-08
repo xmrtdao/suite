@@ -1657,8 +1657,29 @@ async function executeRealToolCall(
       });
       
     } else if (name === 'invoke_edge_function') {
-      const { function_name, payload } = parsedArgs;
+      let { function_name, payload } = parsedArgs;
       if (!function_name) throw new Error('Missing function_name');
+
+      // Special handling for python-executor to extract embedded request_data into args
+      if (function_name === 'python-executor' && payload && typeof payload.code === 'string') {
+        const pythonCode = payload.code;
+        const requestDataPattern = /request_data = ({[^}]*?\})/; // Regex to find `request_data = {...}`
+        const match = pythonCode.match(requestDataPattern);
+
+        if (match && match[1]) {
+          const requestDataJsonString = match[1];
+          // Remove the request_data assignment from the code
+          const cleanedCode = pythonCode.replace(requestDataPattern, '');
+          
+          payload = {
+            ...payload,
+            code: cleanedCode.trim(), // Assign cleaned code
+            args: [...(payload.args || []), requestDataJsonString] // Add request_data to args
+          };
+          console.log(`🐍 [PYTHON-EXECUTOR] Extracted request_data and added to args for function: ${function_name}`);
+        }
+      }
+
       result = await invokeEdgeFunction(function_name, payload ?? {});
       
     } else if (name === 'search_edge_functions') {
