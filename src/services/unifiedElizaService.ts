@@ -1,6 +1,3 @@
-// FIXED VERSION - Proper response extraction for frontend compatibility
-// UPDATED: Properly handles file attachments by converting to Base64
-// FIX: Added surgical logging for attachment extraction debugging
 import { supabase } from '@/integrations/supabase/client'
 import { executiveCouncilService } from './executiveCouncilService'
 import { FallbackAIService } from './fallbackAIService'
@@ -471,15 +468,6 @@ export class UnifiedElizaService {
         const userContext = await this.getCurrentUserContext();
         const userIdForPayload = userContext.userEmail || userContext.userId;
         
-        // NEW: Prepare headers for the Supabase Edge Function
-        const headers: Record<string, string> = {};
-        if (userContext.userId) {
-          headers['x-user-id'] = userContext.userId;
-        }
-        if (userContext.userEmail) {
-          headers['x-user-email'] = userContext.userEmail;
-        }
-
         // Build the messages array with proper context
         const messages = [
           { role: 'system', content: languageInstruction },
@@ -538,8 +526,7 @@ export class UnifiedElizaService {
         });
 
         const response = await supabase.functions.invoke(executive, {
-          body: payload,
-          headers: headers
+          body: payload
         });
         data = response.data;
         error = response.error;
@@ -589,15 +576,6 @@ export class UnifiedElizaService {
     const userContext = await this.getCurrentUserContext();
     const userIdForPayload = userContext.userEmail || userContext.userId;
     
-    // NEW: Prepare headers for the Supabase Edge Function
-    const headers: Record<string, string> = {};
-    if (userContext.userId) {
-      headers['x-user-id'] = userContext.userId;
-    }
-    if (userContext.userEmail) {
-      headers['x-user-email'] = userContext.userEmail;
-    }
-
     // SURGICAL FIX: Extract attachments from message/context comprehensively
     let extractedAttachments = this.extractAttachmentsFromMessage(userInput, context);
     
@@ -663,10 +641,7 @@ export class UnifiedElizaService {
 
     try {
       console.log(`🎭 Calling ${functionId} (own persona)...`);
-      const { data, error } = await supabase.functions.invoke(functionId, {
-        body: payload,
-        headers: headers
-      });
+      const { data, error } = await supabase.functions.invoke(functionId, { body: payload });
       if (error) { console.error(`❌ ${functionId} error:`, error); return null; }
       const content = this.extractResponseContent(data);
       if (content) { console.log(`✅ ${functionId} response (${content.length} chars)`); }
