@@ -795,8 +795,14 @@ export function AgentTaskVisualizer() {
     e.preventDefault();
     setDragOverAgentId(null);
 
-    if (!draggedTask) return;
-    if (draggedTask.assignee_agent_id === agentId) {
+    // Support both internal state and dataTransfer for cross-component drops
+    const taskId = draggedTask?.id || e.dataTransfer.getData('taskId') || e.dataTransfer.getData('text/plain');
+    if (!taskId) return;
+
+    const taskToReassign = draggedTask || tasks.find(t => t.id === taskId);
+    if (!taskToReassign) return;
+
+    if (taskToReassign.assignee_agent_id === agentId) {
       setDraggedTask(null);
       return;
     }
@@ -804,15 +810,15 @@ export function AgentTaskVisualizer() {
     setIsUpdating(true);
     try {
       const newAgent = agentMap.get(agentId);
-      const oldAgent = draggedTask.assignee_agent_id ? agentMap.get(draggedTask.assignee_agent_id) : undefined;
+      const oldAgent = taskToReassign.assignee_agent_id ? agentMap.get(taskToReassign.assignee_agent_id) : undefined;
 
       // Generate AI confirmation for the handoff
       const aiConfirmation = newAgent
-        ? await generateHandoffConfirmation(draggedTask, newAgent, oldAgent)
+        ? await generateHandoffConfirmation(taskToReassign, newAgent, oldAgent)
         : 'Task unassigned.';
 
       // Perform the reassignment
-      await handleTaskReassignWithHandoff(draggedTask.id, agentId, aiConfirmation, oldAgent, newAgent);
+      await handleTaskReassignWithHandoff(taskToReassign.id, agentId, aiConfirmation, oldAgent, newAgent);
     } finally {
       setIsUpdating(false);
       setDraggedTask(null);
@@ -933,7 +939,9 @@ export function AgentTaskVisualizer() {
   const handleDragOver = (e: DragEvent<HTMLDivElement>, stageKey: string) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
-    setDragOverStage(stageKey);
+    if (dragOverStage !== stageKey) {
+      setDragOverStage(stageKey);
+    }
   };
 
   const handleDragLeave = () => {
@@ -944,9 +952,13 @@ export function AgentTaskVisualizer() {
     e.preventDefault();
     setDragOverStage(null);
 
-    if (!draggedTask) return;
+    const taskId = draggedTask?.id || e.dataTransfer.getData('taskId') || e.dataTransfer.getData('text/plain');
+    if (!taskId) return;
 
-    const currentColumn = getColumnForTask(draggedTask);
+    const taskToMove = draggedTask || tasks.find(t => t.id === taskId);
+    if (!taskToMove) return;
+
+    const currentColumn = getColumnForTask(taskToMove);
     if (currentColumn === targetStage) {
       setDraggedTask(null);
       return;
@@ -973,7 +985,7 @@ export function AgentTaskVisualizer() {
         updates.stage = targetStage as 'DISCUSS' | 'PLAN' | 'EXECUTE' | 'VERIFY' | 'INTEGRATE';
 
         // If coming from PENDING/CLAIMED, set to IN_PROGRESS to activate task
-        if (['PENDING', 'CLAIMED'].includes(draggedTask.status)) {
+        if (['PENDING', 'CLAIMED'].includes(taskToMove.status)) {
           updates.status = 'IN_PROGRESS';
         }
       }
@@ -982,41 +994,42 @@ export function AgentTaskVisualizer() {
       const { error: updateError } = await supabase
         .from('tasks')
         .update(updates)
-        .eq('id', draggedTask.id);
+        .eq('id', taskToMove.id);
 
       if (updateError) throw updateError;
 
       // Log activity to unified activity log (supports nullable text agent_id)
       const activityTitle = isForward
-        ? `Task queued for execution: ${draggedTask.title}`
-        : `Task sent back for discussion: ${draggedTask.title}`;
+        ? `Task queued for execution: ${taskToMove.title}`
+        : `Task sent back for discussion: ${taskToMove.title}`;
 
       await supabase.from('eliza_activity_log').insert({
         activity_type: 'task_stage_change',
         title: activityTitle,
         description: `Task moved from ${fromLabel} to ${toLabel}`,
         status: 'completed',
-        task_id: draggedTask.id,
-        agent_id: draggedTask.assignee_agent_id || null,
+        task_id: taskToMove.id,
+        agent_id: taskToMove.assignee_agent_id || null,
         metadata: {
-          from_stage: draggedTask.stage,
+          handoff_type: 'drag_drop',
+          from_stage: taskToMove.stage,
           to_stage: targetStage,
           direction: isForward ? 'forward' : 'backward',
-          task_title: draggedTask.title
+          task_title: taskToMove.title
         }
       });
 
       // Show toast notification
       toast({
         title: isForward ? 'Task moved forward' : 'Task moved back',
-        description: `"${draggedTask.title.slice(0, 40)}${draggedTask.title.length > 40 ? '...' : ''}" moved from ${fromLabel} to ${toLabel}`,
+        description: `"${taskToMove.title.slice(0, 40)}${taskToMove.title.length > 40 ? '...' : ''}" moved from ${fromLabel} to ${toLabel}`,
         variant: isForward ? 'default' : 'default',
       });
 
       // Optimistically update UI
       setTasks(prev => prev.map(t =>
-        t.id === draggedTask.id
-          ? { ...t, stage: targetStage, updated_at: new Date().toISOString() }
+        t.id === taskToMove.id
+          ? { ...t, ...updates, updated_at: new Date().toISOString() }
           : t
       ));
 
