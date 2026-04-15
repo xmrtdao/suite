@@ -926,8 +926,8 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   const fullAutonomyTurnCountRef = useRef(0);
   const FULL_AUTONOMY_AUTO_ADVANCE_SECONDS = 60;
   const FULL_AUTONOMY_BREAKOUT_PROMPT = language === 'es'
-    ? 'Audita tu progreso para asegurar que se está realizando trabajo real: revisa tu base de conocimientos para confirmar que guardaste lo que creías haber guardado, revisa tu código en GitHub, tu esquema en Supabase y tu frontend en Vercel.'
-    : 'Audit your progress to ensure real work is being done - check your knowledgebase to ensure you stored things you thought you stored, check your codebase through github, your schema through supabase, and your frontend through vercel.';
+    ? 'Audita tu progreso para asegurar que se está realizando trabajo real: revisa tu base de conocimientos para confirmar que guardaste lo que creías haber guardad.'
+    : 'Audit your progress to ensure real work is being done - if you are doing research, check your knowledgebase to ensure you stored things you learned, if you are working with emails ensure they were actually sent, or if you are working with documents, ensure your most recent changes were actually made.';
   // Ref to handleSendMessage — avoids stale closure in setInterval callbacks
   // Updated BEFORE the interval fires via assignment in component body below
   const handleSendMessageRef = useRef<((msg?: string) => void) | undefined>(undefined);
