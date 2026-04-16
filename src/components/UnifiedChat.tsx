@@ -1328,24 +1328,33 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
             console.log(`📚 Found ${context.summaries.length} summaries for ${context.totalMessageCount} total messages`);
           }
 
-          // Load enhanced Supabase backend data
-          if (userCtx?.ip) {
-            // Load user preferences from user_preferences table
+          // Load enhanced Supabase backend data (unrestricted)
+          try {
+            // Load user preferences
             const preferences = await conversationPersistence.getUserPreferences();
-            console.log('⚙️ User preferences:', Object.keys(preferences).length, 'items');
+            console.log('⚙️ User preferences:', Object.keys(preferences ?? {}).length, 'items');
 
-            // Load memory contexts from memory_contexts table (semantic search)
-            const memoryContexts = await memoryContextService.getRelevantContexts(userCtx.ip, 5);
+            // Load memory contexts:
+            // - if IP exists, use personalized semantic search
+            // - otherwise, use a global/fallback loader (implement if missing)
+            const memoryContexts = userCtx?.ip
+              ? await memoryContextService.getRelevantContexts(userCtx.ip, 100)
+              : await memoryContextService.getAllContexts?.(100) ?? [];
             console.log('🧠 Memory contexts:', memoryContexts.length, 'items');
 
-            // Load learning patterns from interaction_patterns table
-            const learningPatterns = await learningPatternsService.getHighConfidencePatterns(0.7);
+            // Load learning patterns with lower threshold to include more patterns
+            const learningPatterns = await learningPatternsService.getHighConfidencePatterns(0.0);
             console.log('📊 Learning patterns:', learningPatterns.length, 'patterns');
 
-            // Load knowledge entities from knowledge_entities table
-            const miningEntities = await knowledgeEntityService.getEntitiesByType('mining_concept');
-            const daoEntities = await knowledgeEntityService.getEntitiesByType('dao_concept');
-            console.log('🏷️ Knowledge entities:', miningEntities.length + daoEntities.length, 'entities');
+            // Load all knowledge entities instead of only two hard-coded types
+            const allEntities = await knowledgeEntityService.getAllEntities?.() ?? [];
+            console.log('🏷️ Knowledge entities:', allEntities.length, 'entities');
+
+            // Optional: if your downstream logic expects separate arrays
+            const miningEntities = allEntities.filter((e: any) => e.type === 'mining_concept');
+            const daoEntities = allEntities.filter((e: any) => e.type === 'dao_concept');
+          } catch (error) {
+            console.log('Conversation persistence error:', error);
           }
         } catch (error) {
           console.log('Conversation persistence error:', error);
