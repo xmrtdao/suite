@@ -28,7 +28,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.58.0';
 const CLOUD_RUN_URL = Deno.env.get('PISTON_URL') || 'https://python-executor-vm-210818947113.us-central1.run.app';
 // Private Piston sandbox — optional, only used if caller forces backend: "piston"
 // Do NOT set to the public emkc.org — it went whitelist-only Feb 15 2026
-const PISTON_SANDBOX_URL = Deno.env.get('PISTON_SANDBOX_URL') || '';
+const PISTON_SANDBOX_URL = Deno.env.get('PISTON_URL') || '';
 
 const supabase = createClient(
   Deno.env.get('SUPABASE_URL')!,
