@@ -1,83 +1,180 @@
-import { SystemStatus } from '../../types/system';
-import { stripAnsi } from '../../utils';
+import { supabase } from '@/integrations/supabase/client';
 
-// Define the URL for your deployed Supabase Edge Function 'python-executor'
-// This should be set as an environment variable in your deployment environment.
-const PYTHON_EXECUTOR_EDGE_FUNCTION_URL = process.env.SUPABASE_EDGE_FUNCTION_URL || 'YOUR_SUPABASE_EDGE_FUNCTION_URL_HERE';
-
-// Type definition for the Python execution result from the Edge Function
-export interface PythonExecResult {
+export interface PythonExecutionResult {
   success: boolean;
   output: string;
   error: string;
   exitCode: number;
-  language: string;
-  version: string;
-  backend: string;
-  execution_time_ms: number;
-  executor_type: 'self-contained' | 'external-piston';
-  note?: string;
+  estimatedTime?: string;
 }
 
-export const executePython = async (
-  code: string,
-  systemStatus: SystemStatus,
-  purpose: string,
-  source: string = 'eliza',
-  agent_id: string | null = null,
-  task_id: string | null = null,
-  timeout_ms: number = 30000,
-  backend?: 'piston' // Optional: 'piston' to force external execution via the Edge Function
-): Promise<PythonExecResult> => {
-  try {
-    const response = await fetch(PYTHON_EXECUTOR_EDGE_FUNCTION_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        // If your Edge Function requires an Authorization header (e.g., a service role key if not public),
-        // you would add it here. However, the provided Edge Function code
-        // does not appear to enforce an external authorization header for its own invocation.
-        // It uses internal Deno.env for its Supabase client.
-        // For public-facing Edge Functions, this might not be needed.
-        // If it were protected, you might need: 'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`
-      },
-      body: JSON.stringify({
-        code,
-        purpose,
-        source,
-        agent_id,
-        task_id,
-        timeout_ms,
-        backend, // Pass 'piston' if requested, otherwise it defaults to self-contained
-      }),
+export interface PythonExecutionOptions {
+  code: string;
+  stdin?: string;
+  args?: string[];
+  silent?: boolean; // If true, don't show code in chat
+}
+
+/**
+ * Service for executing Python code with full network access
+ * Uses eliza-python-runtime to enable Eliza to call all 84 edge functions
+ * Provides full access to Supabase backend capabilities
+ */
+export class PythonExecutorService {
+  private static executionHistory: Array<{
+    code: string;
+    result: PythonExecutionResult;
+    timestamp: Date;
+  }> = [];
+
+  /**
+   * Execute Python code with time estimation
+   */
+  static async executeCode(options: PythonExecutionOptions): Promise<PythonExecutionResult> {
+    const startTime = Date.now();
+    
+    try {
+      console.log('🐍 Eliza Python Runtime - Starting execution with network access:', {
+        codeLength: options.code.length,
+        silent: options.silent,
+        estimatedTime: this.estimateExecutionTime(options.code),
+        runtime: 'eliza-python-runtime',
+        networkEnabled: true
+      });
+
+      const { data, error } = await supabase.functions.invoke('eliza-python-runtime', {
+        body: {
+          code: options.code,
+          stdin: options.stdin || '',
+          args: options.args || [],
+          purpose: 'Eliza code execution',
+          source: 'eliza'
+        }
+      });
+
+      const executionTime = Date.now() - startTime;
+
+      if (error) {
+        const result: PythonExecutionResult = {
+          success: false,
+          output: '',
+          error: error.message,
+          exitCode: 1,
+          estimatedTime: `${executionTime}ms`
+        };
+        
+        this.addToHistory(options.code, result);
+        console.error('❌ Python execution failed:', error);
+        return result;
+      }
+
+      const result: PythonExecutionResult = {
+        success: data.success,
+        output: data.output || '',
+        error: data.error || '',
+        exitCode: data.exitCode || 0,
+        estimatedTime: `${executionTime}ms`
+      };
+
+      this.addToHistory(options.code, result);
+      console.log('✅ Python execution completed:', {
+        success: result.success,
+        executionTime: `${executionTime}ms`,
+        outputLength: result.output.length
+      });
+
+      return result;
+
+    } catch (error: any) {
+      const executionTime = Date.now() - startTime;
+      const result: PythonExecutionResult = {
+        success: false,
+        output: '',
+        error: error.message || 'Unknown error',
+        exitCode: 1,
+        estimatedTime: `${executionTime}ms`
+      };
+
+      this.addToHistory(options.code, result);
+      console.error('❌ Python executor service error:', error);
+      return result;
+    }
+  }
+
+  /**
+   * Estimate execution time based on code complexity
+   * This helps Eliza inform users how long to wait
+   */
+  private static estimateExecutionTime(code: string): string {
+    const lines = code.split('\n').filter(line => line.trim()).length;
+    const hasLoops = /\b(for|while)\b/.test(code);
+    const hasRequests = /\brequests\b/.test(code);
+    const hasDataProcessing = /\b(pandas|numpy)\b/.test(code);
+    const hasFileIO = /\b(open|read|write)\b/.test(code);
+
+    let estimatedSeconds = 1; // Base time
+
+    if (lines > 20) estimatedSeconds += 2;
+    if (lines > 50) estimatedSeconds += 5;
+    if (hasLoops) estimatedSeconds += 3;
+    if (hasRequests) estimatedSeconds += 10; // Network calls are slow
+    if (hasDataProcessing) estimatedSeconds += 5;
+    if (hasFileIO) estimatedSeconds += 2;
+
+    if (estimatedSeconds < 5) return '~5 seconds';
+    if (estimatedSeconds < 15) return '~15 seconds';
+    if (estimatedSeconds < 30) return '~30 seconds';
+    if (estimatedSeconds < 60) return '~1 minute';
+    return '~2 minutes';
+  }
+
+  /**
+   * Add execution to history for context
+   */
+  private static addToHistory(code: string, result: PythonExecutionResult): void {
+    this.executionHistory.push({
+      code,
+      result,
+      timestamp: new Date()
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Edge Function HTTP error! Status: ${response.status}, Message: ${errorText}`);
+    // Keep only last 50 executions
+    if (this.executionHistory.length > 50) {
+      this.executionHistory.shift();
     }
-
-    const result: PythonExecResult = await response.json();
-
-    if (!result.success && result.error) {
-      // Log the error from the Python execution itself
-      console.error(`Python execution failed for purpose "${purpose}":`, stripAnsi(result.error));
-    }
-
-    return result;
-
-  } catch (error: any) {
-    console.error(`Error communicating with Python executor Edge Function for purpose "${purpose}":`, error);
-    return {
-      success: false,
-      output: '',
-      error: `Failed to execute Python code via Edge Function: ${error.message}`,
-      exitCode: 1,
-      language: 'python',
-      version: 'unknown',
-      backend: 'edge-function-communication-error',
-      execution_time_ms: 0,
-      executor_type: 'edge-function-error',
-    };
   }
-};
+
+  /**
+   * Get execution history (for Eliza's context)
+   */
+  static getHistory(limit: number = 10): typeof this.executionHistory {
+    return this.executionHistory.slice(-limit);
+  }
+
+  /**
+   * Clear execution history
+   */
+  static clearHistory(): void {
+    this.executionHistory = [];
+    console.log('🧹 Python execution history cleared');
+  }
+
+  /**
+   * Get available Python packages and edge function access
+   * With eliza-python-runtime, Eliza has access to:
+   * - All standard Python libraries (urllib, json, etc.)
+   * - Full network access to call all 84 edge functions
+   * - Auto-injected SUPABASE_URL and SUPABASE_SERVICE_KEY
+   */
+  static getAvailablePackages(): string[] {
+    return [
+      'Built-in: urllib, json, base64, datetime, math, statistics, re, random',
+      'Network: Full outbound HTTP/HTTPS access',
+      'Edge Functions: All 84 Supabase edge functions accessible',
+      'Environment: SUPABASE_URL and SUPABASE_SERVICE_KEY pre-configured'
+    ];
+  }
+}
+
+// Export singleton-like interface
+export const pythonExecutor = PythonExecutorService;
