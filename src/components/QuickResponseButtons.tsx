@@ -294,7 +294,7 @@ const GO_SURFING_BUTTON: ButtonConfig = {
 };
 
 const GO_SURFING_PROMPT =
-  "Go Surfing 🏄‍♀️ — Eliza, use browse_web with DuckDuckGo as your search engine to follow your curiosity and engage your imagination for a series of 3 chained tool calls based on your own whims. Don't bother telling me what you're going to surf, just explore and return with your summarized synthesis of what you explored and what you learned.";
+  "Go Surfing 🏄‍♀️ — Eliza, use search_web with DuckDuckGo as your search engine to follow your curiosity and engage your imagination for a series of 3 chained tool calls based on your own whims. Don't bother telling me what you're going to surf, just explore and return with your summarized synthesis of what you explored and what you learned.";
 
 const GET_MY_EMAILS_BUTTON: ButtonConfig = {
   label: "Get my emails",
@@ -302,7 +302,7 @@ const GET_MY_EMAILS_BUTTON: ButtonConfig = {
 };
 
 const GET_MY_EMAILS_PROMPT =
-  "Get my emails 📥 — Eliza, fetch my latest 10 emails, then open and read the full content of each of those 10 emails to understand their context before summarizing. After reviewing all 10, intelligently classify each email into one of: actionable, ads/promotions, spam/suspicious, and no-reply or automated failure notices. Prioritize actionable emails for me, and clearly mark ads, spam, and no-reply/failure notices as do-not-reply.";
+  "Get my emails 📥 — Eliza, fetch my latest 5 emails, take note of the ID of each and open and read the full content of each of those emails using the ID to understand their context before summarizing. After reviewing all 10, intelligently classify each email into one of: actionable, ads/promotions, spam/suspicious, and no-reply or automated failure notices. Prioritize actionable emails for me, and clearly mark ads, spam, and no-reply/failure notices as do-not-reply.";
 
 const GET_ER_DONE_BUTTON: ButtonConfig = {
   label: "Create a Workflow",
@@ -318,7 +318,7 @@ const INSPECT_ERROR_LOGS_PROMPT =
 const PROCEED_WITH_PLAN_PROMPT = "Proceed Intelligently ✅";
 
 const DRAFT_MY_EMAILS_PROMPT =
-  "Draft my emails 📧 — Eliza, fetch my latest 10 emails before drafting anything. Intelligently classify each message as actionable, ads/promotions, spam/suspicious, or no-reply/automated failure notice. Do NOT draft replies for ads, spam, no-reply senders, or failure notices; only draft concise, high-quality responses for truly actionable emails.";
+  "Draft my emails 📧 — Eliza, fetch my latest 5 emails before drafting anything. Intelligently classify each message as actionable, ads/promotions, spam/suspicious, or no-reply/automated failure notice. Do NOT draft replies for ads, spam, no-reply senders, or failure notices; only draft concise, high-quality responses for truly actionable emails.";
 
 const SEND_EMAIL_BUTTON: ButtonConfig = {
   label: "Send Email",
@@ -326,7 +326,7 @@ const SEND_EMAIL_BUTTON: ButtonConfig = {
 };
 
 const SEND_EMAIL_PROMPT =
-  "Send Email 📨 — Eliza, if you already prepared a draft email, send it now. If multiple drafts are ready, send the highest-priority actionable draft first and then summarize what was sent.";
+  "Send Email 📨 — Eliza, if you already prepared a draft email, send it now. If multiple drafts are ready, send the highest-priority actionable draft first and then check to ensure it was not bounced back, and then summarize and confirm what was sent.";
 
 const STORE_IN_KNOWLEDGE_BUTTON: ButtonConfig = {
   label: "Store in your Knowledge",
@@ -350,7 +350,7 @@ const COUNCIL_PRINT_MINUTES_BUTTON: ButtonConfig = {
 };
 
 const COUNCIL_PRINT_MINUTES_PROMPT =
-  "Print the Minutes 📝 — Council, generate professionally formatted and summarized meeting minutes from this session (agenda, key discussion points, decisions, votes, owners, deadlines, and open risks), then email those finalized minutes to my user email address and confirm that the email was sent.";
+  "Print the Minutes 📝 — Council, adjourn the meeting and generate professionally formatted and summarized meeting minutes from this session (agenda, key discussion points, decisions, votes, owners, deadlines, and open risks), then email those finalized minutes to my user email address and confirm that the email was sent.";
 
 const MAX_STORED_SNIPPET_LENGTH = 3000;
 
