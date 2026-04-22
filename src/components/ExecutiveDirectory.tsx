@@ -32,7 +32,7 @@ export const ExecutiveDirectory: React.FC<ExecutiveDirectoryProps> = ({
       'deepseek-chat': 'deepseek',
       'gemini-chat': 'gemini',
       'openai-chat': 'openai',
-      'coo-chat': 'lovable'
+      'coo-chat': 'ollama'
     };
     
     const mappedService = serviceMap[serviceName];

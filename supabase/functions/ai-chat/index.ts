@@ -11,6 +11,8 @@ const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY') || '';
 const DEEPSEEK_API_KEY = Deno.env.get('DEEPSEEK_API_KEY') || '';
 const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY') || '';
 const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY') || '';
+const OLLAMA_API_KEY = Deno.env.get('OLLAMA_API_KEY') || '';
+const OLLAMA_HOST = Deno.env.get('OLLAMA_HOST') || 'https://ollama.xmrt.pro';
 
 // Executive Configuration
 const EXECUTIVE_NAME = Deno.env.get('EXECUTIVE_NAME') || 'Eliza';
@@ -85,6 +87,19 @@ interface AIProviderConfig {
 }
 
 const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
+  ollama: {
+    name: 'Ollama',
+    enabled: !!OLLAMA_API_KEY,
+    apiKey: OLLAMA_API_KEY,
+    endpoint: `${OLLAMA_HOST}/api/chat`,
+    models: ['llama3.1', 'mistral', 'codellama'],
+    supportsTools: true,
+    timeoutMs: 45000,
+    priority: 1,
+    fallbackOnly: false,
+    maxRetries: 1,
+    retryDelayMs: 2000
+  },
   deepseek: {
     name: 'DeepSeek',
     enabled: !!DEEPSEEK_API_KEY,
@@ -93,7 +108,7 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     models: ['deepseek-chat', 'deepseek-coder'],
     supportsTools: true,
     timeoutMs: 35000,
-    priority: 1,
+    priority: 2,
     fallbackOnly: false,
     maxRetries: 2,
     retryDelayMs: 1500
@@ -106,7 +121,7 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'],
     supportsTools: true,
     timeoutMs: 25000,
-    priority: 2,
+    priority: 3,
     fallbackOnly: false,
     maxRetries: 2,
     retryDelayMs: 1000
@@ -117,14 +132,14 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     apiKey: GEMINI_API_KEY,
     endpoint: `https://generativelanguage.googleapis.com/v1beta/models`,
     models: [
-      'gemini-2.5-flash',
-      'gemini-2.5-pro',
+      'gemini-2.0-flash',
+      'gemini-2.0-pro',
       'gemini-1.5-flash',
       'gemini-1.5-pro'
     ],
     supportsTools: true,
     timeoutMs: 30000,
-    priority: 3,
+    priority: 4,
     fallbackOnly: false,
     maxRetries: 2,
     retryDelayMs: 2000
@@ -300,7 +315,7 @@ async function generateAISummary(messages: any[], toolResults: any[]): Promise<s
     const providers = [
       { name: 'openai', apiKey: OPENAI_API_KEY, endpoint: 'https://api.openai.com/v1/chat/completions' },
       { name: 'deepseek', apiKey: DEEPSEEK_API_KEY, endpoint: 'https://api.deepseek.com/v1/chat/completions' },
-      { name: 'gemini', apiKey: GEMINI_API_KEY, endpoint: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent` }
+      { name: 'gemini', apiKey: GEMINI_API_KEY, endpoint: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent` }
     ];
     
     for (const provider of providers) {

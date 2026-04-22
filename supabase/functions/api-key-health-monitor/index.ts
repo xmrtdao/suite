@@ -60,10 +60,10 @@ serve(async (req) => {
     healthResults.push(vercelHealth);
     await supabase.from('api_key_health').upsert(vercelHealth, { onConflict: 'service_name' });
 
-    // Check Lovable AI
-    const lovableHealth = await checkLovableAIHealth();
-    healthResults.push(lovableHealth);
-    await supabase.from('api_key_health').upsert(lovableHealth, { onConflict: 'service_name' });
+    // Check Ollama
+    const ollamaHealth = await checkOllamaHealth();
+    healthResults.push(ollamaHealth);
+    await supabase.from('api_key_health').upsert(ollamaHealth, { onConflict: 'service_name' });
 
     // Check Gemini
     const geminiHealth = await checkGeminiHealth();
@@ -314,11 +314,13 @@ async function checkDeepSeekHealth() {
   }
 }
 
-async function checkLovableAIHealth() {
-  const apiKey = Deno.env.get('LOVABLE_API_KEY');
+async function checkOllamaHealth() {
+  const apiKey = Deno.env.get('OLLAMA_API_KEY');
+  const host = Deno.env.get('OLLAMA_HOST') || 'https://ollama.xmrt.pro';
+  
   if (!apiKey) {
     return {
-      service_name: 'lovable_ai',
+      service_name: 'ollama',
       key_type: 'api_key',
       is_healthy: false,
       error_message: 'API key not configured',
@@ -329,37 +331,30 @@ async function checkLovableAIHealth() {
   }
 
   try {
-    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
+    const response = await fetch(`${host}/api/tags`, {
       headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
-        messages: [{ role: 'user', content: 'test' }],
-        max_tokens: 5
-      })
+        'Authorization': `Bearer ${apiKey}`
+      }
     });
 
     return {
-      service_name: 'lovable_ai',
+      service_name: 'ollama',
       key_type: 'api_key',
-      is_healthy: response.ok || response.status === 402,
+      is_healthy: response.ok,
       error_message: response.ok ? null : `HTTP ${response.status}`,
-      expiry_warning: response.status === 402,
+      expiry_warning: false,
       days_until_expiry: null,
-      metadata: { note: response.status === 402 ? 'Credits depleted' : '' }
+      metadata: { host }
     };
   } catch (error) {
     return {
-      service_name: 'lovable_ai',
+      service_name: 'ollama',
       key_type: 'api_key',
       is_healthy: false,
       error_message: error.message,
       expiry_warning: false,
       days_until_expiry: null,
-      metadata: {}
+      metadata: { host }
     };
   }
 }
@@ -450,7 +445,7 @@ async function checkGeminiHealth() {
   }
 
   try {
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1/models?key=${apiKey}`);
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash?key=${apiKey}`);
 
     return {
       service_name: 'gemini',
@@ -459,7 +454,7 @@ async function checkGeminiHealth() {
       error_message: response.ok ? null : `HTTP ${response.status}`,
       expiry_warning: false,
       days_until_expiry: null,
-      metadata: {}
+      metadata: { model: 'gemini-2.0-flash' }
     };
   } catch (error) {
     return {

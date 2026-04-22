@@ -8,9 +8,9 @@
  */
 export const ESSENTIAL_API_SERVICES = [
   'github',       // Core for code operations
-  'deepseek',     // Primary AI provider
+  'ollama',       // Primary AI provider
+  'deepseek',     // Secondary AI provider
   'gemini',       // Vision fallback
-  'lovable_ai',   // Primary chat
   'openai'        // Fallback AI
 ];
 

@@ -28,10 +28,10 @@ const SERVICE_INFO: Record<string, {
   icon: React.ElementType;
   docsUrl?: string;
 }> = {
-  lovable_ai: {
-    displayName: 'Lovable AI Gateway',
-    description: 'Primary AI gateway',
-    powers: 'All executives, tool calling, chat completions',
+  ollama: {
+    displayName: 'Ollama',
+    description: 'Primary AI provider',
+    powers: 'All executives, tool calling, local inference',
     icon: Zap,
   },
   vertex_ai: {
@@ -141,7 +141,7 @@ export function CredentialsManager() {
 
   // Group credentials by category
   const aiProviders = health.filter(h =>
-    ['xai', 'lovable_ai', 'deepseek', 'vercel_ai', 'gemini', 'openai'].includes(h.service_name)
+    ['xai', 'ollama', 'deepseek', 'vercel_ai', 'gemini', 'openai'].includes(h.service_name)
   );
   const integrations = health.filter(h =>
     ['github', 'elevenlabs', 'tave'].includes(h.service_name)

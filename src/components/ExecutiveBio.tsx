@@ -13,7 +13,7 @@ export const EXECUTIVE_PROFILES = {
     colorClass: 'executive-cto',
     photo: '/executives/anya.png',
     nationality: 'Indian-American',
-    model: 'Google Gemini 2.5 Flash',
+    model: 'Google Gemini 2.0 Flash',
     specialty: 'AI Strategy & Technical Architecture',
     strengths: [
       'AI/ML roadmap and system design',
@@ -73,7 +73,7 @@ export const EXECUTIVE_PROFILES = {
     colorClass: 'executive-cmo',
     photo: '/executives/bella.png',
     nationality: 'Cuban-American',
-    model: 'Google Gemini 2.5 Pro',
+    model: 'Google Gemini 2.0 Pro',
     specialty: 'Brand Strategy & Viral Growth',
     strengths: [
       'Brand storytelling and go-to-market',
@@ -133,7 +133,7 @@ export const EXECUTIVE_PROFILES = {
     colorClass: 'executive-cpo',
     photo: '/executives/akari.png',
     nationality: 'Japanese',
-    model: 'STAE-Integrated AI',
+    model: 'Ollama (Llama 3.1)',
     specialty: 'Culture, Talent & Organizational Development',
     strengths: [
       'Employee well-being and talent growth',
