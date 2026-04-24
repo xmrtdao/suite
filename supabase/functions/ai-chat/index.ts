@@ -1909,24 +1909,36 @@ async function executeRealToolCall(
 
 // ========== TOOL PARSING FUNCTIONS ==========
 function parseDeepSeekToolCalls(content: string): Array<any> | null {
-  const toolCallsMatch = content.match(/ elk(.*?)elk/s);
+  const normalizedContent = content.replace(/｜/g, '|');
+  const toolCallsMatch = normalizedContent.match(/<\|DSML\|tool_calls>\s*([\s\S]*?)\s*<\/\|DSML\|tool_calls>/i);
   if (!toolCallsMatch) return null;
   
   const toolCallsText = toolCallsMatch[1];
-  const toolCallPattern = / tool(.*?)tool(.*?)tool/gs;
+  const toolCallPattern = /<\|DSML\|invoke\s+name="([^"]+)"\s*>([\s\S]*?)<\/\|DSML\|invoke>/gi;
   const toolCalls: Array<any> = [];
   
   let match;
   while ((match = toolCallPattern.exec(toolCallsText)) !== null) {
     const functionName = match[1].trim();
-    let args = match[2].trim();
-    
-    let parsedArgs = {};
-    if (args && args !== '{}') {
+    const invokeBody = match[2].trim();
+    const parsedArgs: Record<string, any> = {};
+
+    const parameterPattern = /<\|DSML\|parameter\s+name="([^"]+)"(?:\s+string="(true|false)")?\s*>([\s\S]*?)<\/\|DSML\|parameter>/gi;
+    let paramMatch;
+    while ((paramMatch = parameterPattern.exec(invokeBody)) !== null) {
+      const paramName = paramMatch[1].trim();
+      const isStringParam = paramMatch[2] === 'true';
+      const rawValue = paramMatch[3].trim();
+
+      if (isStringParam) {
+        parsedArgs[paramName] = rawValue;
+        continue;
+      }
+
       try {
-        parsedArgs = JSON.parse(args);
-      } catch (e) {
-        console.warn(`Failed to parse DeepSeek tool args for ${functionName}:`, args);
+        parsedArgs[paramName] = JSON.parse(rawValue);
+      } catch {
+        parsedArgs[paramName] = rawValue;
       }
     }
     
@@ -2999,6 +3011,12 @@ async function executeToolsWithIteration(
   
   if (finalContent.includes('```tool_code')) {
     finalContent = finalContent.replace(/```tool_code[\s\S]*?```/g, '').trim();
+  }
+
+  if (finalContent.includes('DSML')) {
+    finalContent = finalContent
+      .replace(/<[\|｜]DSML[\|｜]tool_calls>[\s\S]*?<\/[\|｜]DSML[\|｜]tool_calls>/gi, '')
+      .trim();
   }
 
   // Strip any tool call patterns that leaked into natural language output.
