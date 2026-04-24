@@ -794,6 +794,10 @@ export const ELIZA_TOOLS = [
           payload: {
             type: 'object',
             description: 'JSON payload to send to the function. Structure depends on the target function.'
+          },
+          timeout_ms: {
+            type: 'number',
+            description: 'Optional timeout for this invocation in milliseconds (default 5000). Increase for longer-running functions.'
           }
         },
         required: ['function_name', 'payload']
@@ -870,7 +874,11 @@ export const ELIZA_TOOLS = [
         properties: {
           function_name: { type: 'string', description: 'Edge function name (e.g., github-integration, mining-proxy)' },
           body: { type: 'object', description: 'Request body to send to the function' },
-          purpose: { type: 'string', description: 'What this call is for' }
+          purpose: { type: 'string', description: 'What this call is for' },
+          timeout_ms: {
+            type: 'number',
+            description: 'Optional timeout for this invocation in milliseconds (default 5000). Increase for longer-running functions.'
+          }
         },
         required: ['function_name', 'body']
       }

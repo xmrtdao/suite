@@ -441,9 +441,10 @@ export async function executeToolCall(
 
       case 'invoke_edge_function':
       case 'call_edge_function':
-        let { function_name, payload, body } = parsedArgs;
+        let { function_name, payload, body, timeout_ms } = parsedArgs;
         let targetFunction = function_name || parsedArgs.function_name;
         let targetPayload = payload || body || {};
+        const edgeTimeoutMs = Number(timeout_ms) > 0 ? Number(timeout_ms) : 5000;
 
         // Auto-correct common VSCO function name hallucinations
         // AI sometimes hallucinates "vsco-manage-events" instead of using vsco_manage_events tool
@@ -459,8 +460,12 @@ export async function executeToolCall(
           }
         }
 
-        console.log(`📡 [${executiveName}] Invoking edge function: ${targetFunction}`);
-        const funcResult = await supabase.functions.invoke(targetFunction, { body: targetPayload });
+        console.log(`📡 [${executiveName}] Invoking edge function: ${targetFunction} (timeout ${edgeTimeoutMs}ms)`);
+        const invocation = supabase.functions.invoke(targetFunction, { body: targetPayload });
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error(`Timed out after ${edgeTimeoutMs}ms`)), edgeTimeoutMs);
+        });
+        const funcResult = await Promise.race([invocation, timeoutPromise]);
 
         if (funcResult.error) {
           console.error(`❌ [${executiveName}] Edge function error:`, funcResult.error);

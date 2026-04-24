@@ -1122,9 +1122,14 @@ async function getSystemStatus(): Promise<any> {
   }
 }
 
-async function invokeEdgeFunction(name: string, payload: any): Promise<any> {
+async function invokeEdgeFunction(name: string, payload: any, timeoutMs = 5000): Promise<any> {
   try {
-    const { data, error } = await supabase.functions.invoke(name, { body: payload });
+    const invocation = supabase.functions.invoke(name, { body: payload });
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error(`Timed out after ${timeoutMs}ms`)), timeoutMs);
+    });
+
+    const { data, error } = await Promise.race([invocation, timeoutPromise]);
     if (error) throw new Error(error.message);
     return data;
   } catch (error: any) {
@@ -1498,7 +1503,7 @@ async function executeRealToolCall(
       });
       
     } else if (name === 'invoke_edge_function') {
-      let { function_name, payload } = parsedArgs;
+      let { function_name, payload, timeout_ms } = parsedArgs;
       if (!function_name) throw new Error('Missing function_name');
 
       // Fix for python-executor request_data parsing
@@ -1520,7 +1525,7 @@ async function executeRealToolCall(
         }
       }
 
-      result = await invokeEdgeFunction(function_name, payload ?? {});
+      result = await invokeEdgeFunction(function_name, payload ?? {}, timeout_ms ?? 5000);
       
     } else if (name === 'search_edge_functions') {
       const { query, category, mode } = parsedArgs;
