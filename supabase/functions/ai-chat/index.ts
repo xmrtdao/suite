@@ -199,6 +199,35 @@ function sanitizeMessagesForProvider(messages: any[]): any[] {
   }));
 }
 
+function stripUncommittedToolIntents(messages: any[]): any[] {
+  const committedToolCallIds = new Set(
+    (messages || [])
+      .filter((m: any) => m?.role === 'tool' && typeof m?.tool_call_id === 'string')
+      .map((m: any) => m.tool_call_id)
+  );
+
+  return (messages || []).flatMap((message: any) => {
+    if (message?.role !== 'assistant' || !Array.isArray(message?.tool_calls)) {
+      return [message];
+    }
+
+    const committedToolCalls = message.tool_calls.filter((toolCall: any) =>
+      committedToolCallIds.has(toolCall?.id)
+    );
+
+    if (committedToolCalls.length > 0) {
+      return [{ ...message, tool_calls: committedToolCalls }];
+    }
+
+    if (message?.content) {
+      const { tool_calls, ...assistantTextOnly } = message;
+      return [assistantTextOnly];
+    }
+
+    return [];
+  });
+}
+
 function normalizeUserId(userId?: string): string | undefined {
   if (!userId) return undefined;
   return String(userId).trim();
@@ -1909,24 +1938,36 @@ async function executeRealToolCall(
 
 // ========== TOOL PARSING FUNCTIONS ==========
 function parseDeepSeekToolCalls(content: string): Array<any> | null {
-  const toolCallsMatch = content.match(/ elk(.*?)elk/s);
+  const normalizedContent = content.replace(/｜/g, '|');
+  const toolCallsMatch = normalizedContent.match(/<\|DSML\|tool_calls>\s*([\s\S]*?)\s*<\/\|DSML\|tool_calls>/i);
   if (!toolCallsMatch) return null;
   
   const toolCallsText = toolCallsMatch[1];
-  const toolCallPattern = / tool(.*?)tool(.*?)tool/gs;
+  const toolCallPattern = /<\|DSML\|invoke\s+name="([^"]+)"\s*>([\s\S]*?)<\/\|DSML\|invoke>/gi;
   const toolCalls: Array<any> = [];
   
   let match;
   while ((match = toolCallPattern.exec(toolCallsText)) !== null) {
     const functionName = match[1].trim();
-    let args = match[2].trim();
-    
-    let parsedArgs = {};
-    if (args && args !== '{}') {
+    const invokeBody = match[2].trim();
+    const parsedArgs: Record<string, any> = {};
+
+    const parameterPattern = /<\|DSML\|parameter\s+name="([^"]+)"(?:\s+string="(true|false)")?\s*>([\s\S]*?)<\/\|DSML\|parameter>/gi;
+    let paramMatch;
+    while ((paramMatch = parameterPattern.exec(invokeBody)) !== null) {
+      const paramName = paramMatch[1].trim();
+      const isStringParam = paramMatch[2] === 'true';
+      const rawValue = paramMatch[3].trim();
+
+      if (isStringParam) {
+        parsedArgs[paramName] = rawValue;
+        continue;
+      }
+
       try {
-        parsedArgs = JSON.parse(args);
-      } catch (e) {
-        console.warn(`Failed to parse DeepSeek tool args for ${functionName}:`, args);
+        parsedArgs[paramName] = JSON.parse(rawValue);
+      } catch {
+        parsedArgs[paramName] = rawValue;
       }
     }
     
@@ -1943,8 +1984,13 @@ function parseDeepSeekToolCalls(content: string): Array<any> | null {
   return toolCalls.length > 0 ? toolCalls : null;
 }
 
-function parseToolCodeBlocks(content: string): Array<any> | null {
+function parseToolCodeBlocks(content: string, availableTools: any[] = []): Array<any> | null {
   const toolCalls: Array<any> = [];
+  const allowedToolNames = new Set(
+    availableTools
+      .map((tool: any) => tool?.function?.name)
+      .filter((name: string | undefined): name is string => Boolean(name))
+  );
   
   const toolCodeRegex = /```tool_code\s*\n?([\s\S]*?)```/g;
   let match;
@@ -1969,9 +2015,13 @@ function parseToolCodeBlocks(content: string): Array<any> | null {
       continue;
     }
     
-    const directMatch = code.match(/(\w+)\s*\(\s*(\{[\s\S]*?\})?\s*\)/);
+    const directMatch = code.match(/^\s*([a-zA-Z_]\w*)\s*\(\s*(\{[\s\S]*?\})?\s*\)\s*;?\s*$/);
     if (directMatch) {
       const funcName = directMatch[1];
+      if (allowedToolNames.size > 0 && !allowedToolNames.has(funcName)) {
+        console.warn(`Ignoring unrecognized tool_code function call: ${funcName}`);
+        continue;
+      }
       let argsStr = directMatch[2] || '{}';
       try {
         argsStr = argsStr.replace(/(\w+)\s*:/g, '"$1":').replace(/'/g, '"').replace(/""+/g, '"');
@@ -1987,43 +2037,6 @@ function parseToolCodeBlocks(content: string): Array<any> | null {
     }
   }
   
-  return toolCalls.length > 0 ? toolCalls : null;
-}
-
-function parseConversationalToolIntent(content: string): Array<any> | null {
-  const toolCalls: Array<any> = [];
-  const patterns = [
-    /(?:call(?:ing)?|use|invoke|execute|run|check(?:ing)?)\s+(?:the\s+)?(?:function\s+|tool\s+)?[`"']?(\w+)[`"']?/gi,
-    /let me (?:call|check|get|invoke)\s+[`"']?(\w+)[`"']?/gi,
-    /I(?:'ll| will) (?:call|invoke|use)\s+[`"']?(\w+)[`"']?/gi
-  ];
-  
-  const knownTools = [
-    'google_cloud_auth', 'google_drive', 'analyze_attachment', 'browse_web',
-    'get_mining_stats', 'get_system_status', 'get_ecosystem_metrics',
-    'vertex_generate_image', 'vertex_generate_video', 'vertex_check_video_status',
-    'invoke_edge_function', 'search_edge_functions', 'list_available_functions',
-    'get_edge_function_logs', 'list_agents', 'assign_task', 'list_tasks',
-    'search_knowledge', 'store_knowledge', 'recall_entity',
-    'createGitHubIssue', 'listGitHubIssues', 'createGitHubPullRequest',
-    'commentOnGitHubIssue', 'updateGitHubIssue', 'closeGitHubIssue', 'listGitHubPullRequests',
-    'execute_workflow_template', 'propose_edge_function', 'list_proposed_functions',
-    'deploy_edge_function', 'store_code_snippet'
-  ];
-  
-  for (const pattern of patterns) {
-    let match;
-    while ((match = pattern.exec(content)) !== null) {
-      const funcName = match[1];
-      if (knownTools.includes(funcName) && !toolCalls.find(t => t.function.name === funcName)) {
-        toolCalls.push({
-          id: `conv_${Date.now()}_${Math.random().toString(36).substring(7)}`,
-          type: 'function',
-          function: { name: funcName, arguments: '{}' }
-        });
-      }
-    }
-  }
   return toolCalls.length > 0 ? toolCalls : null;
 }
 
@@ -2939,6 +2952,34 @@ async function handleAmbiguousResponse(
   };
 }
 
+function normalizeToolCallArgs(args: any): string {
+  const sortDeep = (value: any): any => {
+    if (Array.isArray(value)) return value.map(sortDeep);
+    if (value && typeof value === 'object') {
+      return Object.keys(value)
+        .sort()
+        .reduce((acc: Record<string, any>, key) => {
+          acc[key] = sortDeep(value[key]);
+          return acc;
+        }, {});
+    }
+    return value;
+  };
+
+  try {
+    const parsed = typeof args === 'string' ? JSON.parse(args || '{}') : (args || {});
+    return JSON.stringify(sortDeep(parsed));
+  } catch {
+    return String(args || '{}');
+  }
+}
+
+function buildToolCallSignature(toolCall: any): string {
+  const toolName = toolCall?.function?.name || 'unknown_tool';
+  const normalizedArgs = normalizeToolCallArgs(toolCall?.function?.arguments);
+  return `${toolName}:${normalizedArgs}`;
+}
+
 // ========== EXECUTE TOOLS WITH ITERATION ==========
 async function executeToolsWithIteration(
   initialResponse: any,
@@ -2954,21 +2995,30 @@ async function executeToolsWithIteration(
   let response = initialResponse;
   let totalToolsExecuted = 0;
   let iteration = 0;
+  let stoppedForRepeatedToolLoop = false;
   let conversationMessages = [...aiMessages];
+  const executedToolSignatures = new Map<string, number>();
   
   while (iteration < maxIterations) {
     let toolCalls = response.tool_calls || [];
     
     if ((!toolCalls || toolCalls.length === 0) && response.content) {
-      const textToolCalls = parseToolCodeBlocks(response.content) || 
-                           parseDeepSeekToolCalls(response.content) ||
-                           parseConversationalToolIntent(response.content);
+      const textToolCalls = parseToolCodeBlocks(response.content, tools) || 
+                           parseDeepSeekToolCalls(response.content);
       if (textToolCalls && textToolCalls.length > 0) {
         toolCalls = textToolCalls;
       }
     }
     
     if (!toolCalls || toolCalls.length === 0) break;
+
+    const signatures = toolCalls.map(buildToolCallSignature);
+    const allRepeated = signatures.every(signature => (executedToolSignatures.get(signature) || 0) > 0);
+    if (allRepeated) {
+      console.warn(`[${executiveName}] Stopping repeated tool loop at iteration ${iteration + 1}.`);
+      stoppedForRepeatedToolLoop = true;
+      break;
+    }
     
     console.log(`[${executiveName}] Iteration ${iteration + 1}: Executing ${toolCalls.length} tool(s)`);
     
@@ -2988,6 +3038,8 @@ async function executeToolsWithIteration(
         name: toolCall.function.name,
         content: JSON.stringify(result)
       });
+      const signature = buildToolCallSignature(toolCall);
+      executedToolSignatures.set(signature, (executedToolSignatures.get(signature) || 0) + 1);
       totalToolsExecuted++;
     }
     
@@ -3028,6 +3080,22 @@ async function executeToolsWithIteration(
   
   if (finalContent.includes('```tool_code')) {
     finalContent = finalContent.replace(/```tool_code[\s\S]*?```/g, '').trim();
+  }
+
+  if (finalContent.includes('DSML')) {
+    finalContent = finalContent
+      .replace(/<[\|｜]DSML[\|｜]tool_calls>[\s\S]*?<\/[\|｜]DSML[\|｜]tool_calls>/gi, '')
+      .trim();
+  }
+
+  // Strip any tool call patterns that leaked into natural language output.
+  finalContent = finalContent.replace(
+    /(invoke_edge_function|execute_python|call_edge_function)\s*\(\s*\{[\s\S]*?\}\s*\)\s*/g,
+    ''
+  ).trim();
+
+  if (!finalContent && stoppedForRepeatedToolLoop) {
+    finalContent = "I stopped a repeated tool-call loop and skipped rerunning the same function call. Tell me what outcome you want, and I'll respond directly.";
   }
   
   if (totalToolsExecuted > 0 && !finalContent) {
@@ -3745,7 +3813,8 @@ class EnhancedProviderCascade {
   ): Promise<CascadeResult> {
     this.attempts = [];
     
-    const sanitizedMessages = sanitizeMessagesForProvider(messages);
+    const replaySafeMessages = stripUncommittedToolIntents(messages);
+    const sanitizedMessages = sanitizeMessagesForProvider(replaySafeMessages);
     
     if (preferredProvider && preferredProvider !== 'auto') {
       const config = AI_PROVIDERS_CONFIG[preferredProvider];
