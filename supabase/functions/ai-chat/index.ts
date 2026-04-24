@@ -1943,8 +1943,13 @@ function parseDeepSeekToolCalls(content: string): Array<any> | null {
   return toolCalls.length > 0 ? toolCalls : null;
 }
 
-function parseToolCodeBlocks(content: string): Array<any> | null {
+function parseToolCodeBlocks(content: string, availableTools: any[] = []): Array<any> | null {
   const toolCalls: Array<any> = [];
+  const allowedToolNames = new Set(
+    availableTools
+      .map((tool: any) => tool?.function?.name)
+      .filter((name: string | undefined): name is string => Boolean(name))
+  );
   
   const toolCodeRegex = /```tool_code\s*\n?([\s\S]*?)```/g;
   let match;
@@ -1969,9 +1974,13 @@ function parseToolCodeBlocks(content: string): Array<any> | null {
       continue;
     }
     
-    const directMatch = code.match(/(\w+)\s*\(\s*(\{[\s\S]*?\})?\s*\)/);
+    const directMatch = code.match(/^\s*([a-zA-Z_]\w*)\s*\(\s*(\{[\s\S]*?\})?\s*\)\s*;?\s*$/);
     if (directMatch) {
       const funcName = directMatch[1];
+      if (allowedToolNames.size > 0 && !allowedToolNames.has(funcName)) {
+        console.warn(`Ignoring unrecognized tool_code function call: ${funcName}`);
+        continue;
+      }
       let argsStr = directMatch[2] || '{}';
       try {
         argsStr = argsStr.replace(/(\w+)\s*:/g, '"$1":').replace(/'/g, '"').replace(/""+/g, '"');
@@ -1987,43 +1996,6 @@ function parseToolCodeBlocks(content: string): Array<any> | null {
     }
   }
   
-  return toolCalls.length > 0 ? toolCalls : null;
-}
-
-function parseConversationalToolIntent(content: string): Array<any> | null {
-  const toolCalls: Array<any> = [];
-  const patterns = [
-    /(?:call(?:ing)?|use|invoke|execute|run|check(?:ing)?)\s+(?:the\s+)?(?:function\s+|tool\s+)?[`"']?(\w+)[`"']?/gi,
-    /let me (?:call|check|get|invoke)\s+[`"']?(\w+)[`"']?/gi,
-    /I(?:'ll| will) (?:call|invoke|use)\s+[`"']?(\w+)[`"']?/gi
-  ];
-  
-  const knownTools = [
-    'google_cloud_auth', 'google_drive', 'analyze_attachment', 'browse_web',
-    'get_mining_stats', 'get_system_status', 'get_ecosystem_metrics',
-    'vertex_generate_image', 'vertex_generate_video', 'vertex_check_video_status',
-    'invoke_edge_function', 'search_edge_functions', 'list_available_functions',
-    'get_edge_function_logs', 'list_agents', 'assign_task', 'list_tasks',
-    'search_knowledge', 'store_knowledge', 'recall_entity',
-    'createGitHubIssue', 'listGitHubIssues', 'createGitHubPullRequest',
-    'commentOnGitHubIssue', 'updateGitHubIssue', 'closeGitHubIssue', 'listGitHubPullRequests',
-    'execute_workflow_template', 'propose_edge_function', 'list_proposed_functions',
-    'deploy_edge_function', 'store_code_snippet'
-  ];
-  
-  for (const pattern of patterns) {
-    let match;
-    while ((match = pattern.exec(content)) !== null) {
-      const funcName = match[1];
-      if (knownTools.includes(funcName) && !toolCalls.find(t => t.function.name === funcName)) {
-        toolCalls.push({
-          id: `conv_${Date.now()}_${Math.random().toString(36).substring(7)}`,
-          type: 'function',
-          function: { name: funcName, arguments: '{}' }
-        });
-      }
-    }
-  }
   return toolCalls.length > 0 ? toolCalls : null;
 }
 
@@ -2960,9 +2932,8 @@ async function executeToolsWithIteration(
     let toolCalls = response.tool_calls || [];
     
     if ((!toolCalls || toolCalls.length === 0) && response.content) {
-      const textToolCalls = parseToolCodeBlocks(response.content) || 
-                           parseDeepSeekToolCalls(response.content) ||
-                           parseConversationalToolIntent(response.content);
+      const textToolCalls = parseToolCodeBlocks(response.content, tools) || 
+                           parseDeepSeekToolCalls(response.content);
       if (textToolCalls && textToolCalls.length > 0) {
         toolCalls = textToolCalls;
       }
