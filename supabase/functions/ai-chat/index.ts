@@ -3029,6 +3029,12 @@ async function executeToolsWithIteration(
   if (finalContent.includes('```tool_code')) {
     finalContent = finalContent.replace(/```tool_code[\s\S]*?```/g, '').trim();
   }
+
+  // Strip any tool call patterns that leaked into natural language output.
+  finalContent = finalContent.replace(
+    /(invoke_edge_function|execute_python|call_edge_function)\s*\(\s*\{[\s\S]*?\}\s*\)\s*/g,
+    ''
+  ).trim();
   
   if (totalToolsExecuted > 0 && !finalContent) {
     const lastUserMsg = extractLastUserMessage(conversationMessages);
