@@ -199,6 +199,35 @@ function sanitizeMessagesForProvider(messages: any[]): any[] {
   }));
 }
 
+function stripUncommittedToolIntents(messages: any[]): any[] {
+  const committedToolCallIds = new Set(
+    (messages || [])
+      .filter((m: any) => m?.role === 'tool' && typeof m?.tool_call_id === 'string')
+      .map((m: any) => m.tool_call_id)
+  );
+
+  return (messages || []).flatMap((message: any) => {
+    if (message?.role !== 'assistant' || !Array.isArray(message?.tool_calls)) {
+      return [message];
+    }
+
+    const committedToolCalls = message.tool_calls.filter((toolCall: any) =>
+      committedToolCallIds.has(toolCall?.id)
+    );
+
+    if (committedToolCalls.length > 0) {
+      return [{ ...message, tool_calls: committedToolCalls }];
+    }
+
+    if (message?.content) {
+      const { tool_calls, ...assistantTextOnly } = message;
+      return [assistantTextOnly];
+    }
+
+    return [];
+  });
+}
+
 function normalizeUserId(userId?: string): string | undefined {
   if (!userId) return undefined;
   return String(userId).trim();
@@ -2923,6 +2952,34 @@ async function handleAmbiguousResponse(
   };
 }
 
+function normalizeToolCallArgs(args: any): string {
+  const sortDeep = (value: any): any => {
+    if (Array.isArray(value)) return value.map(sortDeep);
+    if (value && typeof value === 'object') {
+      return Object.keys(value)
+        .sort()
+        .reduce((acc: Record<string, any>, key) => {
+          acc[key] = sortDeep(value[key]);
+          return acc;
+        }, {});
+    }
+    return value;
+  };
+
+  try {
+    const parsed = typeof args === 'string' ? JSON.parse(args || '{}') : (args || {});
+    return JSON.stringify(sortDeep(parsed));
+  } catch {
+    return String(args || '{}');
+  }
+}
+
+function buildToolCallSignature(toolCall: any): string {
+  const toolName = toolCall?.function?.name || 'unknown_tool';
+  const normalizedArgs = normalizeToolCallArgs(toolCall?.function?.arguments);
+  return `${toolName}:${normalizedArgs}`;
+}
+
 // ========== EXECUTE TOOLS WITH ITERATION ==========
 async function executeToolsWithIteration(
   initialResponse: any,
@@ -2938,7 +2995,9 @@ async function executeToolsWithIteration(
   let response = initialResponse;
   let totalToolsExecuted = 0;
   let iteration = 0;
+  let stoppedForRepeatedToolLoop = false;
   let conversationMessages = [...aiMessages];
+  const executedToolSignatures = new Map<string, number>();
   
   while (iteration < maxIterations) {
     let toolCalls = response.tool_calls || [];
@@ -2952,6 +3011,14 @@ async function executeToolsWithIteration(
     }
     
     if (!toolCalls || toolCalls.length === 0) break;
+
+    const signatures = toolCalls.map(buildToolCallSignature);
+    const allRepeated = signatures.every(signature => (executedToolSignatures.get(signature) || 0) > 0);
+    if (allRepeated) {
+      console.warn(`[${executiveName}] Stopping repeated tool loop at iteration ${iteration + 1}.`);
+      stoppedForRepeatedToolLoop = true;
+      break;
+    }
     
     console.log(`[${executiveName}] Iteration ${iteration + 1}: Executing ${toolCalls.length} tool(s)`);
     
@@ -2971,6 +3038,8 @@ async function executeToolsWithIteration(
         name: toolCall.function.name,
         content: JSON.stringify(result)
       });
+      const signature = buildToolCallSignature(toolCall);
+      executedToolSignatures.set(signature, (executedToolSignatures.get(signature) || 0) + 1);
       totalToolsExecuted++;
     }
     
@@ -3024,6 +3093,10 @@ async function executeToolsWithIteration(
     /(invoke_edge_function|execute_python|call_edge_function)\s*\(\s*\{[\s\S]*?\}\s*\)\s*/g,
     ''
   ).trim();
+
+  if (!finalContent && stoppedForRepeatedToolLoop) {
+    finalContent = "I stopped a repeated tool-call loop and skipped rerunning the same function call. Tell me what outcome you want, and I'll respond directly.";
+  }
   
   if (totalToolsExecuted > 0 && !finalContent) {
     const lastUserMsg = extractLastUserMessage(conversationMessages);
@@ -3740,7 +3813,8 @@ class EnhancedProviderCascade {
   ): Promise<CascadeResult> {
     this.attempts = [];
     
-    const sanitizedMessages = sanitizeMessagesForProvider(messages);
+    const replaySafeMessages = stripUncommittedToolIntents(messages);
+    const sanitizedMessages = sanitizeMessagesForProvider(replaySafeMessages);
     
     if (preferredProvider && preferredProvider !== 'auto') {
       const config = AI_PROVIDERS_CONFIG[preferredProvider];
