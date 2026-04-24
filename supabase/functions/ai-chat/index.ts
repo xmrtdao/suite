@@ -236,6 +236,7 @@ function normalizeUserId(userId?: string): string | undefined {
 // ========== TOOL CALLING MANDATE ==========
 const TOOL_CALLING_MANDATE = `
 RULE 0 (MOST IMPORTANT): If the user asks a direct question you can answer from memory or general knowledge, DO NOT call tools. Answer directly and conversationally.
+RULE 0.5: If the user asks you to stop, calm down, "snap out of it", or expresses frustration about repeated tool calls, STOP calling tools immediately and respond conversationally only.
 
 CRITICAL TOOL CALLING RULES:
 1. When the user asks for current data/status/metrics, you MUST call tools using the native function calling mechanism
@@ -2042,6 +2043,31 @@ function parseToolCodeBlocks(content: string, availableTools: any[] = []): Array
 
 function needsDataRetrieval(messages: any[]): boolean {
   const lastUser = messages.filter(m => m.role === 'user').pop()?.content?.toLowerCase() || '';
+  const lastAssistant: any = messages.filter(m => m.role === 'assistant').pop() || {};
+
+  const stopOrDeescalationPatterns = [
+    /\b(stop|quit|cancel|enough|pause|chill|calm down)\b/i,
+    /\b(don't|do not|no more)\s+(run|call|use|trigger|execute|test)\b/i,
+    /\b(snap out|just talk|just respond|no tools|without tools)\b/i,
+    /\b(stop testing|stop calling|stop running)\b/i
+  ];
+
+  const frustrationPatterns = [
+    /\b(you keep|again|repeated|loop|stuck|involuntary)\b/i,
+    /\b(this is wrong|this is broken|not what i asked)\b/i
+  ];
+
+  const isStopIntent = stopOrDeescalationPatterns.some((pattern) => pattern.test(lastUser));
+  const isFrustrated = frustrationPatterns.some((pattern) => pattern.test(lastUser));
+  const lastAssistantHadToolIntent = Boolean(
+    lastAssistant?.tool_calls?.length ||
+    (typeof lastAssistant?.content === 'string' &&
+      (lastAssistant.content.includes('DSML') || lastAssistant.content.includes('invoke_edge_function')))
+  );
+
+  if (isStopIntent || (isFrustrated && lastAssistantHadToolIntent)) {
+    return false;
+  }
   
   const dataKeywords = [
     'what is', 'what\'s', 'what are', 'who is', 'who are', 'where is', 'when is',
