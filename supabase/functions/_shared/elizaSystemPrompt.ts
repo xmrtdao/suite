@@ -730,6 +730,8 @@ The unified OAuth flow automatically authorizes:
 ACTIONS:
 • send_email: Send emails from xmrtsolutions@gmail.com
   Required: to, subject, body | Optional: cc, bcc
+  Subject rule: plain text only (no emojis, no newline/header characters)
+  Body rule: if body contains HTML tags, include is_html: true
 
 • list_emails: Search/list inbox messages
   Optional: query (Gmail search syntax), max_results (default 10)
@@ -739,6 +741,8 @@ ACTIONS:
 
 • create_draft: Save email drafts for later review
   Required: to, subject, body
+  Subject rule: plain text only (no emojis, no newline/header characters)
+  Body rule: if body contains HTML tags, include is_html: true
 
 GMAIL QUERY SYNTAX EXAMPLES:
 • "is:unread" - Unread emails

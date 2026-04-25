@@ -52,6 +52,27 @@ interface TokenResponse {
   refresh_token?: string;
 }
 
+function isValidEmailAddress(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+function sanitizeEmailSubject(subject: unknown): string {
+  if (typeof subject !== 'string') return '';
+  return subject
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/[\p{Extended_Pictographic}\p{Emoji_Presentation}]/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeEmailBody(body: unknown, isHtml: unknown): { body: string; isHtml: boolean; hadHtmlContent: boolean } {
+  const normalizedBody = typeof body === 'string' ? body : String(body ?? '');
+  const htmlDetected = /<([a-z][\w-]*)(\s[^>]*)?>/i.test(normalizedBody);
+  const normalizedIsHtml = isHtml === true || htmlDetected;
+  return { body: normalizedBody, isHtml: normalizedIsHtml, hadHtmlContent: htmlDetected };
+}
+
 // 🔧 SURGICAL FIX: Enhanced user context extraction with deterministic identifier
 function extractUserContext(req: Request, body: any): { userId?: string; userEmail?: string; deterministicId?: string } {
   const userId = req.headers.get('x-user-id') || body?.user_id;
@@ -1773,7 +1794,19 @@ serve(async (req) => {
           return new Response(JSON.stringify({ success: false, error: 'Missing to, subject, or body' }),
             { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
-        const result = await sendEmail(accessToken, to, subject, emailBody, is_html);
+        if (!isValidEmailAddress(to)) {
+          return new Response(JSON.stringify({ success: false, error: 'Invalid recipient email format' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        const sanitizedSubject = sanitizeEmailSubject(subject);
+        if (!sanitizedSubject) {
+          return new Response(JSON.stringify({ success: false, error: 'Invalid subject after sanitization' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+
+        const normalized = normalizeEmailBody(emailBody, is_html);
+        const result = await sendEmail(accessToken, to, sanitizedSubject, normalized.body, normalized.isHtml);
         return new Response(JSON.stringify({ success: true, result, user_context: { userId, userEmail, deterministicId } }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
@@ -1810,12 +1843,22 @@ serve(async (req) => {
           return new Response(JSON.stringify({ success: false, error: 'Not authenticated for this user', user_context: { userId, userEmail, deterministicId } }),
             { status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
-        const { to, subject, body: draftBody } = body;
+        const { to, subject, body: draftBody, is_html } = body;
         if (!to || !subject || !draftBody) {
           return new Response(JSON.stringify({ success: false, error: 'Missing to, subject, or body' }),
             { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
         }
-        const result = await createDraft(accessToken, to, subject, draftBody);
+        if (!isValidEmailAddress(to)) {
+          return new Response(JSON.stringify({ success: false, error: 'Invalid recipient email format' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+        const sanitizedSubject = sanitizeEmailSubject(subject);
+        if (!sanitizedSubject) {
+          return new Response(JSON.stringify({ success: false, error: 'Invalid subject after sanitization' }),
+            { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+        }
+        const normalized = normalizeEmailBody(draftBody, is_html);
+        const result = await createDraft(accessToken, to, sanitizedSubject, normalized.body);
         return new Response(JSON.stringify({ success: true, result, user_context: { userId, userEmail, deterministicId } }),
           { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }

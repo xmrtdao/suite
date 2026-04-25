@@ -600,6 +600,26 @@ function normalizeAction(action: unknown): string {
   return aliases[normalized] || normalized;
 }
 
+function isValidEmailAddress(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+function sanitizeEmailSubject(subject: unknown): string {
+  if (typeof subject !== 'string') return '';
+  return subject
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/[\p{Extended_Pictographic}\p{Emoji_Presentation}]/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeEmailBody(body: unknown, isHtml: unknown): { body: string; isHtml: boolean } {
+  const normalizedBody = typeof body === 'string' ? body : String(body ?? '');
+  const htmlDetected = /<([a-z][\w-]*)(\s[^>]*)?>/i.test(normalizedBody);
+  return { body: normalizedBody, isHtml: isHtml === true || htmlDetected };
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
@@ -650,18 +670,42 @@ serve(async (req) => {
     let result;
 
     switch (action) {
-      case 'send_email':
+      case 'send_email': {
+        if (!body.to || !body.subject || !body.body) {
+          await usageTracker.failure('Missing to, subject, or body', 400);
+          return new Response(JSON.stringify({ success: false, error: 'Missing to, subject, or body' }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+        if (!isValidEmailAddress(body.to)) {
+          await usageTracker.failure('Invalid recipient email format', 400);
+          return new Response(JSON.stringify({ success: false, error: 'Invalid recipient email format' }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+        const sanitizedSubject = sanitizeEmailSubject(body.subject);
+        if (!sanitizedSubject) {
+          await usageTracker.failure('Invalid subject after sanitization', 400);
+          return new Response(JSON.stringify({ success: false, error: 'Invalid subject after sanitization' }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+        const normalized = normalizeEmailBody(body.body, body.is_html);
         result = await sendEmail(
           accessToken,
           body.to,
-          body.subject,
-          body.body,
-          body.is_html ?? false,
+          sanitizedSubject,
+          normalized.body,
+          normalized.isHtml,
           body.images ?? [],
           body.video,
           body.cc
         );
         break;
+      }
 
       case 'list_emails':
         result = await listEmails(accessToken, body.query ?? body.q, body.max_results);
@@ -671,18 +715,42 @@ serve(async (req) => {
         result = await getEmail(accessToken, body.message_id ?? body.id);
         break;
 
-      case 'create_draft':
+      case 'create_draft': {
+        if (!body.to || !body.subject || !body.body) {
+          await usageTracker.failure('Missing to, subject, or body', 400);
+          return new Response(JSON.stringify({ success: false, error: 'Missing to, subject, or body' }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+        if (!isValidEmailAddress(body.to)) {
+          await usageTracker.failure('Invalid recipient email format', 400);
+          return new Response(JSON.stringify({ success: false, error: 'Invalid recipient email format' }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+        const sanitizedSubject = sanitizeEmailSubject(body.subject);
+        if (!sanitizedSubject) {
+          await usageTracker.failure('Invalid subject after sanitization', 400);
+          return new Response(JSON.stringify({ success: false, error: 'Invalid subject after sanitization' }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          });
+        }
+        const normalized = normalizeEmailBody(body.body, body.is_html);
         result = await createDraft(
           accessToken,
           body.to,
-          body.subject,
-          body.body,
-          body.is_html ?? false,
+          sanitizedSubject,
+          normalized.body,
+          normalized.isHtml,
           body.images ?? [],
           body.video,
           body.cc
         );
         break;
+      }
 
       case 'modify_message':
         result = await modifyMessage(
