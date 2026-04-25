@@ -118,6 +118,23 @@ const sanitizeRawToolMarkup = (content: string): ToolMarkupSanitizationResult =>
   };
 };
 
+const FULL_AUTONOMY_RESUME_PROMPT = "Where were we at? Let's proceed from there.";
+
+const isDefaultBackupResponse = (content: string): boolean => {
+  const normalized = normalizeMessageContent(content).toLowerCase();
+  if (!normalized) return false;
+
+  return [
+    "i'm eliza, general intelligence agent",
+    'i am eliza, general intelligence agent',
+    'technical difficulties',
+    'please try again in a moment',
+    'please try again later',
+    'encountered an error processing your request',
+    "i apologize, but i'm experiencing technical difficulties",
+  ].some((marker) => normalized.includes(marker));
+};
+
 // MiningStats imported from unifiedDataService
 import { ExecutiveName, EXECUTIVE_PROFILES } from './ExecutiveBio';
 
@@ -923,6 +940,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   const autoAdvanceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pendingAutoAdvancePromptRef = useRef<string>('');
   const lastAutoAdvancePromptRef = useRef<string>('');
+  const shouldInjectResumePromptRef = useRef(false);
   const fullAutonomyTurnCountRef = useRef(0);
   const FULL_AUTONOMY_AUTO_ADVANCE_SECONDS = 60;
   const FULL_AUTONOMY_BREAKOUT_PROMPT = language === 'es'
@@ -1612,6 +1630,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   useEffect(() => {
     fullAutonomyTurnCountRef.current = 0;
     lastAutoAdvancePromptRef.current = '';
+    shouldInjectResumePromptRef.current = false;
     if (!fullAutonomyEnabled) {
       clearAutoAdvanceTimer();
     }
@@ -2221,6 +2240,13 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
     if (!trimmedInput || isProcessing) return;
     clearAutoAdvanceTimer();
     const messageText = formatUserMessageForDisplayAndParsing(trimmedInput);
+    const shouldInjectResumePrompt = fullAutonomyEnabled && shouldInjectResumePromptRef.current;
+    const injectedMessageText = shouldInjectResumePrompt
+      ? `${messageText}\n\n${FULL_AUTONOMY_RESUME_PROMPT}`
+      : messageText;
+    if (shouldInjectResumePrompt) {
+      shouldInjectResumePromptRef.current = false;
+    }
 
 
     // Mark that user has engaged with the chat
@@ -2365,11 +2391,11 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
     }
 
     try {
-      console.log('💬 Starting message processing:', messageText);
+      console.log('💬 Starting message processing:', injectedMessageText);
       console.log('🔧 Context:', { miningStats: !!miningStats, userContext: !!userContext });
 
       // Check if user is teaching pronunciation
-      const learnedSpeech = speechLearningService.parseInstruction(messageText);
+      const learnedSpeech = speechLearningService.parseInstruction(injectedMessageText);
       if (learnedSpeech) {
         const confirmMessage: UnifiedMessage = {
           id: `eliza-${Date.now()}`,
@@ -2388,7 +2414,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       const fullContext = await conversationPersistence.getFullConversationContext();
 
       // Process response using Gemini AI Gateway or Council
-      const response = await UnifiedElizaService.generateResponse(messageText, {
+      const response = await UnifiedElizaService.generateResponse(injectedMessageText, {
         miningStats,
         userContext,
         organizationContext,
@@ -2421,6 +2447,9 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
 
         setMessages(prev => [...prev, elizaMessage]);
         setLastElizaMessage(deliberation.synthesis);
+        if (fullAutonomyEnabled && isDefaultBackupResponse(deliberation.synthesis || '')) {
+          shouldInjectResumePromptRef.current = true;
+        }
 
         // Store council response
         try {
@@ -2594,6 +2623,9 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
 
       setMessages(prev => [...prev, elizaMessage]);
       setLastElizaMessage(displayContent);
+      if (fullAutonomyEnabled && isDefaultBackupResponse(displayContent || '')) {
+        shouldInjectResumePromptRef.current = true;
+      }
       scheduleFullAutonomyAdvance(elizaMessage);
 
       // Store Eliza's response with full data integration
@@ -2677,7 +2709,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       } else {
         // Parse and diagnose the error
         const diagnosis = await IntelligentErrorHandler.diagnoseError(error, {
-          userInput: messageText,
+          userInput: injectedMessageText,
           attemptedExecutive: (window as any).__lastElizaExecutive
         });
 
@@ -2699,7 +2731,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
           description: errorContent.substring(0, 200),
           activity_type: 'error_diagnostics',
           status: 'completed',
-          metadata: { userInput: messageText } as any,
+          metadata: { userInput: injectedMessageText } as any,
           mentioned_to_user: true
         });
       } catch (logError) {
