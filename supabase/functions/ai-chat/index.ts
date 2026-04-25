@@ -263,6 +263,7 @@ ATTACHMENT ANALYSIS (MANDATORY):
 
 EMAIL SENDING (MANDATORY):
 - When user asks to SEND EMAIL -> IMMEDIATELY call google_cloud_auth with action 'send_email'
+- For send_email/create_draft payloads: subject MUST be plain text (no emojis/newlines), and if body contains HTML tags then set is_html=true.
 `;
 
 // ========== UTILITY FUNCTIONS ==========

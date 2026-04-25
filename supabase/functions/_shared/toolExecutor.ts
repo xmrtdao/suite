@@ -125,6 +125,25 @@ export async function executeToolCall(
     if (inferredUserId && !payload.user_id) payload.user_id = inferredUserId;
     if (!payload.requested_from) payload.requested_from = sourceTool;
 
+    // Enforce Gmail payload hygiene for reliable delivery through google-cloud-auth.
+    if (payload.action === 'send_email' || payload.action === 'create_draft') {
+      if (typeof payload.subject === 'string') {
+        // Remove header-breaking characters and emoji from subject.
+        payload.subject = payload.subject
+          .replace(/[\r\n]+/g, ' ')
+          .replace(/[\p{Extended_Pictographic}\p{Emoji_Presentation}]/gu, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+      }
+
+      if (typeof payload.body === 'string') {
+        const looksLikeHtml = /<([a-z][\w-]*)(\s[^>]*)?>/i.test(payload.body);
+        if (looksLikeHtml && payload.is_html !== true) {
+          payload.is_html = true;
+        }
+      }
+    }
+
     return payload;
   };
 
