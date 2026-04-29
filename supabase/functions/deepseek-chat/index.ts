@@ -29,12 +29,10 @@ serve(async (req) => {
     console.log(`🧠 ${EXECUTIVE_NAME} Executive Processing: ${chatMessages.length} messages, Council: ${councilMode}`);
 
     const options: UnifiedAIOptions = {
-      preferProvider: 'deepseek', // Priority 1: DeepSeek R1 (Financial Analysis)
+      preferProvider: 'deepseek',
       userContext,
       executiveName: 'Omar Al-Farsi',
-      // Non-lead execs must not receive ELIZA_TOOLS — only the lead gets tool access
-      useFullElizaContext: councilMode ? !!isLeadExecutive : true,
-      maxTokens: 4000,
+      maxTokens: 8000,
       temperature: 0.7,
     };
 

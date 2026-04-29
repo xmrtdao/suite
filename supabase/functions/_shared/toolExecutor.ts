@@ -2427,6 +2427,85 @@ export async function getVscoToolHandler(name: string, parsedArgs: any, supabase
       }).then((res: any) => res.error ? { success: false, error: res.error.message } : res.data);
 
     // ====================================================================
+    // 🎨 MUAPI MEDIA GENERATION (PRIMARY)
+    // ====================================================================
+    case 'muapi_generate_media': {
+      console.log(`🎨 [${executiveName}] Muapi Media Generation: action=${parsedArgs.action}, prompt=${parsedArgs.prompt?.substring(0, 50)}...`);
+      // Route to superduper-content-media (primary) or muapi-media-generator (fallback)
+      return supabase.functions.invoke('superduper-content-media', {
+        body: {
+          action: parsedArgs.action || 'generate_image',
+          prompt: parsedArgs.prompt,
+          style: parsedArgs.style,
+          aspect_ratio: parsedArgs.aspect_ratio,
+          duration_seconds: parsedArgs.duration_seconds,
+          model: parsedArgs.model
+        }
+      }).then((res: any) => {
+        if (res.error) {
+          // Fallback to muapi-media-generator if superduper-content-media fails
+          console.warn(`⚠️ [${executiveName}] superduper-content-media failed, trying muapi-media-generator`);
+          return supabase.functions.invoke('muapi-media-generator', {
+            body: {
+              action: parsedArgs.action || 'generate_image',
+              prompt: parsedArgs.prompt,
+              style: parsedArgs.style,
+              aspect_ratio: parsedArgs.aspect_ratio,
+              duration_seconds: parsedArgs.duration_seconds
+            }
+          }).then((res2: any) => res2.error
+            ? { success: false, error: `Both media generators failed. Primary: ${res.error.message}, Fallback: ${res2.error.message}` }
+            : { success: true, result: res2.data, provider: 'muapi-media-generator', source: 'fallback' });
+        }
+        return {
+          success: true,
+          result: res.data,
+          provider: 'superduper-content-media',
+          source: 'primary',
+          storage_note: 'All generated media is stored in Supabase Storage and accessible via the returned CDN URLs.'
+        };
+      });
+    }
+
+    case 'muapi_list_models': {
+      console.log(`📋 [${executiveName}] Muapi List Models: type=${parsedArgs.type || 'all'}`);
+      return supabase.functions.invoke('muapi-media-generator', {
+        body: { action: 'list_models', type: parsedArgs.type || 'all' }
+      }).then((res: any) => res.error
+        ? { success: false, error: res.error.message }
+        : { success: true, result: res.data, provider: 'muapi-media-generator' });
+    }
+
+    case 'muapi_estimate_cost': {
+      console.log(`💰 [${executiveName}] Muapi Estimate Cost: action=${parsedArgs.action}`);
+      return supabase.functions.invoke('muapi-media-generator', {
+        body: { action: 'estimate_cost', model: parsedArgs.model, count: parsedArgs.count }
+      }).then((res: any) => res.error
+        ? { success: false, error: res.error.message }
+        : { success: true, result: res.data, provider: 'muapi-media-generator' });
+    }
+
+    case 'muapi_generate_slideshow': {
+      console.log(`🎬 [${executiveName}] Muapi Generate Slideshow: ${parsedArgs.scenes?.length || 0} scenes`);
+      return supabase.functions.invoke('superduper-content-media', {
+        body: {
+          action: 'generate_slideshow',
+          scenes: parsedArgs.scenes,
+          style: parsedArgs.style,
+          transition: parsedArgs.transition || 'fade',
+          duration_per_scene: parsedArgs.duration_per_scene || 4
+        }
+      }).then((res: any) => res.error
+        ? { success: false, error: res.error.message }
+        : {
+          success: true,
+          result: res.data,
+          provider: 'superduper-content-media',
+          storage_note: 'Slideshow video is stored in Supabase Storage and accessible via the returned CDN URL.'
+        });
+    }
+
+    // ====================================================================
     // 🔷 VERTEX AI EXPRESS TOOLS
     // ====================================================================
     case 'vertex_ai_generate':

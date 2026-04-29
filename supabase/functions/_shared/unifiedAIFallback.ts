@@ -692,38 +692,270 @@ export async function callAIWithFallback(
   // 1. PRIMARY: Ollama
   console.log('🦙 Trying Ollama (primary)...');
   const ollamaResult = await callOllama(messages, options);
-  if (ollamaResult.success) return transformResult(ollamaResult);
+  if (ollamaResult.success) {
+    const transformed = transformResult(ollamaResult);
+    if (transformed.tool_calls?.length > 0) {
+      console.log(`🔧 [${options.executiveName || 'exec'}] Ollama returned ${transformed.tool_calls.length} tool call(s) — executing...`);
+      return executeToolCallsAndSynthesize(messages, transformed.tool_calls, options);
+    }
+    return transformed;
+  }
   errors.push(`Ollama: ${ollamaResult.error}`);
   console.warn('⚠️ Ollama failed, trying Vertex SA fallback...');
 
   // 2. CLOUD PRIMARY: Vertex AI via Service Account OAuth2
   console.log('🔑 Trying Vertex AI SA OAuth2...');
   const saResult = await callVertexWithServiceAccount(messages, options);
-  if (saResult.success) return transformResult(saResult);
+  if (saResult.success) {
+    const transformed = transformResult(saResult);
+    if (transformed.tool_calls?.length > 0) {
+      console.log(`🔧 [${options.executiveName || 'exec'}] Vertex SA returned ${transformed.tool_calls.length} tool call(s) — executing...`);
+      return executeToolCallsAndSynthesize(messages, transformed.tool_calls, options);
+    }
+    return transformed;
+  }
   errors.push(`VertexSA: ${saResult.error}`);
   console.warn('⚠️ Vertex SA failed, trying API key fallback...');
 
   // 3. FALLBACK: Gemini API key
   const geminiResult = await callGemini(messages, options);
-  if (geminiResult.success) return transformResult(geminiResult);
+  if (geminiResult.success) {
+    const transformed = transformResult(geminiResult);
+    if (transformed.tool_calls?.length > 0) {
+      console.log(`🔧 [${options.executiveName || 'exec'}] Gemini returned ${transformed.tool_calls.length} tool call(s) — executing...`);
+      return executeToolCallsAndSynthesize(messages, transformed.tool_calls, options);
+    }
+    return transformed;
+  }
   errors.push(`Gemini: ${geminiResult.error}`);
 
   // 4. Vertex AI Express Mode (reuses Gemini key)
   const vertexResult = await callVertex(messages, options);
-  if (vertexResult.success) return transformResult(vertexResult);
+  if (vertexResult.success) {
+    const transformed = transformResult(vertexResult);
+    if (transformed.tool_calls?.length > 0) {
+      console.log(`🔧 [${options.executiveName || 'exec'}] Vertex Express returned ${transformed.tool_calls.length} tool call(s) — executing...`);
+      return executeToolCallsAndSynthesize(messages, transformed.tool_calls, options);
+    }
+    return transformed;
+  }
   errors.push(`Vertex: ${vertexResult.error}`);
 
   // 5. DeepSeek V3
   const deepSeekResult = await callDeepSeek(messages, options);
-  if (deepSeekResult.success) return transformResult(deepSeekResult);
+  if (deepSeekResult.success) {
+    const transformed = transformResult(deepSeekResult);
+    if (transformed.tool_calls?.length > 0) {
+      console.log(`🔧 [${options.executiveName || 'exec'}] DeepSeek returned ${transformed.tool_calls.length} tool call(s) — executing...`);
+      return executeToolCallsAndSynthesize(messages, transformed.tool_calls, options);
+    }
+    return transformed;
+  }
   errors.push(`DeepSeek: ${deepSeekResult.error}`);
 
   // 6. Kimi K2 (final fallback)
   const kimiResult = await callKimi(messages, options);
-  if (kimiResult.success) return transformResult(kimiResult);
+  if (kimiResult.success) {
+    const transformed = transformResult(kimiResult);
+    if (transformed.tool_calls?.length > 0) {
+      console.log(`🔧 [${options.executiveName || 'exec'}] Kimi returned ${transformed.tool_calls.length} tool call(s) — executing...`);
+      return executeToolCallsAndSynthesize(messages, transformed.tool_calls, options);
+    }
+    return transformed;
+  }
   errors.push(`Kimi: ${kimiResult.error}`);
 
   throw new Error(`All AI providers failed: ${errors.join(' | ')}`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TOOL EXECUTION ENGINE
+// Executes tool calls returned by AI providers using universal-edge-invoker
+// ─────────────────────────────────────────────────────────────────────────────
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || 'https://vawouugtzwmejxqkeqqj.supabase.co';
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
+
+async function executeToolCall(toolName: string, toolArgs: any, executiveName: string = 'unknown'): Promise<any> {
+  console.log(`🔧 [${executiveName}] EXECUTING TOOL: ${toolName}`);
+
+  // ── MEDIA GENERATION TOOLS ──────────────────────────────────────────────
+  // Route to the correct edge function for each tool family
+  if (toolName === 'muapi_generate_media') {
+    const { action = 'generate_image', prompt, style, aspect_ratio, duration_seconds, model } = toolArgs;
+    const body = { action, prompt, style, aspect_ratio, duration_seconds, model };
+    // Primary: superduper-content-media, Fallback: muapi-media-generator
+    const result = await invokeEdgeFunctionWithFallback('superduper-content-media', body, [
+      'muapi-media-generator', 'superduper-content-media'
+    ], executiveName);
+    return result;
+  }
+  if (toolName === 'muapi_list_models') {
+    return invokeEdgeFunction('muapi-media-generator', { action: 'list_models', type: toolArgs.type || 'all' });
+  }
+  if (toolName === 'muapi_estimate_cost') {
+    return invokeEdgeFunction('muapi-media-generator', { action: 'estimate_cost', model: toolArgs.model, count: toolArgs.count });
+  }
+  if (toolName === 'muapi_generate_slideshow') {
+    const { scenes, style, transition = 'fade', duration_per_scene = 4 } = toolArgs;
+    return invokeEdgeFunction('superduper-content-media', {
+      action: 'generate_slideshow', scenes, style, transition, duration_per_scene
+    });
+  }
+  if (toolName === 'vertex_generate_image' || toolName === 'vertex_generate_video') {
+    return invokeEdgeFunction('vertex-ai-image-gen', toolArgs);
+  }
+  if (toolName === 'generate_image' || toolName === 'generate_video') {
+    // Generic alias — route to muapi
+    return invokeEdgeFunction('superduper-content-media', {
+      action: toolName === 'generate_image' ? 'generate_image' : 'generate_video',
+      ...toolArgs
+    });
+  }
+
+  // ── GENERAL EDGE FUNCTION INVOCATION ───────────────────────────────────
+  // Catch-all: route any unknown tool to universal-edge-invoker or directly
+  if (toolName === 'invoke_edge_function' || toolName === 'universal_edge_invoker') {
+    return invokeEdgeFunction(toolArgs.function_name, toolArgs.payload || {});
+  }
+  if (toolName === 'invoke-edge-function') {
+    return invokeEdgeFunction(toolArgs.function_name, toolArgs.payload || {});
+  }
+
+  // Generic tool routing via universal-edge-invoker
+  return invokeEdgeFunction('universal-edge-invoker', {
+    function_name: toolName.replace(/_/g, '-'),
+    payload: toolArgs
+  });
+}
+
+async function invokeEdgeFunction(functionName: string, payload: any): Promise<any> {
+  if (!SUPABASE_SERVICE_ROLE_KEY) {
+    return { success: false, error: 'SUPABASE_SERVICE_ROLE_KEY not configured in edge function environment' };
+  }
+  try {
+    const url = `${SUPABASE_URL}/functions/v1/${functionName}`;
+    const response = await fetchWithTimeout(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      },
+      body: JSON.stringify(payload),
+    }, 30000);
+
+    const data = await response.json();
+    return { success: response.ok, status: response.status, data };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+async function invokeEdgeFunctionWithFallback(primary: string, payload: any, fallbacks: string[], executiveName: string): Promise<any> {
+  for (const fn of [primary, ...fallbacks]) {
+    const result = await invokeEdgeFunction(fn, payload);
+    if (result.success) {
+      console.log(`✅ [${executiveName}] ${fn} succeeded`);
+      return { ...result, provider: fn };
+    }
+    console.warn(`⚠️ [${executiveName}] ${fn} failed: ${result.error}. Trying next...`);
+  }
+  return { success: false, error: `All providers failed: ${fallbacks.join(', ')}` };
+}
+
+/**
+ * Execute tool calls and feed results back to the AI for a final synthesis.
+ * Called after any provider returns tool_calls.
+ */
+async function executeToolCallsAndSynthesize(
+  messages: AIMessage[],
+  toolCalls: any[],
+  options: UnifiedAIOptions
+): Promise<{ content: string; provider: string }> {
+  const executiveName = options.executiveName || 'Executive';
+  console.log(`🔧 [${executiveName}] Executing ${toolCalls.length} tool call(s)...`);
+
+  const toolResults: any[] = [];
+  for (const tc of toolCalls) {
+    try {
+      const name = tc.function?.name || tc.name || '';
+      let args = tc.function?.arguments || tc.arguments || '{}';
+      if (typeof args === 'string') {
+        try { args = JSON.parse(args); } catch { args = {}; }
+      }
+      const result = await executeToolCall(name, args, executiveName);
+      const readable = formatToolResult(name, result);
+      toolResults.push(readable);
+      console.log(`✅ [${executiveName}] ${name} -> ${JSON.stringify(readable).substring(0, 200)}`);
+    } catch (err: any) {
+      toolResults.push({ error: err.message });
+      console.error(`❌ [${executiveName}] Tool ${tc.function?.name || tc.name} failed: ${err.message}`);
+    }
+  }
+
+  // Feed results back to AI for final synthesis
+  const toolMessages = toolCalls.map((tc, i) => ({
+    role: 'assistant' as const,
+    content: null,
+    tool_calls: [{
+      id: tc.id || `tc_${i}`,
+      type: 'function' as const,
+      function: {
+        name: tc.function?.name || tc.name || '',
+        arguments: typeof tc.function?.arguments === 'string'
+          ? tc.function.arguments
+          : JSON.stringify(tc.function?.arguments || tc.arguments || {})
+      }
+    }]
+  }));
+
+  const resultMessages = toolResults.map((r, i) => ({
+    role: 'tool' as const,
+    tool_call_id: tc_ids_from_calls(toolCalls)[i],
+    content: JSON.stringify(r)
+  }));
+
+  function tc_ids_from_calls(calls: any[]): string[] {
+    return calls.map((c, i) => c.id || `tc_${i}`);
+  }
+
+  // Build follow-up messages with tool results
+  const followUpMessages = [
+    ...messages,
+    ...toolMessages,
+    ...resultMessages,
+    { role: 'user', content: 'Based on the tool results above, provide your final response to the user. Format images/videos as: ![description](url). Keep it concise and actionable.' }
+  ];
+
+  // Retry with the same provider or fall back through cascade
+  return callAIWithFallback(followUpMessages, { ...options, maxTokens: 8000 });
+}
+
+function formatToolResult(toolName: string, result: any): any {
+  if (!result.success) return { error: result.error || 'Tool execution failed' };
+  const data = result.data || result;
+
+  if (toolName === 'muapi_generate_media' || toolName === 'superduper-content-media' || toolName === 'muapi-media-generator') {
+    if (data.image_url) return { image_url: data.image_url, model: data.model, dimensions: data.dimensions };
+    if (data.video_url) return { video_url: data.video_url, model: data.model, duration: data.duration };
+    if (data.urls && data.urls.length > 0) return { urls: data.urls };
+    return data;
+  }
+  if (toolName === 'muapi_list_models' || toolName === 'muapi-list-models') {
+    return { models: data.models || data };
+  }
+  if (toolName === 'muapi_estimate_cost') {
+    return { estimate: data };
+  }
+  if (toolName === 'muapi_generate_slideshow') {
+    return { slideshow_url: data.slideshow_url || data.url, scenes: data.scenes };
+  }
+
+  // Generic: return success + first-level data
+  if (typeof data === 'object' && data !== null) {
+    const keys = Object.keys(data).filter(k => !['error', 'success', 'status'].includes(k));
+    if (keys.length > 0) return { [keys[0]]: data[keys[0]], _summary: `${keys.length} fields returned` };
+  }
+  return { result: data };
 }
 
 /**
@@ -792,6 +1024,9 @@ interface UnifiedAIOptions {
   max_tokens?: number;
   systemPrompt?: string;
   tools?: any[];
+  executiveName?: string;
+  preferProvider?: string;
+  userContext?: any;
 }
 
 interface ProviderResult {

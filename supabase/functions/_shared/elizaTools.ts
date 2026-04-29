@@ -3446,5 +3446,207 @@ Response includes ecosystem_summary with one-line stats for each component.`,
         required: ['relay_tag']
       }
     }
+  },
+
+  // ====================================================================
+  // 🎨 MUAPI MEDIA GENERATION (PRIMARY - Supabase Edge Functions)
+  // ====================================================================
+  {
+    type: 'function',
+    function: {
+      name: 'muapi_generate_media',
+      description: '🎨 PRIMARY MEDIA GENERATOR — Generate images and videos via Supabase edge functions (muapi-media-generator / superduper-content-media) backed by Muapi AI. Fast, affordable, reliable. Results include permanent CDN URLs. Use this FIRST for any image/video generation request.',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['generate_image', 'generate_video', 'image_to_image'],
+            description: 'Type of generation: generate_image (default), generate_video, image_to_image (transform existing image)'
+          },
+          prompt: {
+            type: 'string',
+            description: 'Detailed description of the image or video to generate. Be specific about subjects, setting, style, colors, motion. For image_to_image, also describe the desired transformation.'
+          },
+          style: {
+            type: 'string',
+            description: 'Optional artistic style: realistic, cinematic, anime, abstract, minimal, futuristic, retro, photorealistic, artistic, logo, infographic, document, diagram'
+          },
+          aspect_ratio: {
+            type: 'string',
+            enum: ['1:1', '16:9', '9:16', '4:3', '3:4'],
+            description: 'Aspect ratio for images (default: 1:1 square). 16:9 = widescreen, 9:16 = vertical/tiktok'
+          },
+          duration_seconds: {
+            type: 'number',
+            enum: [5, 6, 7, 8],
+            description: 'Video duration in seconds (5-8, default: 5). Muapi max is 8s per clip.'
+          }
+        },
+        required: ['action', 'prompt']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'muapi_list_models',
+      description: '📋 LIST AVAILABLE MEDIA MODELS — Get the full catalog of Muapi image and video models with pricing, capabilities, and max durations. Use this to discover all available options before generating.',
+      parameters: {
+        type: 'object',
+        properties: {
+          type: {
+            type: 'string',
+            enum: ['image', 'video', 'all'],
+            description: 'Filter by type: image models, video models, or all (default: all)'
+          }
+        }
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'muapi_estimate_cost',
+      description: '💰 ESTIMATE GENERATION COST — Get pricing estimate for a media generation request before spending credits. Shows cost per call and estimated total.',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['generate_image', 'generate_video', 'image_to_image', 'generate_slideshow'],
+            description: 'Generation action type'
+          },
+          model: {
+            type: 'string',
+            description: 'Optional: specific model name (e.g., nano-banana-pro, veo3.1-fast-text-to-video). If omitted, uses default for the action.'
+          },
+          count: {
+            type: 'number',
+            description: 'Optional: number of images/video clips (default: 1)'
+          }
+        },
+        required: ['action']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'muapi_generate_slideshow',
+      description: '🎬 GENERATE IMAGE SLIDESHOW — Create a video slideshow from multiple generated images with transitions. Great for explainer videos, product showcases, or storytelling sequences.',
+      parameters: {
+        type: 'object',
+        properties: {
+          scenes: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Array of scene descriptions (3-10 scenes recommended). Each scene becomes one slide frame.'
+          },
+          style: {
+            type: 'string',
+            description: 'Optional: visual style for all scenes: cinematic, clean, minimal, futuristic, retro, documentary'
+          },
+          transition: {
+            type: 'string',
+            enum: ['fade', 'slide', 'zoom', 'dissolve'],
+            description: 'Transition style between scenes (default: fade)'
+          },
+          duration_per_scene: {
+            type: 'number',
+            description: 'Seconds per scene (3-10, default: 4). Total video = scenes × duration_per_scene.'
+          }
+        },
+        required: ['scenes']
+      }
+    }
+  },
+
+  // ====================================================================
+  // 🖼️ VERTEX AI IMAGE GENERATION (FALLBACK)
+  // ====================================================================
+  {
+    type: 'function',
+    function: {
+      name: 'vertex_generate_image',
+      description: '🖼️ [FALLBACK] Generate images using Vertex AI Gemini. PRIMARY OPTION: Use muapi_generate_media instead — it\'s faster, cheaper, and returns permanent URLs. Vertex AI is available as a backup when Muapi is unavailable. Models: gemini-2.5-flash-preview-05-20 (default, fast).',
+      parameters: {
+        type: 'object',
+        properties: {
+          prompt: {
+            type: 'string',
+            description: 'Detailed description of the image to generate. Be specific about style, composition, colors, and subject matter.'
+          },
+          model: {
+            type: 'string',
+            enum: ['gemini-2.5-flash-preview-05-20'],
+            description: 'Image generation model (default: gemini-2.5-flash-preview-05-20)'
+          },
+          aspect_ratio: {
+            type: 'string',
+            enum: ['16:9', '1:1', '9:16', '4:3', '3:4'],
+            description: 'Image aspect ratio (default: 1:1)'
+          },
+          count: {
+            type: 'number',
+            description: 'Number of images to generate 1-4 (default: 1)'
+          }
+        },
+        required: ['prompt']
+      }
+    }
+  },
+
+  // ====================================================================
+  // 🎬 VERTEX AI VIDEO GENERATION (FALLBACK)
+  // ====================================================================
+  {
+    type: 'function',
+    function: {
+      name: 'vertex_generate_video',
+      description: '🎬 [FALLBACK] Generate videos using Vertex AI Veo 3.1 (professional quality). PRIMARY OPTION: Use muapi_generate_media instead — it\'s faster, cheaper, and returns permanent URLs. Vertex AI is available as a backup. Videos are 4-8 seconds with native audio. Models: veo-3.1-generate-001 (4K best), veo-3.1-fast-generate-001 (faster).',
+      parameters: {
+        type: 'object',
+        properties: {
+          prompt: {
+            type: 'string',
+            description: 'Detailed description of the video to generate. Include motion, scene, style, and camera movement details.'
+          },
+          model: {
+            type: 'string',
+            enum: ['veo-3.1-generate-001', 'veo-3.1-fast-generate-001', 'veo-3.0-generate-001'],
+            description: 'Video model: veo-3.1-generate-001 (default, 4K, best quality), veo-3.1-fast-generate-001 (faster), veo-3.0-generate-001 (fallback)'
+          },
+          aspect_ratio: {
+            type: 'string',
+            enum: ['16:9', '9:16'],
+            description: 'Video aspect ratio: 16:9 (landscape) or 9:16 (portrait/vertical)'
+          },
+          duration_seconds: {
+            type: 'number',
+            enum: [4, 5, 6, 7, 8],
+            description: 'Video duration in seconds (4-8, default: 5)'
+          }
+        },
+        required: ['prompt']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'vertex_check_video_status',
+      description: '📽️ [VERTEX FALLBACK ONLY] Check the status of an async Vertex AI video generation operation. Poll until done=true to get the video URL. Video generation typically takes 2-5 minutes. NOTE: Muapi video generation (via muapi_generate_media) returns results synchronously — this tool is only for Vertex AI fallback.',
+      parameters: {
+        type: 'object',
+        properties: {
+          operation_name: {
+            type: 'string',
+            description: 'Full operation name returned from vertex_generate_video (e.g., "projects/.../operations/...")'
+          }
+        },
+        required: ['operation_name']
+      }
+    }
   }
 ];
