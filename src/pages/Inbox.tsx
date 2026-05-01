@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -98,6 +98,7 @@ function isAgentConversation(msg: InboxMessage) {
 export default function InboxPage() {
     const { user, profile } = useAuth();
     const navigate = useNavigate();
+    const [searchParams, setSearchParams] = useSearchParams();
     const [messages, setMessages] = useState<InboxMessage[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [activeFilter, setActiveFilter] = useState<FilterTab>("all");
@@ -106,6 +107,7 @@ export default function InboxPage() {
     const [draft, setDraft] = useState("");
     const [isSending, setIsSending] = useState(false);
     const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
+    const [selectedMessageId, setSelectedMessageId] = useState<string | null>(null);
 
     const fetchMessages = useCallback(async () => {
         if (!user) return;
@@ -187,6 +189,12 @@ export default function InboxPage() {
     };
 
     const handleThreadFocus = (msg: InboxMessage) => {
+        setSelectedMessageId(msg.id);
+        setSearchParams((prev) => {
+            const next = new URLSearchParams(prev);
+            next.set("message", msg.id);
+            return next;
+        });
         if (!msg.is_read) {
             void markAsRead(msg.id);
         }
@@ -291,6 +299,13 @@ export default function InboxPage() {
         return true;
     });
 
+    useEffect(() => {
+        const requestedMessageId = searchParams.get("message");
+        if (!requestedMessageId) return;
+        const exists = messages.some((msg) => msg.id === requestedMessageId);
+        if (exists) setSelectedMessageId(requestedMessageId);
+    }, [messages, searchParams]);
+
     const unreadCount = messages.filter((m) => !m.is_read).length;
     const activeThreadMessages = useMemo(() => {
         if (!activeThreadId) return [];
@@ -298,6 +313,31 @@ export default function InboxPage() {
             .filter((message) => getThreadId(message) === activeThreadId)
             .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
     }, [activeThreadId, messages]);
+
+
+
+    const selectedMessage = useMemo(() => messages.find((msg) => msg.id === selectedMessageId) || null, [messages, selectedMessageId]);
+
+    const handleReplyToSender = (msg: InboxMessage) => {
+        const executiveFromMetadata = msg.metadata?.target_executive;
+        const executiveFromAgentId = msg.agent_id as ExecutiveName | null;
+        const executive = executiveFromMetadata || executiveFromAgentId || selectedExecutive;
+        if (executive && executive in EXECUTIVE_PROFILES) {
+            setSelectedExecutive(executive);
+        }
+        const threadId = getThreadId(msg);
+        setActiveThreadId(threadId);
+        const deliverableLink = msg.action_url || (msg.task_id ? `${window.location.origin}/dashboard?task=${msg.task_id}` : null);
+        const suggestion = [
+            `Feedback on: ${msg.title}`,
+            deliverableLink ? `Deliverable link: ${deliverableLink}` : null,
+            "Criticism:",
+            "- ",
+            "Requested revision / reassignment:",
+            "- "
+        ].filter(Boolean).join("\n");
+        setDraft((current) => current || suggestion);
+    };
 
     const filterTabs: { key: FilterTab; label: string; count?: number }[] = [
         { key: "all", label: "All", count: messages.length },
@@ -529,6 +569,37 @@ export default function InboxPage() {
             </div>
 
             <div className="max-w-4xl mx-auto px-4 sm:px-6 py-4">
+                {selectedMessage && (
+                    <div className="mb-4 rounded-2xl border border-border/40 bg-card/70 p-4 shadow-sm">
+                        <div className="flex items-start justify-between gap-3">
+                            <div>
+                                <h2 className="text-sm font-semibold">{selectedMessage.title}</h2>
+                                <p className="text-[11px] text-muted-foreground mt-1">
+                                    {formatDistanceToNow(new Date(selectedMessage.created_at), { addSuffix: true })}
+                                    {selectedMessage.agent_name ? ` · ${selectedMessage.agent_name}` : ""}
+                                </p>
+                            </div>
+                            {getChannelBadge(selectedMessage)}
+                        </div>
+                        <p className="mt-3 text-sm whitespace-pre-wrap leading-relaxed text-muted-foreground">
+                            {selectedMessage.content || "No message body was provided."}
+                        </p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                            {(selectedMessage.action_url || selectedMessage.task_id) && (
+                                <a
+                                    href={selectedMessage.action_url || `/dashboard?task=${selectedMessage.task_id}`}
+                                    className="text-xs text-primary underline underline-offset-2"
+                                >
+                                    Open deliverable link →
+                                </a>
+                            )}
+                            <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => handleReplyToSender(selectedMessage)}>
+                                <Reply className="w-3 h-3 mr-1" />
+                                Reply / Request reassignment
+                            </Button>
+                        </div>
+                    </div>
+                )}
                 {isLoading ? (
                     <div className="space-y-3 pt-4">
                         {Array.from({ length: 4 }).map((_, i) => (
