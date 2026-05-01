@@ -316,6 +316,7 @@ const INSPECT_ERROR_LOGS_PROMPT =
   "Inspect error logs 📋 — Eliza, execute a complete production observability sweep right now using REAL tool calls only. Use this exact sequence and do not skip steps: (1) call list-available-functions (or search-edge-functions) to verify current tool/function names for supabase-integration and related diagnostics endpoints, (2) invoke supabase-integration to fetch platform-wide logs for ALL edge functions (errors + warnings + recent executions) with a broad time window first, then narrowed windows around failures, (3) invoke supabase-integration to fetch PostgreSQL-side signals (Postgres logs/events, slow queries, lock contention, connection saturation, failed statements, replication/performance health if available), (4) invoke supabase-integration to pull all key operational datapoints (HTTP status patterns, latency percentiles, timeout counts, auth failures, queue/backlog signals, cron/scheduled task failures, rate limit events, storage/network anomalies), (5) cross-correlate timestamps, function names, request IDs, and user/session context across all returned sources to identify root-cause chains, (6) if data is incomplete, make additional targeted supabase-integration calls until coverage is sufficient across functions + Postgres + platform health, (7) produce an incident-grade report with: confirmed findings, likely root cause, impacted components, blast radius, immediate mitigations, concrete permanent fix plan, and exact follow-up calls to validate recovery. Never simulate logs; only report real returned data and explicitly mark unknowns.";
 
 const PROCEED_WITH_PLAN_PROMPT = "Proceed Intelligently ✅";
+const SNAP_OUT_OF_IT_PROMPT = "snap out of the loop, and pick up where we left off.";
 
 const DRAFT_MY_EMAILS_PROMPT =
   "Draft my emails 📧 — Eliza, fetch my latest 5 emails before drafting anything. Intelligently classify each message as actionable, ads/promotions, spam/suspicious, or no-reply/automated failure notice. Do NOT draft replies for ads, spam, no-reply senders, or failure notices; only draft concise, high-quality responses for truly actionable emails.";
@@ -353,6 +354,10 @@ const COUNCIL_PRINT_MINUTES_PROMPT =
   "Print the Minutes 📝 — Council, adjourn the meeting and generate professionally formatted and summarized meeting minutes from this session (agenda, key discussion points, decisions, votes, owners, deadlines, and open risks), then email those finalized minutes to my user email address and confirm that the email was sent.";
 
 const MAX_STORED_SNIPPET_LENGTH = 3000;
+const LOOP_INTERRUPTION_PATTERN = /stopped a repeated tool-call loop|skipped rerunning the same function call/i;
+
+const wasLoopInterrupted = (content?: string): boolean =>
+  LOOP_INTERRUPTION_PATTERN.test(content || '');
 
 const buildStoreKnowledgePrompt = (lastMessageContent?: string): string => {
   const assistantMessage = (lastMessageContent || '').trim();
@@ -504,8 +509,14 @@ const getContextualButtons = (
   // 1. Add confirmation/feedback button first
   buttons.push(execConfig.feedbackButton);
   
-  // If full autonomy is enabled, we only want the primary feedback button ("Proceed Intelligently")
+  // If full autonomy is enabled, only show proceed + loop-recovery action (when relevant).
   if (fullAutonomyEnabled) {
+    if (wasLoopInterrupted(lastMessageContent)) {
+      return withCouncilButtons([
+        { label: "Snap out of it", emoji: "🧭" },
+        ...buttons
+      ]);
+    }
     return withCouncilButtons(buttons);
   }
 
@@ -552,6 +563,7 @@ const resolveQuickResponsePrompt = (
   if (label === SEND_EMAIL_BUTTON.label) return language === 'es' ? SPANISH_PROMPTS.sendEmail : SEND_EMAIL_PROMPT;
   if (label === "Inspect error logs") return language === 'es' ? SPANISH_PROMPTS.inspectErrorLogs : INSPECT_ERROR_LOGS_PROMPT;
   if (label === "Proceed Intelligently") return language === 'es' ? SPANISH_PROMPTS.proceedWithPlan : PROCEED_WITH_PLAN_PROMPT;
+  if (label === "Snap out of it") return SNAP_OUT_OF_IT_PROMPT;
   if (label === STORE_IN_KNOWLEDGE_BUTTON.label) {
     return language === 'es'
       ? SPANISH_PROMPTS.storeKnowledge
