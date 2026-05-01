@@ -3121,11 +3121,11 @@ async function executeToolsWithIteration(
     ''
   ).trim();
 
-  if (!finalContent && stoppedForRepeatedToolLoop) {
-    finalContent = "I stopped a repeated tool-call loop and skipped rerunning the same function call. Tell me what outcome you want, and I'll respond directly.";
+  if (!finalContent && stoppedForRepeatedToolLoop && totalToolsExecuted === 0) {
+    finalContent = "I couldn't safely execute a unique tool action this turn, so I stopped to avoid repeating the same call. Please tell me the exact outcome you want and I'll answer directly.";
   }
   
-  if (totalToolsExecuted > 0 && !finalContent) {
+  if (totalToolsExecuted > 0 && (!finalContent || stoppedForRepeatedToolLoop)) {
     const lastUserMsg = extractLastUserMessage(conversationMessages);
     const toolResults = memoryManager?.getToolResults().slice(-totalToolsExecuted) || [];
     
@@ -3137,7 +3137,7 @@ async function executeToolsWithIteration(
       ...conversationMessages,
       {
         role: 'system',
-        content: `You just executed ${totalToolsExecuted} tool(s) based on the user's request: "${lastUserMsg}".\n\nTool results summary:\n${toolSummary}\n\nNow synthesize these results into a natural, helpful, conversational response. Don't just list the raw tool outputs - explain what they mean, highlight interesting findings, and answer the user's question directly. Be warm and insightful.`
+        content: `You just executed ${totalToolsExecuted} tool(s) based on the user's request: "${lastUserMsg}".\n\nTool results summary:\n${toolSummary}\n\nNow synthesize these results into a natural, helpful, conversational response. Don't just list the raw tool outputs - explain what they mean, highlight interesting findings, and answer the user's question directly. Be warm and insightful.\n\nCRITICAL:\n- Do NOT mention internal loop handling, retries, function-call internals, or tool orchestration.\n- Do NOT output tool_call code blocks, JSON tool invocation syntax, or DSML tags.\n- Respond in plain language as the assistant's final answer for the user.`
       }
     ];
     
