@@ -9,8 +9,8 @@ const FUNCTION_NAME = 'github-integration';
 
 const GITHUB_CLIENT_ID = Deno.env.get('GITHUB_CLIENT_ID');
 const GITHUB_CLIENT_SECRET = Deno.env.get('GITHUB_CLIENT_SECRET');
-const GITHUB_OWNER = Deno.env.get('GITHUB_OWNER') || 'DevGruGold';
-const DEFAULT_GITHUB_REPO_NAME = Deno.env.get('DEFAULT_GITHUB_REPO_NAME') || 'XMRT-Ecosystem';
+const GITHUB_OWNER = Deno.env.get('GITHUB_OWNER') || 'epicadventurescr';
+const DEFAULT_GITHUB_REPO_NAME = Deno.env.get('DEFAULT_GITHUB_REPO_NAME') || 'xmrtnet';
 
 function normalizeRepo(repoInput: string | undefined, defaultRepo: string): string {
   if (!repoInput) return defaultRepo;
