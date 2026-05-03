@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { supabase } from '@/integrations/supabase/client';
 import { Smartphone, Cpu, Activity, Clock, CheckCircle2, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
+import { ReferralCodeInput } from './ReferralCodeInput';
 
 interface ClaimableWorker {
   worker_id: string;
@@ -43,6 +44,7 @@ export function WorkerClaimComponent() {
   const [claimDialogOpen, setClaimDialogOpen] = useState(false);
   const [claimToken, setClaimToken] = useState('');
   const [claiming, setClaiming] = useState(false);
+  const [referralCode, setReferralCode] = useState('');
 
   useEffect(() => {
     fetchWorkers();
@@ -114,9 +116,22 @@ export function WorkerClaimComponent() {
         return;
       }
 
+      // Apply referral code if provided
+      if (referralCode.trim()) {
+        try {
+          await supabase.rpc('apply_referral_code', {
+            p_referral_code: referralCode.trim().toUpperCase(),
+            p_worker_id: data.worker.worker_id
+          });
+        } catch (refError) {
+          console.error('Failed to apply referral code:', refError);
+        }
+      }
+
       toast.success(`Worker ${data.worker.worker_id} claimed successfully!`);
       setClaimDialogOpen(false);
       setClaimToken('');
+      setReferralCode('');
       fetchWorkers(); // Refresh lists
       
     } catch (error) {
@@ -341,6 +356,8 @@ export function WorkerClaimComponent() {
                 Find this token in your mobile mining setup output
               </p>
             </div>
+
+            <ReferralCodeInput value={referralCode} onChange={setReferralCode} />
           </div>
           
           <DialogFooter>
@@ -349,6 +366,7 @@ export function WorkerClaimComponent() {
               onClick={() => {
                 setClaimDialogOpen(false);
                 setClaimToken('');
+                setReferralCode('');
               }}
               disabled={claiming}
             >

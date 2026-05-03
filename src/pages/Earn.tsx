@@ -1,6 +1,6 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { DollarSign, GitCommit, Lightbulb, Users } from "lucide-react";
+import { DollarSign, GitCommit, Lightbulb, Users, Share2 } from "lucide-react";
 import { SEOHead } from "@/components/SEOHead";
 import { IdeaSubmissionForm } from "@/components/IdeaSubmissionForm";
 import { IdeaDashboard } from "@/components/IdeaDashboard";
@@ -8,8 +8,11 @@ import { ContributorDashboard } from "@/components/ContributorDashboard";
 import { TreasuryStats } from "@/components/TreasuryStats";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
+import { ReferralDashboard } from "@/components/ReferralDashboard";
+import { useWallet } from "@/hooks/useWallet";
 
 const Earn = () => {
+  const { wallet } = useWallet();
   return (
     <>
       <SEOHead
@@ -35,7 +38,7 @@ const Earn = () => {
         </div>
 
         <Tabs defaultValue="contribute" className="w-full">
-          <TabsList className="grid w-full grid-cols-4 mb-6">
+          <TabsList className="grid w-full grid-cols-5 mb-6">
             <TabsTrigger value="contribute" className="gap-2">
               <GitCommit className="w-4 h-4" />
               <span className="hidden sm:inline">Contribute</span>
@@ -43,6 +46,10 @@ const Earn = () => {
             <TabsTrigger value="treasury" className="gap-2">
               <DollarSign className="w-4 h-4" />
               <span className="hidden sm:inline">Treasury</span>
+            </TabsTrigger>
+            <TabsTrigger value="referrals" className="gap-2">
+              <Share2 className="w-4 h-4" />
+              <span className="hidden sm:inline">Referrals</span>
             </TabsTrigger>
             <TabsTrigger value="ideas" className="gap-2">
               <Lightbulb className="w-4 h-4" />
@@ -94,6 +101,27 @@ const Earn = () => {
                 </Card>
               </div>
             </div>
+          </TabsContent>
+
+          {/* Referrals Tab */}
+          <TabsContent value="referrals">
+            {wallet?.address ? (
+              <ReferralDashboard walletAddress={wallet.address} />
+            ) : (
+              <Card className="border-border bg-card">
+                <CardContent className="flex flex-col items-center justify-center py-12">
+                  <Share2 className="w-12 h-12 text-muted-foreground mb-4" />
+                  <h3 className="text-lg font-medium mb-2">Connect Your Wallet</h3>
+                  <p className="text-muted-foreground text-center max-w-md mb-4">
+                    Connect your wallet to generate a referral code and start
+                    earning 20% commission on referred miners
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    Use the wallet connection button in the navigation bar
+                  </p>
+                </CardContent>
+              </Card>
+            )}
           </TabsContent>
 
           {/* Ideas Tab */}

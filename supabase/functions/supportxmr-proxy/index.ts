@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 
-// Hardcoded wallet address for mining pool
-const DEFAULT_WALLET = '46UxNFuGM2E3UwmZWWJicaRPoRwqwW4byQkaTHkX8yPcVihp91qAVtSFipWUGJJUyTXgzSqxzDQtNLf2bsp2DX2qCCgC5mg';
+// Miners wallet — env var takes priority, falls back to hardcoded address
+const DEFAULT_WALLET = Deno.env.get('MINER_WALLET_ADDRESS') || '46UxNFuGM2E3UwmZWWJicaRPoRwqwW4byQkaTHkX8yPcVihp91qAVtSFipWUGJJUyTXgzSqxzDQtNLf2bsp2DX2qCCgC5mg';
 const POOL_API_BASE = 'https://supportxmr.com/api';
 
 // Monero atomic units: 1 XMR = 1,000,000,000,000 piconeros
