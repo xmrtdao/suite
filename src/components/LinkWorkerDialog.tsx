@@ -6,6 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Plus, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { ReferralCodeInput } from './ReferralCodeInput';
 
 interface LinkWorkerDialogProps {
   userId: string;
@@ -16,6 +17,7 @@ interface LinkWorkerDialogProps {
 export function LinkWorkerDialog({ userId, existingWorkerIds, onWorkerLinked }: LinkWorkerDialogProps) {
   const [open, setOpen] = useState(false);
   const [workerId, setWorkerId] = useState('');
+  const [referralCode, setReferralCode] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
   const [verificationStatus, setVerificationStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
@@ -67,6 +69,22 @@ export function LinkWorkerDialog({ userId, existingWorkerIds, onWorkerLinked }: 
 
       if (updateError) throw updateError;
 
+      // Apply referral code if one was provided
+      if (referralCode.trim()) {
+        const { error: refError } = await supabase.rpc('apply_referral_code', {
+          p_referral_code: referralCode.trim().toUpperCase(),
+          p_referred_worker_id: cleanWorkerId,
+          p_referred_wallet: null,
+        });
+
+        if (!refError) {
+          toast.success('Referral applied! You are now earning 20% commission.');
+        } else {
+          console.warn('Referral application failed (non-fatal):', refError);
+          toast.error(refError.message || 'Could not apply referral code');
+        }
+      }
+
       setVerificationStatus('success');
       toast.success(`Worker ${cleanWorkerId} linked successfully!`);
       onWorkerLinked(cleanWorkerId);
@@ -74,6 +92,7 @@ export function LinkWorkerDialog({ userId, existingWorkerIds, onWorkerLinked }: 
       setTimeout(() => {
         setOpen(false);
         setWorkerId('');
+        setReferralCode('');
         setVerificationStatus('idle');
       }, 1500);
 
@@ -117,6 +136,11 @@ export function LinkWorkerDialog({ userId, existingWorkerIds, onWorkerLinked }: 
               Find your worker ID in the MobileMonero app or XMRig config
             </p>
           </div>
+
+          <ReferralCodeInput
+            value={referralCode}
+            onChange={setReferralCode}
+          />
 
           {verificationStatus === 'error' && (
             <div className="flex items-center gap-2 text-destructive text-sm">
