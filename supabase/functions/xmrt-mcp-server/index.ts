@@ -555,6 +555,108 @@ Please analyze:
 7. Overall system reliability
 8. Recommendations for improvement`;
 
+    case 'xmrt_analyze_proposal':
+      return `Analyze the following XMRT DAO governance proposal.
+
+Proposal ID: ${args.proposal_id}
+
+Please provide:
+1. Proposal overview and objectives
+2. Impact analysis on the ecosystem
+3. Feasibility assessment
+4. Risk assessment
+5. Community sentiment analysis
+6. Voting recommendations
+7. Implementation timeline evaluation`;
+
+    case 'xmrt_optimize_code':
+      return `Optimize the following code for better performance.
+
+Language: ${args.language}
+
+Code:
+\`\`\`${args.language}
+${args.code}
+\`\`\`
+
+Please analyze:
+1. Performance bottlenecks
+2. Algorithmic optimizations
+3. Memory usage improvements
+4. Parallelism opportunities
+5. Best practice improvements
+6. Refactored code with explanations`;
+
+    case 'xmrt_security_audit':
+      return `Perform a security audit on the following target.
+
+Target: ${args.target}
+${args.scope ? `Scope: ${args.scope}` : ''}
+
+Please analyze:
+1. Vulnerability assessment
+2. Attack surface analysis
+3. Dependency security
+4. Authentication & authorization
+5. Data handling & privacy
+6. Input validation & sanitization
+7. Secure configuration review
+8. Recommendations and remediation steps`;
+
+    case 'xmrt_summarize_knowledge':
+      return `Summarize knowledge entities related to the topic: ${args.topic}
+
+Please provide:
+1. Key concepts and entities
+2. Relationships between concepts
+3. Temporal trends and patterns
+4. Confidence levels and sources
+5. Knowledge gaps to explore
+6. Practical applications and relevance to XMRT ecosystem`;
+
+    case 'xmrt_plan_workflow':
+      return `Plan a multi-step workflow to accomplish the following goal.
+
+Goal: ${args.goal}
+${args.constraints ? `Constraints: ${args.constraints}` : ''}
+
+Please design:
+1. Workflow breakdown into phases/steps
+2. Dependencies between steps
+3. Resource allocation
+4. Timeline estimates
+5. Risk mitigation strategies
+6. Success criteria for each milestone
+7. Alternative paths and fallbacks`;
+
+    case 'xmrt_estimate_effort':
+      return `Estimate effort and resources required for the following task.
+
+Task Description: ${args.task_description}
+
+Please provide:
+1. Effort estimation (person-hours)
+2. Skill requirements
+3. Tooling dependencies
+4. Risk factors and buffers
+5. Recommended approach (build vs. integrate vs. delegate)
+6. Suggested milestones with deadlines`;
+
+    case 'xmrt_extract_insights':
+      return `Extract actionable insights from the following source.
+
+Source: ${args.source}
+${args.focus ? `Focus Area: ${args.focus}` : ''}
+
+Please extract:
+1. Key findings and patterns
+2. Actionable recommendations
+3. Risks and opportunities
+4. Data-driven evidence
+5. Decision support matrix
+6. Follow-up actions needed
+7. Related areas for deeper analysis`;
+
     default:
       return `Execute prompt: ${promptName}`;
   }

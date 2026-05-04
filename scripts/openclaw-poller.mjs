@@ -180,9 +180,8 @@ function buildTaskMessage(task) {
  * Async version of runOpenClaw — spawns process and resolves when done.
  * Non-blocking: multiple tasks can dispatch in parallel.
  */
-// Full path avoids PATH resolution issues; shell:false ensures args are properly
-// passed as separate argv entries (shell:true concatenates them unsafely, causing
-// "too many arguments" when --message contains spaces).
+// Full path avoids PATH resolution issues; shell:true routes through cmd.exe
+// so .cmd files execute properly on Windows (shell:false causes EINVAL).
 const OPENCLAW_CMD = process.env.OPENCLAW_CMD
     || 'C:\\Users\\PureTrek\\AppData\\Roaming\\npm\\openclaw.cmd';
 
@@ -202,6 +201,8 @@ function runOpenClawAsync(message, agentMeta, taskId) {
 
         console.log(`  🏃 Spawning: openclaw agent --agent ${agentName} --session-id ${taskSessionId} --message "${message.slice(0, 60)}..."`);
 
+        // Windows fix: use shell:true so .cmd files resolve via cmd.exe
+        // (spawn with shell:false causes EINVAL for .cmd scripts)
         const child = spawn(OPENCLAW_CMD, [
             'agent',
             '--agent', agentName,
@@ -210,7 +211,7 @@ function runOpenClawAsync(message, agentMeta, taskId) {
             '--json',
             // NOTE: NO --deliver flag → output stays local, never routes to WhatsApp
         ], {
-            shell: false,   // ← IMPORTANT: false so args are passed as proper argv, not concatenated string
+            shell: true,    // ← Windows: required so .cmd files execute (EINVAL fix)
             env: process.env,
             windowsHide: true,
         });
