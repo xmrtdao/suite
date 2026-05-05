@@ -3,20 +3,13 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { PDFDocument, StandardFonts, rgb, degrees } from "https://esm.sh/pdf-lib@1.17.1";
 
 /**
- * PDF Handler Edge Function
- * 
- * Direct HTTP API for PDF manipulation operations.
- * Each endpoint handles a specific PDF transformation.
- * 
+ * PDF Handler Edge Function — MCP Native
+ *
+ * Accepts MCP-formatted payloads from xmrt-mcp-server via Supabase functions.invoke().
+ * The incoming payload always contains an `action` field that determines the operation.
+ *
+ * Supported actions: merge, split, sign, watermark, metadata, compress
  * All PDFs are read from / written to Supabase Storage "documents" bucket.
- * 
- * Endpoints:
- *   POST /merge       — Merge multiple PDFs
- *   POST /split       — Split by page ranges
- *   POST /sign        — Add signature field
- *   POST /watermark   — Add text watermark
- *   POST /metadata    — Read/edit metadata
- *   POST /compress    — Optimize PDF
  */
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -60,19 +53,28 @@ serve(async (req: Request) => {
     });
   }
 
-  const url = new URL(req.url);
-  const action = url.pathname.replace(/^\/+/, "").replace(/\/$/, "");
-
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
   let result: unknown;
 
   try {
     const body = await req.json();
 
+    // Support both direct invocation and MCP-routed payloads
+    // MCP payloads have `action` at the top level (transformed by xmrt-mcp-server)
+    // Direct payloads have action nested differently
+    const action = body.action as string;
+    const payload = body;
+
+    if (!action) {
+      return new Response(JSON.stringify({ error: "Missing action field" }), {
+        status: 400, headers: { "Content-Type": "application/json", ...corsHeaders },
+      });
+    }
+
     switch (action) {
       case "merge": {
-        const sources: string[] = body.sources || [];
-        if (sources.length < 2) throw new Error("At least 2 source paths required");
+        const sources: string[] = payload.sources || [];
+        if (sources.length < 2) throw new Error("At least 2 PDF sources required");
 
         const merged = await PDFDocument.create();
         for (const src of sources) {
@@ -83,23 +85,25 @@ serve(async (req: Request) => {
         }
 
         const outBytes = await merged.save();
-        const outPath = `merged/${Date.now()}-merged.pdf`;
+        const outPath = `merged/${Date.now()}-${payload.output_name || "merged.pdf"}`;
         const outUrl = await savePdfToStorage(supabase, outPath, outBytes);
         result = { pages: merged.getPageCount(), url: outUrl, path: outPath, size: outBytes.length };
         break;
       }
 
       case "split": {
-        const { source, ranges } = body;
+        const { source, ranges } = payload;
         if (!source || !ranges) throw new Error("source and ranges required");
 
         const bytes = await getPdfFromStorage(supabase, source);
         const doc = await PDFDocument.load(bytes);
+        const totalPages = doc.getPageCount();
+
         const outputs: Array<{ name: string; pages: number; url: string; path: string }> = [];
 
         for (const range of ranges) {
           const start = Math.max(0, (range.start || 1) - 1);
-          const end = Math.min(doc.getPageCount(), range.end || doc.getPageCount());
+          const end = Math.min(totalPages, range.end || totalPages);
           if (start >= end) continue;
 
           const newDoc = await PDFDocument.create();
@@ -114,12 +118,12 @@ serve(async (req: Request) => {
           outputs.push({ name, pages: newDoc.getPageCount(), url: outUrl, path: outPath });
         }
 
-        result = { totalPages: doc.getPageCount(), outputs };
+        result = { totalPages, outputs };
         break;
       }
 
       case "sign": {
-        const { source, text, position, reason } = body;
+        const { source, text, position, reason } = payload;
         if (!source) throw new Error("source required");
 
         const bytes = await getPdfFromStorage(supabase, source);
@@ -150,7 +154,7 @@ serve(async (req: Request) => {
       }
 
       case "watermark": {
-        const { source, text, opacity } = body;
+        const { source, text, opacity } = payload;
         if (!source) throw new Error("source required");
 
         const bytes = await getPdfFromStorage(supabase, source);
@@ -175,7 +179,7 @@ serve(async (req: Request) => {
       }
 
       case "metadata": {
-        const { source, metadata } = body;
+        const { source, metadata } = payload;
         if (!source) throw new Error("source required");
 
         const bytes = await getPdfFromStorage(supabase, source);
@@ -199,7 +203,7 @@ serve(async (req: Request) => {
       }
 
       case "compress": {
-        const { source, quality } = body;
+        const { source, quality } = payload;
         if (!source) throw new Error("source required");
 
         const bytes = await getPdfFromStorage(supabase, source);
@@ -214,6 +218,7 @@ serve(async (req: Request) => {
         const outPath = `compressed/${Date.now()}-compressed.pdf`;
         const outUrl = await savePdfToStorage(supabase, outPath, outBytes);
         const savings = originalSize - outBytes.length;
+
         result = {
           originalSize, compressedSize: outBytes.length,
           savings, savingsPercent: `${((savings / originalSize) * 100).toFixed(1)}%`,

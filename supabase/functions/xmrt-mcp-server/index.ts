@@ -182,7 +182,22 @@ async function handleToolCall(params: any, supabase: any): Promise<MCPResponse> 
     'xmrt_charger_connect_device': 'monitor-device-connections',
     'xmrt_charger_issue_command': 'issue-engagement-command',
     'xmrt_charger_validate_pop': 'validate-pop-event',
-    'xmrt_charger_get_metrics': 'aggregate-device-metrics'
+    'xmrt_charger_get_metrics': 'aggregate-device-metrics',
+
+    // PDF Document Operations
+    'xmrt_pdf_merge': 'pdf-handler',
+    'xmrt_pdf_split': 'pdf-handler',
+    'xmrt_pdf_sign': 'pdf-handler',
+    'xmrt_pdf_watermark': 'pdf-handler',
+    'xmrt_pdf_metadata': 'pdf-handler',
+    'xmrt_pdf_compress': 'pdf-handler',
+
+    // Task & Agent Orchestration (DenoClaw)
+    'xmrt_create_task': 'denoclaw',
+    'xmrt_decompose_task': 'denoclaw',
+    'xmrt_execute_task': 'denoclaw',
+    'xmrt_get_task_status': 'denoclaw',
+    'xmrt_continue_checkpointed': 'denoclaw'
   };
 
   const targetFunction = toolRoutes[name];
@@ -363,6 +378,66 @@ function transformArgsForFunction(toolName: string, args: any): any {
           }
         }
       };
+
+    // PDF Document Operations
+    case 'xmrt_pdf_merge':
+      return { action: 'merge', sources: args.sources, output_name: args.output_name || 'merged.pdf' };
+
+    case 'xmrt_pdf_split':
+      return { action: 'split', source: args.source, ranges: args.ranges };
+
+    case 'xmrt_pdf_sign':
+      return {
+        action: 'sign',
+        source: args.source,
+        text: args.text || 'Digitally Signed',
+        position: args.position,
+        reason: args.reason || 'XMRT DAO Digital Signature'
+      };
+
+    case 'xmrt_pdf_watermark':
+      return {
+        action: 'watermark',
+        source: args.source,
+        text: args.text || 'XMRT DAO Confidential',
+        opacity: args.opacity ?? 0.3
+      };
+
+    case 'xmrt_pdf_metadata':
+      return {
+        action: 'metadata',
+        source: args.source,
+        metadata: args.metadata || {}
+      };
+
+    case 'xmrt_pdf_compress':
+      return {
+        action: 'compress',
+        source: args.source,
+        quality: args.quality || 'medium'
+      };
+
+    // DenoClaw Task Operations
+    case 'xmrt_create_task':
+      return {
+        action: 'create',
+        agentId: args.agent_id,
+        objective: args.objective,
+        context: args.context || {},
+        priority: args.priority || 5
+      };
+
+    case 'xmrt_decompose_task':
+      return { action: 'decompose', taskId: args.task_id };
+
+    case 'xmrt_execute_task':
+      return { action: 'execute', taskId: args.task_id };
+
+    case 'xmrt_get_task_status':
+      return { action: 'status', taskId: args.task_id };
+
+    case 'xmrt_continue_checkpointed':
+      return { action: 'continue' };
 
     default:
       return args;
