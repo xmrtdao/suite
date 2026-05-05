@@ -217,13 +217,22 @@ export async function executeToolCall(
         // Note: In Edge Functions, process.env is via Deno.env usually, but here we check if passed in context or fetch from simple map
         // For this architecture we assume ANTIGRAVITY_URL is set as a secret in the Edge Function environment
         const antigravityUrl = Deno.env.get('ANTIGRAVITY_URL');
-        const antigravityToken = Deno.env.get('ANTIGRAVITY_TOKEN') || 'default-dev-token';
+        const antigravityToken = Deno.env.get('ANTIGRAVITY_TOKEN');
 
         if (!antigravityUrl) {
           result = {
             success: false,
             error: 'Configuration Error',
             learning_point: 'The ANTIGRAVITY_URL secret is not set in the Edge Function. Please set it to your active ngrok URL.'
+          };
+          break;
+        }
+
+        if (!antigravityToken) {
+          result = {
+            success: false,
+            error: 'Configuration Error',
+            learning_point: 'The ANTIGRAVITY_TOKEN secret is not set in the Edge Function. Please set it in Supabase secrets.'
           };
           break;
         }
