@@ -1,4 +1,5 @@
 import { Tool } from "../types.ts";
+import { EXTENDED_TOOLS } from "./extended-tool-registry.ts";
 
 export const TOOL_REGISTRY: Tool[] = [
   // AI & Conversation Tools
@@ -668,3 +669,6 @@ export const TOOL_REGISTRY: Tool[] = [
     }
   }
 ];
+
+// Merge core registry with extended registry containing ALL edge functions
+export const ALL_TOOLS: Tool[] = [...TOOL_REGISTRY, ...EXTENDED_TOOLS];

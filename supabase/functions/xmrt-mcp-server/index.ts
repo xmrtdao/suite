@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.58.0";
 import { corsHeaders } from "../_shared/cors.ts";
-import { TOOL_REGISTRY } from "./tools/tool-registry.ts";
+import { TOOL_REGISTRY, ALL_TOOLS } from "./tools/tool-registry.ts";
 import { RESOURCE_REGISTRY } from "./resources/resource-registry.ts";
 import { PROMPT_REGISTRY } from "./prompts/prompt-registry.ts";
 import { MCPServerInfo, MCPRequest, MCPResponse, Tool } from "./types.ts";
@@ -52,7 +52,7 @@ serve(async (req) => {
 
       case 'tools/list':
         response = {
-          tools: TOOL_REGISTRY
+          tools: ALL_TOOLS
         };
         break;
 
@@ -200,7 +200,7 @@ async function handleToolCall(params: any, supabase: any): Promise<MCPResponse> 
     'xmrt_continue_checkpointed': 'denoclaw'
   };
 
-  const targetFunction = toolRoutes[name];
+  const targetFunction = toolRoutes[name] || name;
   if (!targetFunction) {
     throw new Error(`No route configured for tool: ${name}`);
   }

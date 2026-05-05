@@ -83,7 +83,7 @@ const steps = [
   {
     number: '02',
     title: 'Set Outcomes',
-    description: 'Give Suite objectives, constraints, and brand context once.',
+    description: 'Give SupaClaw objectives, constraints, and brand context once.',,
   },
   {
     number: '03',
@@ -381,7 +381,7 @@ export default function Landing() {
             ))}
           </div>
           <p className="mt-4 text-xs text-muted-foreground">
-            * Forecast metrics are generated from Suite AI forecasts and executive swarm predictive analysis.
+            * Forecast metrics are generated from SupaClaw AI forecasts and executive swarm predictive analysis.
           </p>
         </div>
       </section>
