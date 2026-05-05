@@ -18,6 +18,7 @@ import {
   Zap,
   Sparkles,
   PencilLine,
+  Layers,
 } from 'lucide-react';
 
 const executives = [
@@ -328,6 +329,15 @@ export default function Landing() {
                   <Play className="mr-2 w-5 h-5" />
                   {t('landing.hero.watch.demo')}
                 </Button>
+                <Button
+                  size="lg"
+                  variant="outline"
+                  className="text-lg px-8 py-6 border-emerald-500/30 text-emerald-400 hover:border-emerald-500/60 hover:bg-emerald-500/10"
+                  onClick={() => window.location.href = '/executives'}
+                >
+                  <Layers className="mr-2 w-5 h-5" />
+                  Executive Dashboard
+                </Button>
               </div>
             </div>
           </div>
@@ -350,7 +360,15 @@ export default function Landing() {
               <Play className="mr-2 w-5 h-5" />
               {t('landing.hero.watch.demo')}
             </Button>
-          </div>
+            <Button
+              size="lg"
+              variant="outline"
+              className="text-lg px-8 py-6 border-emerald-500/30 text-emerald-400 hover:border-emerald-500/60 hover:bg-emerald-500/10"
+              onClick={() => window.location.href = '/executives'}
+            >
+              <Layers className="mr-2 w-5 h-5" />
+              Executive Dashboard
+            </Button>
 
           {/* Stats Row - show final values immediately for fast scrollers */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-3xl mx-auto">
