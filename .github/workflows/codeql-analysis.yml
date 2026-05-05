@@ -37,17 +37,15 @@ jobs:
         # Required before invoking local composite actions (e.g. ./.github/actions/*)
         # so the runner has access to repository files.
 
-      - name: Set up project
-        uses: ./.github/actions/setup-node-install
-
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
           languages: javascript-typescript
-          build-mode: manual
-
-      - name: Build application for analysis
-        run: npm run build
+          # build-mode: none is the correct choice for JavaScript/TypeScript projects.
+          # CodeQL analyzes the source files directly without requiring a build step.
+          # This avoids failures caused by build-time issues (missing env vars, type errors,
+          # or dynamic imports in the build pipeline) that are unrelated to security analysis.
+          build-mode: none
 
       - name: Perform CodeQL analysis
         uses: github/codeql-action/analyze@v3

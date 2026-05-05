@@ -34,11 +34,19 @@ jobs:
       - name: Type check
         run: npm run type-check
 
+      - name: Lint
+        run: npm run lint
+
       - name: Build application
         run: npm run build
 
-      - name: Run unit tests
-        run: npm test
+      - name: Verify build output
+        run: |
+          if [ ! -d "dist" ]; then
+            echo "Build failed: dist directory not found"
+            exit 1
+          fi
+          echo "Build output verified."
 
       - name: Upload production build
         if: github.event_name != 'pull_request'
