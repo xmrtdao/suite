@@ -89,6 +89,26 @@ Security is a top priority. Please see our [Security Policy](SECURITY.md) for re
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
+
+
+## 🚀 eliza-direct (ZeroClaw Integration)
+
+A new gatekeeper-free AI chat endpoint is available at `supabase/functions/eliza-direct/`.
+
+- **Memory-aware**: Loads `conversation_memory`, `conversation_summaries`, and `conversation_context`
+- **Gatekeeper-free**: No forced 5-iteration tool loop, no `🫎🔧` regex parsing
+- **Tool discipline**: Tools only execute on native DeepSeek `tool_calls`
+- **ZeroClaw-ready**: Designed for the AMD Developer Hackathon governance layer
+
+```bash
+curl -X POST https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/eliza-direct \
+  -H "Content-Type: application/json" \
+  -d '{"userQuery": "What is XMRT?", "user_id": "user-123", "session_id": "sess-456"}'
+```
+
+Learn more: [github.com/xmrtdao/zero-claw](https://github.com/xmrtdao/zero-claw)
+
+
 ## 🤝 Contributing
 
 Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
