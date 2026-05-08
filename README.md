@@ -1,7 +1,7 @@
 # XMRT Suite 🚀
 
-[![CI/CD Pipeline](https://github.com/DevGruGold/suite/actions/workflows/ci.yml/badge.svg)](https://github.com/DevGruGold/suite/actions/workflows/ci.yml)
-[![Security Analysis](https://github.com/DevGruGold/suite/actions/workflows/codeql-analysis.yml/badge.svg)](https://github.com/DevGruGold/suite/actions/workflows/codeql-analysis.yml)
+[![CI/CD Pipeline](https://github.com/xmrtdao/suite/actions/workflows/ci.yml/badge.svg)](https://github.com/xmrtdao/suite/actions/workflows/ci.yml)
+[![Security Analysis](https://github.com/xmrtdao/suite/actions/workflows/codeql-analysis.yml/badge.svg)](https://github.com/xmrtdao/suite/actions/workflows/codeql-analysis.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 AI-Powered Mining & DAO Management Platform for XMRT Ecosystem with real-time mining statistics and autonomous agent integration.
@@ -27,7 +27,7 @@ AI-Powered Mining & DAO Management Platform for XMRT Ecosystem with real-time mi
 
 ```bash
 # Clone the repository
-git clone https://github.com/DevGruGold/suite.git
+git clone https://github.com/xmrtdao/suite.git
 cd suite
 
 # Install dependencies
@@ -117,7 +117,7 @@ Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for gui
 
 - 📧 Email: support@devgrugold.com
 - 💬 Discord: [Join our community](https://discord.gg/xmrt)
-- 🐛 Issues: [GitHub Issues](https://github.com/DevGruGold/suite/issues)
+- 🐛 Issues: [GitHub Issues](https://github.com/xmrtdao/suite/issues)
 
 ---
 
