@@ -1,5 +1,8 @@
 # XMRT Suite 🚀
 
+[![HF Space](https://img.shields.io/badge/🤗%20Hugging%20Face-Space-blue)](https://huggingface.co/spaces/XMRTDAO/suite)
+[![GitHub](https://img.shields.io/badge/GitHub-Repo-black)](https://github.com/xmrtdao/suite)
+
 [![CI/CD Pipeline](https://github.com/xmrtdao/suite/actions/workflows/ci.yml/badge.svg)](https://github.com/xmrtdao/suite/actions/workflows/ci.yml)
 [![Security Analysis](https://github.com/xmrtdao/suite/actions/workflows/codeql-analysis.yml/badge.svg)](https://github.com/xmrtdao/suite/actions/workflows/codeql-analysis.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
