@@ -11,6 +11,7 @@ const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY') || '';
 const DEEPSEEK_API_KEY = Deno.env.get('DEEPSEEK_API_KEY') || '';
 const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY') || '';
 const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY') || '';
+const OLLAMA_API_KEY = Deno.env.get('OLLAMA_API_KEY') || '';
 
 // Executive Configuration
 const EXECUTIVE_NAME = Deno.env.get('EXECUTIVE_NAME') || 'Eliza';
@@ -3000,7 +3001,8 @@ class EnhancedProviderCascade {
     const fallbackResults = await Promise.all([
       callDeepSeekFallback(messages, tools),
       callKimiFallback(messages, tools),
-      callGeminiFallback(messages, tools, images)
+      callGeminiFallback(messages, tools, images),
+      callOllamaFallback(messages, tools)
     ]);
     
     for (const result of fallbackResults) {
@@ -3008,7 +3010,7 @@ class EnhancedProviderCascade {
         return {
           success: true,
           content: result.content,
-          tool_calls: result.tool_calls,
+          tool_calls: result.tool_calls || [],
           provider: result.provider,
           model: result.model
         };
@@ -3832,6 +3834,67 @@ Say:
 - If unsure, ask: "Just to clarify – when you say 'yes', are you agreeing to create the GitHub issue?"
 
 Remember: You're here to be genuinely helpful, insightful, and pleasant to talk with.`;
+}
+
+
+// ========== OLLAMA PRO FALLBACK ==========
+async function callOllamaFallback(messages: any[], _tools?: any[]): Promise<any> {
+  console.log('Trying Ollama Pro fallback...');
+  
+  if (!OLLAMA_API_KEY) {
+    console.warn('OLLAMA_API_KEY not configured');
+    return null;
+  }
+  
+  try {
+    // Strip tools - qwen3.5 does not support native function calling
+    const cleanMessages = messages.map((msg: any) => ({
+      role: msg.role,
+      content: typeof msg.content === 'string' ? msg.content : 
+               (msg.content?.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n') || '')
+    }));
+    
+    const response = await fetch('https://ollama.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OLLAMA_API_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        model: 'qwen3.5',
+        messages: cleanMessages,
+        max_tokens: 4096,
+        temperature: 0.7,
+        stream: false
+      }),
+      signal: AbortSignal.timeout(60000)
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.warn('Ollama Pro fallback HTTP ' + response.status + ': ' + errorText.slice(0, 100));
+      return null;
+    }
+    
+    const data = await response.json();
+    const content = data.choices?.[0]?.message?.content || '';
+    
+    if (!content) {
+      console.warn('Ollama Pro fallback returned empty content');
+      return null;
+    }
+    
+    console.log('Ollama Pro fallback successful');
+    return {
+      content,
+      tool_calls: [],
+      provider: 'ollama-pro',
+      model: 'qwen3.5'
+    };
+  } catch (error: any) {
+    console.warn('Ollama Pro fallback failed: ' + (error.message || error));
+    return null;
+  }
 }
 
 // ========== EMERGENCY STATIC FALLBACK ==========
