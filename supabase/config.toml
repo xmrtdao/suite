@@ -51,9 +51,6 @@ verify_jwt = false
 [functions.n8n-workflow-generator]
 verify_jwt = false
 
-[functions.gemini-agent-creator]
-verify_jwt = false
-
 [functions.workflow-optimizer]
 verify_jwt = false
 
@@ -319,6 +316,9 @@ verify_jwt = false
 [functions.mobile-miner-script]
 verify_jwt = false
 
+[functions.mesh-publish]
+verify_jwt = false
+
 [functions.monitor-device-connections]
 verify_jwt = false
 
@@ -532,6 +532,9 @@ verify_jwt = false
 [functions.weekly-retrospective-post]
 verify_jwt = false
 
+[functions.xmrt-university]
+verify_jwt = false
+
 [functions.worker-registration]
 verify_jwt = false
 
@@ -553,3 +556,15 @@ verify_jwt = false
 [functions.xmrt-workflow-templates]
 verify_jwt = false
 
+[functions.agent-message-bus]
+verify_jwt = false
+
+[functions.agent-messages-bridge]
+verify_jwt = false
+
+[functions.mesh-peer-connector]
+verify_jwt = false
+
+
+[functions.gossip-hub]
+verify_jwt = false
