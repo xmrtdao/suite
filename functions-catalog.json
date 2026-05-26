@@ -1,0 +1,2567 @@
+[
+  {
+    "name": "admin-db-tool",
+    "path": "supabase/functions/admin-db-tool/index.ts",
+    "dependencies": [
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": false,
+    "needs_secrets": true
+  },
+  {
+    "name": "agent-coordination-hub",
+    "path": "supabase/functions/agent-coordination-hub/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "agent-deployment-coordinator",
+    "path": "supabase/functions/agent-deployment-coordinator/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "agent-manager",
+    "path": "supabase/functions/agent-manager/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "agent-message-bus",
+    "path": "supabase/functions/agent-message-bus/index.ts",
+    "dependencies": [
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "agent-messages-bridge",
+    "path": "supabase/functions/agent-messages-bridge/index.ts",
+    "dependencies": [
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "agent-work-executor",
+    "path": "supabase/functions/agent-work-executor/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "aggregate-device-metrics",
+    "path": "supabase/functions/aggregate-device-metrics/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "ai-chat",
+    "path": "supabase/functions/ai-chat/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "android-control",
+    "path": "supabase/functions/android-control/index.ts",
+    "dependencies": [
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": false,
+    "needs_secrets": true
+  },
+  {
+    "name": "api-key-health-monitor",
+    "path": "supabase/functions/api-key-health-monitor/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "auth-health-monitor",
+    "path": "supabase/functions/auth-health-monitor/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "autonomous-code-fixer",
+    "path": "supabase/functions/autonomous-code-fixer/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "autonomous-decision-maker",
+    "path": "supabase/functions/autonomous-decision-maker/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "broadcast-state-change",
+    "path": "supabase/functions/broadcast-state-change/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "check-frontend-health",
+    "path": "supabase/functions/check-frontend-health/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "check-vote",
+    "path": "supabase/functions/check-vote/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "cleanup-duplicate-tasks",
+    "path": "supabase/functions/cleanup-duplicate-tasks/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "code-monitor-daemon",
+    "path": "supabase/functions/code-monitor-daemon/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "community-spotlight-post",
+    "path": "supabase/functions/community-spotlight-post/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "conversation-access",
+    "path": "supabase/functions/conversation-access/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "convert-session-to-user",
+    "path": "supabase/functions/convert-session-to-user/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "coo-chat",
+    "path": "supabase/functions/coo-chat/index.ts",
+    "dependencies": [
+      "http_serve"
+    ],
+    "standalone": true,
+    "needs_supabase": false,
+    "needs_secrets": false
+  },
+  {
+    "name": "correlate-user-identity",
+    "path": "supabase/functions/correlate-user-identity/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "create-suite-quote",
+    "path": "supabase/functions/create-suite-quote/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "cron-proxy",
+    "path": "supabase/functions/cron-proxy/index.ts",
+    "dependencies": [
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": false,
+    "needs_secrets": true
+  },
+  {
+    "name": "daily-discussion-post",
+    "path": "supabase/functions/daily-discussion-post/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "daily-news-finder",
+    "path": "supabase/functions/daily-news-finder/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "debug-analytics-data-flow",
+    "path": "supabase/functions/debug-analytics-data-flow/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "deepseek-chat",
+    "path": "supabase/functions/deepseek-chat/index.ts",
+    "dependencies": [
+      "http_serve"
+    ],
+    "standalone": true,
+    "needs_supabase": false,
+    "needs_secrets": false
+  },
+  {
+    "name": "denoclaw",
+    "path": "supabase/functions/denoclaw/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "deploy-approved-edge-function",
+    "path": "supabase/functions/deploy-approved-edge-function/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "diagnose-workflow-failure",
+    "path": "supabase/functions/diagnose-workflow-failure/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "ecosystem-health-check",
+    "path": "supabase/functions/ecosystem-health-check/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "ecosystem-monitor",
+    "path": "supabase/functions/ecosystem-monitor/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "eliza-direct",
+    "path": "supabase/functions/eliza-direct/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "eliza-intelligence-coordinator",
+    "path": "supabase/functions/eliza-intelligence-coordinator/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "eliza-message-inbox",
+    "path": "supabase/functions/eliza-message-inbox/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "eliza-ping",
+    "path": "supabase/functions/eliza-ping/index.ts",
+    "dependencies": [
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": false,
+    "needs_secrets": true
+  },
+  {
+    "name": "eliza-python-runtime",
+    "path": "supabase/functions/eliza-python-runtime/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "eliza-relay",
+    "path": "supabase/functions/eliza-relay/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "eliza-self-evaluation",
+    "path": "supabase/functions/eliza-self-evaluation/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "enhanced-learning",
+    "path": "supabase/functions/enhanced-learning/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "evaluate-community-idea",
+    "path": "supabase/functions/evaluate-community-idea/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "evening-summary-post",
+    "path": "supabase/functions/evening-summary-post/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "event-dispatcher",
+    "path": "supabase/functions/event-dispatcher/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "event-router",
+    "path": "supabase/functions/event-router/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "execute-approved-proposal",
+    "path": "supabase/functions/execute-approved-proposal/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "execute-scheduled-actions",
+    "path": "supabase/functions/execute-scheduled-actions/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "executive-swarm",
+    "path": "supabase/functions/executive-swarm/index.ts",
+    "dependencies": [
+      "http_serve"
+    ],
+    "standalone": true,
+    "needs_supabase": false,
+    "needs_secrets": false
+  },
+  {
+    "name": "extract-knowledge",
+    "path": "supabase/functions/extract-knowledge/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "fetch-auto-fix-results",
+    "path": "supabase/functions/fetch-auto-fix-results/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "function-usage-analytics",
+    "path": "supabase/functions/function-usage-analytics/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "gemini-agent-creator",
+    "path": "supabase/functions/gemini-agent-creator/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "gemini-chat",
+    "path": "supabase/functions/gemini-chat/index.ts",
+    "dependencies": [
+      "http_serve"
+    ],
+    "standalone": true,
+    "needs_supabase": false,
+    "needs_secrets": false
+  },
+  {
+    "name": "gemini-computer-use",
+    "path": "supabase/functions/gemini-computer-use/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "generate-stripe-link",
+    "path": "supabase/functions/generate-stripe-link/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "get-code-execution-lessons",
+    "path": "supabase/functions/get-code-execution-lessons/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "get-cron-registry",
+    "path": "supabase/functions/get-cron-registry/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "get-edge-function-logs",
+    "path": "supabase/functions/get-edge-function-logs/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "get-embedding",
+    "path": "supabase/functions/get-embedding/index.ts",
+    "dependencies": [
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": false,
+    "needs_secrets": true
+  },
+  {
+    "name": "get-function-actions",
+    "path": "supabase/functions/get-function-actions/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": false
+  },
+  {
+    "name": "get-function-version-analytics",
+    "path": "supabase/functions/get-function-version-analytics/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "get-global-state",
+    "path": "supabase/functions/get-global-state/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "get-lovable-key",
+    "path": "supabase/functions/get-lovable-key/index.ts",
+    "dependencies": [
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": false,
+    "needs_secrets": true
+  },
+  {
+    "name": "get-my-feedback",
+    "path": "supabase/functions/get-my-feedback/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "github-integration",
+    "path": "supabase/functions/github-integration/index.ts",
+    "dependencies": [
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": false,
+    "needs_secrets": true
+  },
+  {
+    "name": "github-issue-scanner",
+    "path": "supabase/functions/github-issue-scanner/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "google-calendar",
+    "path": "supabase/functions/google-calendar/index.ts",
+    "dependencies": [
+      "http_serve"
+    ],
+    "standalone": true,
+    "needs_supabase": false,
+    "needs_secrets": false
+  },
+  {
+    "name": "google-cloud-auth",
+    "path": "supabase/functions/google-cloud-auth/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "google-drive",
+    "path": "supabase/functions/google-drive/index.ts",
+    "dependencies": [
+      "database",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": false
+  },
+  {
+    "name": "google-drive-deliverables",
+    "path": "supabase/functions/google-drive-deliverables/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "google-gmail",
+    "path": "supabase/functions/google-gmail/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "google-oauth-handler",
+    "path": "supabase/functions/google-oauth-handler/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "google-sheets",
+    "path": "supabase/functions/google-sheets/index.ts",
+    "dependencies": [
+      "http_serve"
+    ],
+    "standalone": true,
+    "needs_supabase": false,
+    "needs_secrets": false
+  },
+  {
+    "name": "google_cloud_auth",
+    "path": "supabase/functions/google_cloud_auth/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "governance-phase-manager",
+    "path": "supabase/functions/governance-phase-manager/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "handle-rejected-proposal",
+    "path": "supabase/functions/handle-rejected-proposal/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "hourly-task-fetcher",
+    "path": "supabase/functions/hourly-task-fetcher/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "hume-access-token",
+    "path": "supabase/functions/hume-access-token/index.ts",
+    "dependencies": [
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": false,
+    "needs_secrets": true
+  },
+  {
+    "name": "hume-expression-measurement",
+    "path": "supabase/functions/hume-expression-measurement/index.ts",
+    "dependencies": [
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "hume-tts",
+    "path": "supabase/functions/hume-tts/index.ts",
+    "dependencies": [
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "identify-service-interest",
+    "path": "supabase/functions/identify-service-interest/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "inbox-notify",
+    "path": "supabase/functions/inbox-notify/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "ingest-github-contribution",
+    "path": "supabase/functions/ingest-github-contribution/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "issue-engagement-command",
+    "path": "supabase/functions/issue-engagement-command/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "jupyter-executor",
+    "path": "supabase/functions/jupyter-executor/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "kimi-chat",
+    "path": "supabase/functions/kimi-chat/index.ts",
+    "dependencies": [
+      "http_serve"
+    ],
+    "standalone": true,
+    "needs_supabase": false,
+    "needs_secrets": false
+  },
+  {
+    "name": "knowledge-kernel-retriever",
+    "path": "supabase/functions/knowledge-kernel-retriever/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "knowledge-manager",
+    "path": "supabase/functions/knowledge-manager/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "list-available-functions",
+    "path": "supabase/functions/list-available-functions/index.ts",
+    "dependencies": [
+      "http_serve"
+    ],
+    "standalone": true,
+    "needs_supabase": false,
+    "needs_secrets": false
+  },
+  {
+    "name": "list-function-proposals",
+    "path": "supabase/functions/list-function-proposals/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "log-payload-function",
+    "path": "supabase/functions/log-payload-function/index.ts",
+    "dependencies": [],
+    "standalone": false,
+    "needs_supabase": false,
+    "needs_secrets": false
+  },
+  {
+    "name": "lovable-chat",
+    "path": "supabase/functions/lovable-chat/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "mining-proxy",
+    "path": "supabase/functions/mining-proxy/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "mirofish-oracle",
+    "path": "supabase/functions/mirofish-oracle/index.ts",
+    "dependencies": [
+      "http_serve"
+    ],
+    "standalone": true,
+    "needs_supabase": false,
+    "needs_secrets": false
+  },
+  {
+    "name": "mobile-miner-config",
+    "path": "supabase/functions/mobile-miner-config/index.ts",
+    "dependencies": [
+      "http_serve"
+    ],
+    "standalone": true,
+    "needs_supabase": false,
+    "needs_secrets": false
+  },
+  {
+    "name": "mobile-miner-register",
+    "path": "supabase/functions/mobile-miner-register/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "mobile-miner-script",
+    "path": "supabase/functions/mobile-miner-script/index.ts",
+    "dependencies": [
+      "http_serve"
+    ],
+    "standalone": true,
+    "needs_supabase": false,
+    "needs_secrets": false
+  },
+  {
+    "name": "monitor-device-connections",
+    "path": "supabase/functions/monitor-device-connections/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "morning-discussion-post",
+    "path": "supabase/functions/morning-discussion-post/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "multi-step-orchestrator",
+    "path": "supabase/functions/multi-step-orchestrator/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "n8n-workflow-generator",
+    "path": "supabase/functions/n8n-workflow-generator/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "nlg-generator",
+    "path": "supabase/functions/nlg-generator/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "openai-chat",
+    "path": "supabase/functions/openai-chat/index.ts",
+    "dependencies": [
+      "http_serve"
+    ],
+    "standalone": true,
+    "needs_supabase": false,
+    "needs_secrets": false
+  },
+  {
+    "name": "openai-tts",
+    "path": "supabase/functions/openai-tts/index.ts",
+    "dependencies": [
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": false,
+    "needs_secrets": true
+  },
+  {
+    "name": "openclaw-relay",
+    "path": "supabase/functions/openclaw-relay/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "opportunity-scanner",
+    "path": "supabase/functions/opportunity-scanner/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "paperbanana",
+    "path": "supabase/functions/paperbanana/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "paragraph-publisher",
+    "path": "supabase/functions/paragraph-publisher/index.ts",
+    "dependencies": [
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": false,
+    "needs_secrets": true
+  },
+  {
+    "name": "pdf-handler",
+    "path": "supabase/functions/pdf-handler/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "storage",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "pfp-booking",
+    "path": "supabase/functions/pfp-booking/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "pfp-booking-notification",
+    "path": "supabase/functions/pfp-booking-notification/index.ts",
+    "dependencies": [
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": false,
+    "needs_secrets": true
+  },
+  {
+    "name": "pfp-dashboard",
+    "path": "supabase/functions/pfp-dashboard/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "pfp-quote",
+    "path": "supabase/functions/pfp-quote/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "pfp-stripe-webhook",
+    "path": "supabase/functions/pfp-stripe-webhook/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "pfp-template",
+    "path": "supabase/functions/pfp-template/index.ts",
+    "dependencies": [
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": false,
+    "needs_secrets": true
+  },
+  {
+    "name": "playwright-browse",
+    "path": "supabase/functions/playwright-browse/index.ts",
+    "dependencies": [
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": false,
+    "needs_secrets": true
+  },
+  {
+    "name": "predictive-analytics",
+    "path": "supabase/functions/predictive-analytics/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "process-contributor-reward",
+    "path": "supabase/functions/process-contributor-reward/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "process-license-application",
+    "path": "supabase/functions/process-license-application/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "progress-update-post",
+    "path": "supabase/functions/progress-update-post/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "prometheus-metrics",
+    "path": "supabase/functions/prometheus-metrics/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "propose-action",
+    "path": "supabase/functions/propose-action/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "propose-new-edge-function",
+    "path": "supabase/functions/propose-new-edge-function/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "python-db-bridge",
+    "path": "supabase/functions/python-db-bridge/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "python-executor",
+    "path": "supabase/functions/python-executor/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "python-network-proxy",
+    "path": "supabase/functions/python-network-proxy/index.ts",
+    "dependencies": [
+      "http_serve"
+    ],
+    "standalone": true,
+    "needs_supabase": false,
+    "needs_secrets": false
+  },
+  {
+    "name": "qualify-lead",
+    "path": "supabase/functions/qualify-lead/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "query-edge-analytics",
+    "path": "supabase/functions/query-edge-analytics/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "redis-cache",
+    "path": "supabase/functions/redis-cache/index.ts",
+    "dependencies": [
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": false,
+    "needs_secrets": true
+  },
+  {
+    "name": "render-api",
+    "path": "supabase/functions/render-api/index.ts",
+    "dependencies": [
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": false,
+    "needs_secrets": true
+  },
+  {
+    "name": "request-executive-votes",
+    "path": "supabase/functions/request-executive-votes/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "resend-email",
+    "path": "supabase/functions/resend-email/index.ts",
+    "dependencies": [
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": false,
+    "needs_secrets": true
+  },
+  {
+    "name": "schedule-reminder",
+    "path": "supabase/functions/schedule-reminder/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "schema-manager",
+    "path": "supabase/functions/schema-manager/index.ts",
+    "dependencies": [
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": false,
+    "needs_secrets": true
+  },
+  {
+    "name": "search-edge-functions",
+    "path": "supabase/functions/search-edge-functions/index.ts",
+    "dependencies": [
+      "http_serve"
+    ],
+    "standalone": true,
+    "needs_supabase": false,
+    "needs_secrets": false
+  },
+  {
+    "name": "self-optimizing-agent-architecture",
+    "path": "supabase/functions/self-optimizing-agent-architecture/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "service-monetization-engine",
+    "path": "supabase/functions/service-monetization-engine/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "share-latest-news",
+    "path": "supabase/functions/share-latest-news/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "storyboard-creation",
+    "path": "supabase/functions/storyboard-creation/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "stripe-payment-webhook",
+    "path": "supabase/functions/stripe-payment-webhook/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "submit-vote",
+    "path": "supabase/functions/submit-vote/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "suite-task-automation-engine",
+    "path": "supabase/functions/suite-task-automation-engine/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "summarize-conversation",
+    "path": "supabase/functions/summarize-conversation/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "supabase-integration",
+    "path": "supabase/functions/supabase-integration/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "superduper-business-growth",
+    "path": "supabase/functions/superduper-business-growth/index.ts",
+    "dependencies": [
+      "http_serve"
+    ],
+    "standalone": true,
+    "needs_supabase": false,
+    "needs_secrets": false
+  },
+  {
+    "name": "superduper-code-architect",
+    "path": "supabase/functions/superduper-code-architect/index.ts",
+    "dependencies": [
+      "http_serve"
+    ],
+    "standalone": true,
+    "needs_supabase": false,
+    "needs_secrets": false
+  },
+  {
+    "name": "superduper-communication-outreach",
+    "path": "supabase/functions/superduper-communication-outreach/index.ts",
+    "dependencies": [
+      "http_serve"
+    ],
+    "standalone": true,
+    "needs_supabase": false,
+    "needs_secrets": false
+  },
+  {
+    "name": "superduper-content-media",
+    "path": "supabase/functions/superduper-content-media/index.ts",
+    "dependencies": [
+      "http_serve"
+    ],
+    "standalone": true,
+    "needs_supabase": false,
+    "needs_secrets": false
+  },
+  {
+    "name": "superduper-design-brand",
+    "path": "supabase/functions/superduper-design-brand/index.ts",
+    "dependencies": [
+      "http_serve"
+    ],
+    "standalone": true,
+    "needs_supabase": false,
+    "needs_secrets": false
+  },
+  {
+    "name": "superduper-development-coach",
+    "path": "supabase/functions/superduper-development-coach/index.ts",
+    "dependencies": [
+      "http_serve"
+    ],
+    "standalone": true,
+    "needs_supabase": false,
+    "needs_secrets": false
+  },
+  {
+    "name": "superduper-domain-experts",
+    "path": "supabase/functions/superduper-domain-experts/index.ts",
+    "dependencies": [
+      "http_serve"
+    ],
+    "standalone": true,
+    "needs_supabase": false,
+    "needs_secrets": false
+  },
+  {
+    "name": "superduper-finance-investment",
+    "path": "supabase/functions/superduper-finance-investment/index.ts",
+    "dependencies": [
+      "http_serve"
+    ],
+    "standalone": true,
+    "needs_supabase": false,
+    "needs_secrets": false
+  },
+  {
+    "name": "superduper-integration",
+    "path": "supabase/functions/superduper-integration/index.ts",
+    "dependencies": [
+      "http_serve"
+    ],
+    "standalone": true,
+    "needs_supabase": false,
+    "needs_secrets": false
+  },
+  {
+    "name": "superduper-research-intelligence",
+    "path": "supabase/functions/superduper-research-intelligence/index.ts",
+    "dependencies": [
+      "http_serve"
+    ],
+    "standalone": true,
+    "needs_supabase": false,
+    "needs_secrets": false
+  },
+  {
+    "name": "superduper-router",
+    "path": "supabase/functions/superduper-router/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "superduper-social-viral",
+    "path": "supabase/functions/superduper-social-viral/index.ts",
+    "dependencies": [
+      "http_serve"
+    ],
+    "standalone": true,
+    "needs_supabase": false,
+    "needs_secrets": false
+  },
+  {
+    "name": "supportxmr-proxy",
+    "path": "supabase/functions/supportxmr-proxy/index.ts",
+    "dependencies": [
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": false,
+    "needs_secrets": true
+  },
+  {
+    "name": "sync-dashboard-data",
+    "path": "supabase/functions/sync-dashboard-data/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "sync-function-logs",
+    "path": "supabase/functions/sync-function-logs/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "sync-github-contributions",
+    "path": "supabase/functions/sync-github-contributions/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "sync-gmail-replies",
+    "path": "supabase/functions/sync-gmail-replies/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "sync-gmail-v2",
+    "path": "supabase/functions/sync-gmail-v2/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "system-diagnostics",
+    "path": "supabase/functions/system-diagnostics/index.ts",
+    "dependencies": [
+      "http_serve"
+    ],
+    "standalone": true,
+    "needs_supabase": false,
+    "needs_secrets": false
+  },
+  {
+    "name": "system-health",
+    "path": "supabase/functions/system-health/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "system-knowledge-builder",
+    "path": "supabase/functions/system-knowledge-builder/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "system-status",
+    "path": "supabase/functions/system-status/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "tally-votes",
+    "path": "supabase/functions/tally-votes/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "task-auto-advance",
+    "path": "supabase/functions/task-auto-advance/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "task-completion-notifier",
+    "path": "supabase/functions/task-completion-notifier/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "task-orchestrator",
+    "path": "supabase/functions/task-orchestrator/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "template-library-manager",
+    "path": "supabase/functions/template-library-manager/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "text-to-speech",
+    "path": "supabase/functions/text-to-speech/index.ts",
+    "dependencies": [
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": false,
+    "needs_secrets": true
+  },
+  {
+    "name": "thegraph-query",
+    "path": "supabase/functions/thegraph-query/index.ts",
+    "dependencies": [
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": false,
+    "needs_secrets": true
+  },
+  {
+    "name": "toggle-cron-jobs",
+    "path": "supabase/functions/toggle-cron-jobs/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "tool-usage-analytics",
+    "path": "supabase/functions/tool-usage-analytics/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "typefully-integration",
+    "path": "supabase/functions/typefully-integration/index.ts",
+    "dependencies": [
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": false,
+    "needs_secrets": true
+  },
+  {
+    "name": "universal-edge-invoker",
+    "path": "supabase/functions/universal-edge-invoker/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "universal-file-processor",
+    "path": "supabase/functions/universal-file-processor/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "update-api-key",
+    "path": "supabase/functions/update-api-key/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "update-payout-wallet",
+    "path": "supabase/functions/update-payout-wallet/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "usage-monitor",
+    "path": "supabase/functions/usage-monitor/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "uspto-patent-mcp",
+    "path": "supabase/functions/uspto-patent-mcp/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "validate-cross-repo-data",
+    "path": "supabase/functions/validate-cross-repo-data/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "validate-github-contribution",
+    "path": "supabase/functions/validate-github-contribution/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "validate-pop-event",
+    "path": "supabase/functions/validate-pop-event/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "vectorize-memory",
+    "path": "supabase/functions/vectorize-memory/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "vercel-ai-chat",
+    "path": "supabase/functions/vercel-ai-chat/index.ts",
+    "dependencies": [
+      "http_serve"
+    ],
+    "standalone": true,
+    "needs_supabase": false,
+    "needs_secrets": false
+  },
+  {
+    "name": "vercel-ai-chat-stream",
+    "path": "supabase/functions/vercel-ai-chat-stream/index.ts",
+    "dependencies": [
+      "http_serve"
+    ],
+    "standalone": true,
+    "needs_supabase": false,
+    "needs_secrets": false
+  },
+  {
+    "name": "vercel-ecosystem-api",
+    "path": "supabase/functions/vercel-ecosystem-api/index.ts",
+    "dependencies": [
+      "http_serve"
+    ],
+    "standalone": true,
+    "needs_supabase": false,
+    "needs_secrets": false
+  },
+  {
+    "name": "vercel-manager",
+    "path": "supabase/functions/vercel-manager/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "vertex-ai-chat",
+    "path": "supabase/functions/vertex-ai-chat/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "storage",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "vertex-ai-image-gen",
+    "path": "supabase/functions/vertex-ai-image-gen/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "video-job-processor",
+    "path": "supabase/functions/video-job-processor/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "storage",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "vote-on-proposal",
+    "path": "supabase/functions/vote-on-proposal/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "vsco-webhook-handler",
+    "path": "supabase/functions/vsco-webhook-handler/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "vsco-workspace",
+    "path": "supabase/functions/vsco-workspace/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "wan-ai-chat",
+    "path": "supabase/functions/wan-ai-chat/index.ts",
+    "dependencies": [
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": false,
+    "needs_secrets": true
+  },
+  {
+    "name": "weekly-retrospective-post",
+    "path": "supabase/functions/weekly-retrospective-post/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "worker-registration",
+    "path": "supabase/functions/worker-registration/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "workflow-optimizer",
+    "path": "supabase/functions/workflow-optimizer/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "workflow-template-manager",
+    "path": "supabase/functions/workflow-template-manager/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "x-twitter-monitor",
+    "path": "supabase/functions/x-twitter-monitor/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "xmrig-direct-proxy",
+    "path": "supabase/functions/xmrig-direct-proxy/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "xmrt-integration",
+    "path": "supabase/functions/xmrt-integration/index.ts",
+    "dependencies": [
+      "http_serve"
+    ],
+    "standalone": true,
+    "needs_supabase": false,
+    "needs_secrets": false
+  },
+  {
+    "name": "xmrt-mcp-server",
+    "path": "supabase/functions/xmrt-mcp-server/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "xmrt-workflow-templates",
+    "path": "supabase/functions/xmrt-workflow-templates/index.ts",
+    "dependencies": [
+      "supabase_client",
+      "database",
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": true,
+    "needs_secrets": true
+  },
+  {
+    "name": "xmrt_integration",
+    "path": "supabase/functions/xmrt_integration/index.ts",
+    "dependencies": [
+      "secrets",
+      "http_serve"
+    ],
+    "standalone": false,
+    "needs_supabase": false,
+    "needs_secrets": true
+  }
+]
