@@ -3,9 +3,8 @@
  * Provider cascade:
  *   1. Vertex AI via Service Account JWT (OAuth2) — primary, most reliable
  *   2. Vertex AI via Gemini API key — fallback
- *   3. Lovable (OpenRouter/Anthropic)
- *   4. DeepSeek V3
- *   5. Kimi K2
+ *   3. DeepSeek V3
+ *   4. Kimi
  *
  * TIMEOUT GUARDS: Per-provider timeouts prevent cascade hangs
  * FAST-FAIL: 402/429 errors skip immediately to next provider
@@ -19,9 +18,9 @@ const PROVIDER_TIMEOUTS = {
   vertexOAuth: 12000, // Vertex AI via Service Account JWT (primary)
   gemini: 8000,       // Gemini API key fallback
   vertexai: 8000,     // Vertex AI Express Mode
-  lovable: 8000,
   deepseek: 10000,    // Slightly longer for reasoning
   kimi: 8000,
+  ollamaPro: 15000,   // Ollama Pro cloud (OpenAI-compatible)
   embedding: 10000,
 };
 const RESPONSE_MAX_TOKENS = parseInt(Deno.env.get('RESPONSE_MAX_TOKENS') || '16000');
@@ -311,7 +310,7 @@ export interface UnifiedAIOptions {
   max_tokens?: number; // Alias for compatibility
   systemPrompt?: string;
   tools?: Array<any>;
-  preferProvider?: 'gemini' | 'vertexai' | 'lovable' | 'deepseek' | 'kimi'; // Gemini now first
+  preferProvider?: 'gemini' | 'vertexai' | 'deepseek' | 'kimi'; // Gemini now first
   // Eliza intelligence context
   userContext?: any;
   miningStats?: any;
@@ -648,7 +647,7 @@ async function callDeepSeek(
     const maxTokens = options.maxTokens || options.max_tokens || RESPONSE_MAX_TOKENS;
 
     const requestBody: any = {
-      model: 'deepseek-chat',
+      model: 'deepseek-v4-pro',
       messages: requestMessages,
       temperature: options.temperature || 0.7,
       max_tokens: maxTokens,
@@ -710,20 +709,20 @@ async function callDeepSeek(
 }
 
 /**
- * Call Kimi K2 via OpenRouter API - FINAL FALLBACK PROVIDER
+ * Call Kimi via Kimi Code API - FINAL FALLBACK PROVIDER
  */
 async function callKimi(
   messages: AIMessage[],
   options: UnifiedAIOptions = {}
 ): Promise<ProviderResult> {
-  const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY');
+  const KIMI_API_KEY = Deno.env.get('KIMI_API_KEY');
 
-  if (!OPENROUTER_API_KEY) {
-    return { success: false, provider: 'kimi', error: 'OPENROUTER_API_KEY not configured' };
+  if (!KIMI_API_KEY) {
+    return { success: false, provider: 'kimi', error: 'KIMI_API_KEY not configured' };
   }
 
   try {
-    console.log('🦊 FINAL FALLBACK: Attempting Kimi K2 via OpenRouter with full Eliza context...');
+    console.log('🦊 FINAL FALLBACK: Attempting Kimi via Kimi Code API...');
 
     const effectiveSystemPrompt = getEffectiveSystemPrompt(options);
     const effectiveTools = getEffectiveTools(options);
@@ -736,29 +735,29 @@ async function callKimi(
     const maxTokens = options.maxTokens || options.max_tokens || RESPONSE_MAX_TOKENS;
 
     const requestBody: any = {
-      model: 'moonshotai/kimi-k2',
+      model: 'kimi-for-coding',
       messages: requestMessages,
       temperature: options.temperature || 0.7,
-      max_tokens: maxTokens, // Reduced for credit limits
+      max_tokens: maxTokens,
     };
 
     // Include ALL tools for Kimi
     if (effectiveTools.length > 0) {
-      console.log(`📊 Kimi K2: Passing ${effectiveTools.length} tools (full array)`);
+      console.log(`📊 Kimi: Passing ${effectiveTools.length} tools (full array)`);
       requestBody.tools = effectiveTools;
       requestBody.tool_choice = 'auto';
     }
 
+    const headers: Record<string, string> = {
+      'Authorization': `Bearer ${KIMI_API_KEY}`,
+      'Content-Type': 'application/json',
+    };
+
     const response = await fetchWithTimeout(
-      'https://openrouter.ai/api/v1/chat/completions',
+      'https://api.kimi.com/coding/v1/chat/completions',
       {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': 'https://xmrt.pro',
-          'X-Title': 'XMRT Eliza'
-        },
+        headers,
         body: JSON.stringify(requestBody),
       },
       PROVIDER_TIMEOUTS.kimi
@@ -798,15 +797,103 @@ async function callKimi(
 }
 
 /**
+ * Call Ollama Cloud via ollama.com API (OpenAI-compatible).
+ * Uses OLLAMA_API_KEY secret from Supabase.
+ * Model examples: qwen3.5:397b, gpt-oss:120b, deepseek-v4-pro
+ */
+async function callOllamaPro(
+  messages: AIMessage[],
+  options: UnifiedAIOptions = {}
+): Promise<ProviderResult> {
+  const OLLAMA_API_KEY = Deno.env.get('OLLAMA_API_KEY');
+
+  if (!OLLAMA_API_KEY) {
+    return { success: false, provider: 'ollama-pro', error: 'OLLAMA_API_KEY not configured' };
+  }
+
+  try {
+    console.log('🔮 FINAL FALLBACK: Attempting Ollama Pro Cloud (qwen3.5:397b)...');
+
+    const effectiveSystemPrompt = getEffectiveSystemPrompt(options);
+    const effectiveTools = getEffectiveTools(options);
+
+    const requestMessages = [
+      { role: 'system', content: effectiveSystemPrompt },
+      ...messages.filter(m => m.role !== 'system')
+    ];
+
+    const maxTokens = options.maxTokens || options.max_tokens || RESPONSE_MAX_TOKENS;
+
+    const requestBody: any = {
+      model: 'qwen3.5',
+      messages: requestMessages,
+      temperature: options.temperature || 0.7,
+      max_tokens: maxTokens,
+    };
+
+    // Include tools if available
+    if (effectiveTools.length > 0) {
+      console.log(`🔧 Ollama Pro: Passing ${effectiveTools.length} tools`);
+      requestBody.tools = effectiveTools;
+      requestBody.tool_choice = 'auto';
+    }
+
+    const response = await fetchWithTimeout(
+      'https://ollama.com/v1/chat/completions',
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${OLLAMA_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+      },
+      PROVIDER_TIMEOUTS.ollamaPro
+    );
+
+    // Fast-fail check
+    const fastFailError = checkFastFail(response, 'ollama-pro');
+    if (fastFailError) {
+      return { success: false, provider: 'ollama-pro', error: fastFailError };
+    }
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.warn(`⚠️ Ollama Pro failed (${response.status}):`, errorText);
+      return { success: false, provider: 'ollama-pro', error: `${response.status}: ${errorText}` };
+    }
+
+    const data = await response.json();
+    const message = data.choices?.[0]?.message;
+
+    if (!message) {
+      return { success: false, provider: 'ollama-pro', error: 'No message in response' };
+    }
+
+    console.log('✅ Ollama Pro successful');
+
+    if (message.tool_calls?.length > 0) {
+      console.log(`🔧 Ollama Pro returned ${message.tool_calls.length} tool calls`);
+      return { success: true, provider: 'ollama-pro', message };
+    }
+
+    return { success: true, provider: 'ollama-pro', content: message.content || '' };
+  } catch (error) {
+    console.warn('⚠️ Ollama Cloud error:', error.message);
+    return { success: false, provider: 'ollama-pro', error: error.message };
+  }
+}
+
+/**
  * MAIN ENTRY POINT: Unified AI Fallback Cascade
  *
  * Order:
  *   1. Vertex AI via Service Account OAuth2 (GCP — most reliable)
  *   2. Gemini API key (direct, fast fallback)
  *   3. Vertex AI Express Mode (via Gemini key)
- *   4. Lovable / OpenRouter
- *   5. DeepSeek V3
- *   6. Kimi K2
+ *   4. DeepSeek V3
+ *   5. Kimi
+ *   6. Ollama Pro (qwen3.5 — OpenAI-compatible, final fallback)
  */
 export async function callAIWithFallback(
   messages: AIMessage[],
@@ -831,20 +918,22 @@ export async function callAIWithFallback(
   if (vertexResult.success) return transformResult(vertexResult);
   errors.push(`Vertex: ${vertexResult.error}`);
 
-  // 4. Lovable (Claude 3.5 Sonnet via OpenRouter)
-  const lovableResult = await callLovable(messages, options);
-  if (lovableResult.success) return transformResult(lovableResult);
-  errors.push(`Lovable: ${lovableResult.error}`);
+  // 4. Lovable skipped (no key configured)
 
-  // 5. DeepSeek V3
+  // 4. DeepSeek V3
   const deepSeekResult = await callDeepSeek(messages, options);
   if (deepSeekResult.success) return transformResult(deepSeekResult);
   errors.push(`DeepSeek: ${deepSeekResult.error}`);
 
-  // 6. Kimi K2 (final fallback)
+  // 5. Kimi
   const kimiResult = await callKimi(messages, options);
   if (kimiResult.success) return transformResult(kimiResult);
   errors.push(`Kimi: ${kimiResult.error}`);
+
+  // 6. FINAL FALLBACK: Ollama Pro (OpenAI-compatible, qwen3.5)
+  const ollamaResult = await callOllamaPro(messages, options);
+  if (ollamaResult.success) return transformResult(ollamaResult);
+  errors.push(`OllamaPro: ${ollamaResult.error}`);
 
   throw new Error(`All AI providers failed: ${errors.join(' | ')}`);
 }
@@ -908,3 +997,40 @@ export async function generateEmbedding(text: string): Promise<number[]> {
     throw error;
   }
 }
+
+/**
+ * Generate text using the AI fallback cascade.
+ * Wrapper around callAIWithFallback that matches the signature used by 12+ edge functions.
+ * @param prompt - The user/content prompt string
+ * @param systemPrompt - Optional system prompt (used as the only system message)
+ * @param options - Optional UnifiedAIOptions overrides
+ * @returns Generated text content (string), or throws on total cascade failure
+ */
+export async function generateTextWithFallback(
+  prompt: string,
+  systemPrompt?: string,
+  options?: Partial<UnifiedAIOptions>
+): Promise<string> {
+  const messages: AIMessage[] = [];
+  if (systemPrompt) {
+    messages.push({ role: 'system', content: systemPrompt });
+  }
+  messages.push({ role: 'user', content: prompt });
+
+  const result = await callAIWithFallback(messages, {
+    temperature: options?.temperature ?? 0.7,
+    maxTokens: options?.maxTokens ?? options?.max_tokens ?? 2048,
+    useFullElizaContext: options?.useFullElizaContext ?? true,
+    preferProvider: 'deepseek' as any,
+  });
+
+  // callAIWithFallback returns { content, provider } or throws
+  if (typeof result === 'string') return result;
+  if (result && result.content) return result.content;
+  if (result && typeof result === 'object' && 'content' in result) return result.content;
+
+  throw new Error('generateTextWithFallback: no content from AI cascade (' + (result?.provider || 'unknown') + '): ' + (result?.error || 'unknown error'));
+}
+
+
+

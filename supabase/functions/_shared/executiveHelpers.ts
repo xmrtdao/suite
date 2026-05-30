@@ -243,7 +243,7 @@ export async function callDeepSeekFallback(messages: any[], tools?: any[]): Prom
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'deepseek-chat',
+        model: 'deepseek-v4-pro',
         messages: enhancedMessages,
         tools,
         tool_choice: tools ? (forceTools ? 'required' : 'auto') : undefined,
@@ -259,7 +259,7 @@ export async function callDeepSeekFallback(messages: any[], tools?: any[]): Prom
         content: data.choices?.[0]?.message?.content || '',
         tool_calls: data.choices?.[0]?.message?.tool_calls || [],
         provider: 'deepseek',
-        model: 'deepseek-chat'
+        model: 'deepseek-v4-pro'
       };
     } else {
       const errorText = await response.text();

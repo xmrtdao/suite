@@ -159,7 +159,7 @@ Provide:
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            model: 'deepseek-chat',
+            model: 'deepseek-v4-pro',
             messages: [{ role: 'user', content: analysisPrompt }],
             max_tokens: 2000,
           }),

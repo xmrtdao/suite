@@ -247,7 +247,7 @@ Format as GitHub markdown. Sign off as Eliza with the CAO (analytics) attributio
         action: 'create_discussion',
         executive: 'cao',
         data: {
-          repositoryId: 'R_kgDONfvCEw',
+          repositoryId: 'R_kgDOSSxKTQ',
           categoryId: 'DIC_kwDONfvCE84Cl9qy',
           title: `📊 Progress Update - ${time} UTC`,
           body: discussionBody

@@ -97,7 +97,7 @@ function categorizeFunction(functionName: string): string {
     'business': ['identify-service-interest', 'qualify-lead', 'process-license-application', 'generate-stripe-link', 'service-monetization-engine', 'usage-monitor', 'convert-session-to-user', 'correlate-user-identity'],
     'knowledge': ['knowledge-manager', 'extract-knowledge', 'vectorize-memory', 'get-embedding', 'system-knowledge-builder', 'summarize-conversation'],
     'python': ['python-executor', 'python-db-bridge', 'python-network-proxy', 'eliza-python-runtime', 'enhanced-learning', 'predictive-analytics'],
-    'autonomous': ['autonomous-code-fixer', 'autonomous-decision-maker', 'code-monitor-daemon', 'gemini-agent-creator', 'agent-deployment-coordinator', 'self-optimizing-agent-architecture'],
+    'autonomous': ['autonomous-code-fixer', 'autonomous-decision-maker', 'code-monitor-daemon', 'agent-deployment-coordinator', 'self-optimizing-agent-architecture'],
     'superduper': ['superduper-router', 'superduper-integration', 'superduper-business-growth', 'superduper-code-architect', 'superduper-communication-outreach', 'superduper-content-media', 'superduper-design-brand', 'superduper-development-coach', 'superduper-domain-experts', 'superduper-finance-investment', 'superduper-research-intelligence', 'superduper-social-viral'],
     'mcp': ['xmrt-mcp-server', 'uspto-patent-mcp']
   };

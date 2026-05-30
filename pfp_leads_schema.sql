@@ -67,13 +67,13 @@ CREATE TABLE IF NOT EXISTS public.pfp_partnerships (
 );
 
 -- Create indexes for common queries
-CREATE INDEX IF NOT EXISTS idx_pfp_leads_email ON public.pfp_leads(email);
-CREATE INDEX IF NOT EXISTS idx_pfp_leads_category ON public.pfp_leads(category);
-CREATE INDEX IF NOT EXISTS idx_pfp_leads_status ON public.pfp_leads(status);
-CREATE INDEX IF NOT EXISTS idx_pfp_leads_location ON public.pfp_leads(location);
-CREATE INDEX IF NOT EXISTS idx_pfp_leads_source ON public.pfp_leads(source);
-CREATE INDEX IF NOT EXISTS idx_pfp_leads_created_at ON public.pfp_leads(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_pfp_leads_partners ON public.pfp_leads(status) WHERE status = 'partner';
+CREATE INDEX IF NOT EXISTS idx_pfp_partnerships_email ON public.pfp_partnerships(email);
+CREATE INDEX IF NOT EXISTS idx_pfp_partnerships_category ON public.pfp_partnerships(category);
+CREATE INDEX IF NOT EXISTS idx_pfp_partnerships_status ON public.pfp_partnerships(status);
+CREATE INDEX IF NOT EXISTS idx_pfp_partnerships_location ON public.pfp_partnerships(location);
+CREATE INDEX IF NOT EXISTS idx_pfp_partnerships_source ON public.pfp_partnerships(source);
+CREATE INDEX IF NOT EXISTS idx_pfp_partnerships_created_at ON public.pfp_partnerships(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_pfp_partnerships_partners ON public.pfp_partnerships(status) WHERE status = 'partner';
 
 -- Create updated_at trigger
 CREATE OR REPLACE FUNCTION update_updated_at_column()
@@ -84,36 +84,36 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER update_pfp_leads_updated_at
-    BEFORE UPDATE ON public.pfp_leads
+CREATE TRIGGER update_pfp_partnerships_updated_at
+    BEFORE UPDATE ON public.pfp_partnerships
     FOR EACH ROW
     EXECUTE FUNCTION update_updated_at_column();
 
 -- Enable Row Level Security (optional - disable if you want open access)
-ALTER TABLE public.pfp_leads ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.pfp_partnerships ENABLE ROW LEVEL SECURITY;
 
 -- Create policy for authenticated users to read/write
-CREATE POLICY "Allow authenticated users to read leads"
-    ON public.pfp_leads
+CREATE POLICY "Allow authenticated users to read partnerships"
+    ON public.pfp_partnerships
     FOR SELECT
     TO authenticated
     USING (true);
 
-CREATE POLICY "Allow authenticated users to insert leads"
-    ON public.pfp_leads
+CREATE POLICY "Allow authenticated users to insert partnerships"
+    ON public.pfp_partnerships
     FOR INSERT
     TO authenticated
     WITH CHECK (true);
 
-CREATE POLICY "Allow authenticated users to update leads"
-    ON public.pfp_leads
+CREATE POLICY "Allow authenticated users to update partnerships"
+    ON public.pfp_partnerships
     FOR UPDATE
     TO authenticated
     USING (true);
 
 -- Create policy for service role (edge functions)
 CREATE POLICY "Allow service role full access"
-    ON public.pfp_leads
+    ON public.pfp_partnerships
     FOR ALL
     TO service_role
     USING (true)
@@ -140,7 +140,7 @@ SELECT
     total_revenue,
     commission_owed,
     commission_paid
-FROM public.pfp_leads
+FROM public.pfp_partnerships
 WHERE status = 'partner'
 ORDER BY partnership_start_date DESC;
 
@@ -161,14 +161,14 @@ SELECT
         WHEN status = 'responded' AND last_contacted_at < NOW() - INTERVAL '2 days' THEN 'Schedule meeting'
         ELSE 'No action needed'
     END AS next_action
-FROM public.pfp_leads
+FROM public.pfp_partnerships
 WHERE status IN ('new', 'contacted', 'responded')
 ORDER BY last_contacted_at ASC NULLS FIRST;
 
 -- Grant permissions to postgres role
-GRANT ALL ON public.pfp_leads TO postgres;
-GRANT ALL ON public.pfp_leads TO authenticated;
-GRANT ALL ON public.pfp_leads TO service_role;
+GRANT ALL ON public.pfp_partnerships TO postgres;
+GRANT ALL ON public.pfp_partnerships TO authenticated;
+GRANT ALL ON public.pfp_partnerships TO service_role;
 
 -- Comment describing the table
-COMMENT ON TABLE public.pfp_leads IS 'Party Favor Photo - Wedding planner and venue partnership leads';
+COMMENT ON TABLE public.pfp_partnerships IS 'Party Favor Photo - Wedding planner and venue partnership leads';

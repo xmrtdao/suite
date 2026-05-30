@@ -557,7 +557,7 @@ export async function executeToolCall(
           body: {
             action: 'create_discussion',
             data: {
-              repositoryId: 'R_kgDONfvCEw',
+              repositoryId: 'R_kgDOSSxKTQ',
               title: parsedArgs.title,
               body: parsedArgs.body,
               categoryId: parsedArgs.categoryId || 'DIC_kwDOPHeChc4CkXxI',

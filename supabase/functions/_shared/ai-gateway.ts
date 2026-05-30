@@ -1,6 +1,6 @@
 // Unified AI Gateway with Comprehensive Fallback System
 // Priority: Vertex AI (gemini-2.5-pro/flash, GCP credits) → Gemini API key → DeepSeek → OpenAI → Kimi
-// Last updated: 2026-03-02 — Vertex AI SA auth wired as priority 1
+// Last updated: 2026-05-06 — Kimi endpoint updated to kimi-for-coding (api.kimi.com/coding/v1)
 
 import { getVertexAuth, getVertexEndpoint } from './vertexAuthHelper.ts';
 
@@ -26,6 +26,16 @@ export interface GatewayConfig {
 // Priority order: Vertex gemini-2.5-pro → Vertex gemini-2.5-flash → Gemini API → DeepSeek → OpenAI → Kimi
 const GATEWAY_CONFIG: GatewayConfig = {
   providers: [
+    {
+      name: 'ollama-pro',
+      get apiKey() { return Deno.env.get('OLLAMA_API_KEY') || '' },
+      endpoint: 'https://ollama.com/v1/chat/completions',
+      model: 'qwen3.5',
+      priority: 1,
+      rateLimit: 1200,
+      timeout: 60000,
+      available: true
+    },
     {
       name: 'vertex-pro',
       // Endpoint is dynamically set per-request via vertexAuthHelper
@@ -57,7 +67,7 @@ const GATEWAY_CONFIG: GatewayConfig = {
     {
       name: 'deepseek',
       endpoint: 'https://api.deepseek.com/v1/chat/completions',
-      model: 'deepseek-chat',
+      model: 'deepseek-v4-pro',
       priority: 4,
       rateLimit: 1500,
       timeout: 30000,
@@ -74,11 +84,11 @@ const GATEWAY_CONFIG: GatewayConfig = {
     },
     {
       name: 'kimi',
-      endpoint: 'https://api.moonshot.cn/v1/chat/completions',
-      model: 'moonshot-v1-8k',
+      endpoint: 'https://api.kimi.com/coding/v1/chat/completions',
+      model: 'kimi-for-coding',
       priority: 6,
-      rateLimit: 500,
-      timeout: 30000,
+      rateLimit: 1200, // ~300-1200 req per 5-hour window, shared quotas
+      timeout: 60000,
       available: true
     }
   ],

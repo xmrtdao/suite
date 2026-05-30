@@ -1,4 +1,4 @@
-// Enhanced coo-chat - Eliza - Chief Operating Officer (SYNTAX ERROR FIXED)
+﻿// Enhanced coo-chat - Eliza - Chief Operating Officer (SYNTAX ERROR FIXED)
 // Fixed Python f-string syntax error in executive response handling
 
 import { corsHeaders } from "../_shared/cors.ts";
@@ -178,8 +178,8 @@ async function handleRequest(request: Request): Promise<Response> {
         executiveName: 'Akari Tanaka',
         maxTokens: 4000,
         temperature: 0.7,
-        // Tools enabled in single mode; blocked for non-lead council members only
-        useFullElizaContext: councilMode ? !!isLeadExecutive : true,
+        // Tools always available — non-lead council members can read system status too
+        useFullElizaContext: true,
       };
 
       if (councilMode) {
@@ -194,10 +194,10 @@ Council: Dr. Anya Sharma (CTO), Mr. Omar Al-Farsi (CFO), Ms. Bella Rodriguez (CM
 
 Council: Dr. Anya Sharma (CTO), Mr. Omar Al-Farsi (CFO), Ms. Bella Rodriguez (CMO), Mr. Klaus Richter (COO), Ms. Akari Tanaka (CPO/you).
 
-\u{1F3A4} PERSPECTIVE ONLY — share your CPO people, culture, and talent insights.
-\u26D4 DO NOT call system-status or any other tools.
-\u26D4 DO NOT write JSON or markdown code blocks.
-\u26D4 DO NOT suggest anyone run a diagnostic check.
+\u{270B} PERSPECTIVE FIRST — share your CPO people, culture, and talent insights.
+\u{1F527} You have tool access for quick data lookups if needed.
+\u{26D4} DO NOT write JSON or markdown code blocks.
+\u{26D4} DO NOT push tasks to other council members.
 
 When asked for roll call: "Ms. Akari Tanaka, Chief People Officer — present and ready."
 Be concise, warm, and decisive.`;

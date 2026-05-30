@@ -343,7 +343,7 @@ Weekly retrospective for ${weekStart} to ${weekEnd}.
         action: 'create_discussion',
         executive: 'cso',
         data: {
-          repositoryId: 'R_kgDONfvCEw',
+          repositoryId: 'R_kgDOSSxKTQ',
           categoryId: 'DIC_kwDONfvCE84Cl9qy',
           title: `📈 Weekly Retrospective - ${weekStart} to ${weekEnd}`,
           body: discussionBody

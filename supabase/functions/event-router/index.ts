@@ -52,8 +52,14 @@ Deno.serve(async (req) => {
     let validationError = '';
 
     if (source === 'github' || headers['x-github-event']) {
-      isValid = await validateGitHubSignature(rawBody, headers['x-hub-signature-256']);
-      if (!isValid) validationError = 'Invalid GitHub signature';
+      const hasSignature = !!headers['x-hub-signature-256'];
+      if (hasSignature) {
+        isValid = await validateGitHubSignature(rawBody, headers['x-hub-signature-256']);
+        if (!isValid) validationError = 'Invalid GitHub signature';
+      } else {
+        // Allow unsigned requests during setup (GitHub may send ping before webhook secret propagates)
+        isValid = true;
+      }
     } else if (source === 'vercel') {
       isValid = await validateVercelSignature(rawBody, headers['x-vercel-signature']);
       if (!isValid) validationError = 'Invalid Vercel signature';

@@ -331,6 +331,43 @@ function transformArgsForFunction(toolName: string, args: any): any {
         end_date: args.end_date
       };
 
+    // Kimi AI tools
+    case 'xmrt_kimi_chat':
+      return {
+        method: 'tools/call',
+        params: {
+          name: 'kimi_chat',
+          arguments: {
+            message: args.message,
+            session_id: args.session_id,
+            model: args.model || 'kimi-for-coding'
+          }
+        }
+      };
+
+    case 'xmrt_kimi_anthropic_chat':
+      return {
+        method: 'tools/call',
+        params: {
+          name: 'kimi_anthropic_chat',
+          arguments: {
+            message: args.message,
+            session_id: args.session_id
+          }
+        }
+      };
+
+    case 'xmrt_kimi_load_skills':
+      return {
+        method: 'tools/call',
+        params: {
+          name: 'kimi_load_skills',
+          arguments: {
+            skill_name: args.skill_name || 'xmrt-dao'
+          }
+        }
+      };
+
     // USPTO Patent tools
     case 'search_uspto_patents':
       return {

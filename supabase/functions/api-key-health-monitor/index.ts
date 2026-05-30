@@ -286,7 +286,7 @@ async function checkDeepSeekHealth() {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: 'deepseek-chat',
+        model: 'deepseek-v4-pro',
         messages: [{ role: 'user', content: 'test' }],
         max_tokens: 5
       })

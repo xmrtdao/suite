@@ -95,7 +95,7 @@ async function getAccessToken(userCtx?: { userId?: string; userEmail?: string })
   }
 
   // 2. Fallback to Env Vars if not in DB
-  if (!refreshToken && !userCtx?.userId && !userCtx?.userEmail) {
+  if (!refreshToken) {
     refreshToken = Deno.env.get('GOOGLE_REFRESH_TOKEN') || Deno.env.get('GMAIL_REFRESH_TOKEN');
     if (refreshToken) console.log('Using refresh token from Environment Variables');
   }

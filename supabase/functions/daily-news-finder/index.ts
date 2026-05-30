@@ -19,9 +19,13 @@ serve(async (req) => {
         const supabaseUrl = Deno.env.get('SUPABASE_URL');
         const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
         const geminiApiKey = Deno.env.get('GEMINI_API_KEY');
+        const deepseekApiKey = Deno.env.get('DEEPSEEK_API_KEY');
 
-        if (!supabaseUrl || !supabaseKey || !geminiApiKey) {
-            throw new Error('Missing configuration (Supabase URL, Key, or Gemini API Key).');
+        if (!supabaseUrl || !supabaseKey) {
+            throw new Error('Missing configuration (Supabase URL or Key).');
+        }
+        if (!geminiApiKey && !deepseekApiKey) {
+            throw new Error('Missing both GEMINI_API_KEY and DEEPSEEK_API_KEY — at least one AI provider required.');
         }
 
         const supabase = createClient(supabaseUrl, supabaseKey);
@@ -85,19 +89,74 @@ serve(async (req) => {
     }
     `;
 
-        const geminiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                contents: [{ parts: [{ text: prompt }] }],
-                generationConfig: { responseMimeType: "application/json" }
-            })
-        });
+        let selectedStoryTitle, storyLink, postTitle, postMarkdown;
+        let usedProvider = '';
 
-        const geminiData = await geminiResponse.json();
-        const generatedContent = JSON.parse(geminiData.candidates[0].content.parts[0].text);
+        // Try Gemini first
+        if (geminiApiKey) {
+            try {
+                const geminiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        contents: [{ parts: [{ text: prompt }] }],
+                        generationConfig: { responseMimeType: "application/json" }
+                    })
+                });
 
-        console.log(`🤖 Gemini selected: "${generatedContent.selected_story_title}"`);
+                if (!geminiResponse.ok) {
+                    const errText = await geminiResponse.text();
+                    console.error(`Gemini API error: ${geminiResponse.status} - ${errText}`);
+                    throw new Error('Gemini failed');
+                }
+
+                const geminiData = await geminiResponse.json();
+                const parsed = JSON.parse(geminiData.candidates[0].content.parts[0].text);
+                selectedStoryTitle = parsed.selected_story_title;
+                storyLink = parsed.selected_story_link;
+                postTitle = parsed.post_title;
+                postMarkdown = parsed.post_markdown;
+                usedProvider = 'gemini';
+                console.log(`🤖 Gemini selected: "${selectedStoryTitle}"`);
+            } catch (geminiErr) {
+                console.error('Gemini failed, trying DeepSeek fallback:', geminiErr);
+            }
+        }
+
+        // Fallback to DeepSeek if Gemini failed or missing
+        if (!usedProvider && deepseekApiKey) {
+            console.log('🔄 Falling back to DeepSeek...');
+            const deepseekResponse = await fetch('https://api.deepseek.com/v1/chat/completions', {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${deepseekApiKey}`
+                },
+                body: JSON.stringify({
+                    model: "deepseek-v4-pro",
+                    messages: [{ role: "user", content: prompt }],
+                    response_format: { type: "json_object" }
+                })
+            });
+
+            if (!deepseekResponse.ok) {
+                const errText = await deepseekResponse.text();
+                throw new Error(`DeepSeek API error: ${deepseekResponse.status} - ${errText}`);
+            }
+
+            const dsData = await deepseekResponse.json();
+            const parsed = JSON.parse(dsData.choices[0].message.content);
+            selectedStoryTitle = parsed.selected_story_title;
+            storyLink = parsed.selected_story_link;
+            postTitle = parsed.post_title;
+            postMarkdown = parsed.post_markdown;
+            usedProvider = 'deepseek';
+            console.log(`🤖 DeepSeek selected: "${selectedStoryTitle}"`);
+        }
+
+        if (!usedProvider) {
+            throw new Error('All AI providers failed to generate content.');
+        }
 
         // 4. Publish to Paragraph using the internal function call
         // We invoke the paragraph-publisher function directly or simply call the logic if we want to save an internal hop, 
@@ -106,8 +165,8 @@ serve(async (req) => {
 
         const { data: pubData, error: pubError } = await supabase.functions.invoke('paragraph-publisher', {
             body: {
-                title: generatedContent.post_title,
-                markdown: generatedContent.post_markdown,
+                title: postTitle,
+                markdown: postMarkdown,
                 sendNewsletter: true, // As requested, maybe? Or false for safety. User said "publish a story", usually implies standard post.
                 categories: ['News', 'XMRT Intelligence']
             }
@@ -121,22 +180,24 @@ serve(async (req) => {
         await supabase.from('eliza_activity_log').insert({
             activity_type: 'daily_news_published',
             title: '📰 Daily News Published',
-            description: `Published analysis of: ${generatedContent.selected_story_title}`,
+            description: `Published analysis of: ${selectedStoryTitle}`,
             status: 'completed',
             metadata: {
-                original_story: generatedContent.selected_story_title,
-                original_link: generatedContent.selected_story_link,
+                provider: usedProvider,
+                original_story: selectedStoryTitle,
+                original_link: storyLink,
                 published_url: publishedUrl,
                 paragraph_response: pubData
             }
         });
 
-        await usageTracker.success({ result_summary: 'news_published', provider: 'gemini' });
+        await usageTracker.success({ result_summary: 'news_published', provider: usedProvider });
 
         return new Response(JSON.stringify({
             success: true,
             published_url: publishedUrl,
-            story: generatedContent.selected_story_title
+            story: selectedStoryTitle,
+            provider: usedProvider
         }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
             status: 200

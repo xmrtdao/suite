@@ -308,7 +308,7 @@ Daily thoughts for ${reportDate}.
         action: 'create_discussion',
         executive: 'eliza',
         data: {
-          repositoryId: 'R_kgDONfvCEw',
+          repositoryId: 'R_kgDOSSxKTQ',
           categoryId: 'DIC_kwDONfvCE84Cl9qy',
           title: `💡 Eliza's Daily Thoughts - ${reportDate}`,
           body: discussionBody

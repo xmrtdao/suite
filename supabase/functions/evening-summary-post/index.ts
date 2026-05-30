@@ -273,7 +273,7 @@ Evening wrap-up for ${today}.
         action: 'create_discussion',
         executive: 'eliza',
         data: {
-          repositoryId: 'R_kgDONfvCEw',
+          repositoryId: 'R_kgDOSSxKTQ',
           categoryId: 'DIC_kwDONfvCE84Cl9qy',
           title: `🌙 Evening Summary - ${today}`,
           body: discussionBody

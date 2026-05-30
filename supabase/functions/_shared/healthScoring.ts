@@ -10,7 +10,6 @@ export const ESSENTIAL_API_SERVICES = [
   'github',       // Core for code operations
   'deepseek',     // Primary AI provider
   'gemini',       // Vision fallback
-  'lovable_ai',   // Primary chat
   'openai'        // Fallback AI
 ];
 
@@ -337,3 +336,4 @@ export function buildHealthMetrics(params: {
     failedCommands: commandStats.failed || 0
   };
 }
+

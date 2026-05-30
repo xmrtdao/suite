@@ -613,14 +613,6 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
     example_use: 'Analyze function usage, track performance, identify patterns'
   },
   {
-    name: 'gemini-agent-creator',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/gemini-agent-creator',
-    description: 'Auto-detected function: gemini-agent-creator',
-    capabilities: ['gemini agent creator'],
-    category: 'task-management',
-    example_use: 'Invoke gemini-agent-creator'
-  },
-  {
     name: 'gemini-chat',
     url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/gemini-chat',
     description: 'AI chat via Google Gemini model',

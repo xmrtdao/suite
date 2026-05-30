@@ -568,3 +568,6 @@ verify_jwt = false
 
 [functions.gossip-hub]
 verify_jwt = false
+
+[functions.resend-webhook-proxy]
+verify_jwt = false

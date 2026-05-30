@@ -361,6 +361,43 @@ export const TOOL_REGISTRY: Tool[] = [
     }
   },
 
+  // Kimi AI Integration Tools
+  {
+    name: "xmrt_kimi_chat",
+    description: "Interact with Kimi AI using the coding-optimized API (OpenAI-compatible)",
+    inputSchema: {
+      type: "object",
+      properties: {
+        message: { type: "string", description: "User message" },
+        session_id: { type: "string", description: "Session identifier" },
+        model: { type: "string", description: "Model override (default: kimi-for-coding)" }
+      },
+      required: ["message"]
+    }
+  },
+  {
+    name: "xmrt_kimi_anthropic_chat",
+    description: "Interact with Kimi AI using the Anthropic-compatible messages API (drop-in for Claude)",
+    inputSchema: {
+      type: "object",
+      properties: {
+        message: { type: "string", description: "User message" },
+        session_id: { type: "string", description: "Session identifier" }
+      },
+      required: ["message"]
+    }
+  },
+  {
+    name: "xmrt_kimi_load_skills",
+    description: "Load XMRT DAO skills and agents configuration from the .agents/skills/xmrt-dao directory",
+    inputSchema: {
+      type: "object",
+      properties: {
+        skill_name: { type: "string", description: "Skill name to load (default: xmrt-dao)" }
+      }
+    }
+  },
+
   // USPTO Patent Research Tools
   {
     name: "search_uspto_patents",

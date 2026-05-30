@@ -119,7 +119,7 @@ Keep building, keep learning, keep growing together!
         action: 'create_discussion',
         executive: 'cso',
         data: {
-          repositoryId: 'R_kgDONfvCEw',
+          repositoryId: 'R_kgDOSSxKTQ',
           categoryId: 'DIC_kwDONfvCE84Cl9qy',
           title: `🌟 Community Spotlight - ${today}`,
           body: discussionBody

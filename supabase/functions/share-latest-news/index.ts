@@ -17,9 +17,13 @@ serve(async (req) => {
         const supabaseUrl = Deno.env.get('SUPABASE_URL');
         const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
         const geminiApiKey = Deno.env.get('GEMINI_API_KEY');
+        const deepseekApiKey = Deno.env.get('DEEPSEEK_API_KEY');
 
-        if (!supabaseUrl || !supabaseKey || !geminiApiKey) {
-            throw new Error('Missing configuration.');
+        if (!supabaseUrl || !supabaseKey) {
+            throw new Error('Missing Supabase configuration.');
+        }
+        if (!geminiApiKey && !deepseekApiKey) {
+            throw new Error('Missing both GEMINI_API_KEY and DEEPSEEK_API_KEY — at least one AI provider required.');
         }
 
         const supabase = createClient(supabaseUrl, supabaseKey);
@@ -67,18 +71,65 @@ serve(async (req) => {
     Return ONLY the tweet text.
     `;
 
-        const geminiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                contents: [{ parts: [{ text: prompt }] }]
-            })
-        });
+        let tweetText;
+        let usedProvider = '';
 
-        const geminiData = await geminiResponse.json();
-        const tweetText = geminiData.candidates[0].content.parts[0].text.trim();
+        // Try Gemini first
+        if (geminiApiKey) {
+            try {
+                const geminiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${geminiApiKey}`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        contents: [{ parts: [{ text: prompt }] }]
+                    })
+                });
 
-        console.log(`🐦 Generated Draft: ${tweetText}`);
+                if (!geminiResponse.ok) {
+                    const errText = await geminiResponse.text();
+                    console.error(`Gemini API error: ${geminiResponse.status} - ${errText}`);
+                    throw new Error('Gemini failed');
+                }
+
+                const geminiData = await geminiResponse.json();
+                tweetText = geminiData.candidates[0].content.parts[0].text.trim();
+                usedProvider = 'gemini';
+                console.log(`🐦 Gemini Draft: ${tweetText}`);
+            } catch (geminiErr) {
+                console.error('Gemini failed, trying DeepSeek fallback:', geminiErr);
+            }
+        }
+
+        // Fallback to DeepSeek
+        if (!usedProvider && deepseekApiKey) {
+            console.log('🔄 Falling back to DeepSeek for tweet generation...');
+            const dsResponse = await fetch('https://api.deepseek.com/v1/chat/completions', {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Bearer ${deepseekApiKey}`
+                },
+                body: JSON.stringify({
+                    model: "deepseek-v4-pro",
+                    messages: [{ role: "user", content: prompt }],
+                    max_tokens: 300
+                })
+            });
+
+            if (!dsResponse.ok) {
+                const errText = await dsResponse.text();
+                throw new Error(`DeepSeek API error: ${dsResponse.status} - ${errText}`);
+            }
+
+            const dsData = await dsResponse.json();
+            tweetText = dsData.choices[0].message.content.trim();
+            usedProvider = 'deepseek';
+            console.log(`🐦 DeepSeek Draft: ${tweetText}`);
+        }
+
+        if (!usedProvider) {
+            throw new Error('All AI providers failed to generate tweet.');
+        }
 
         // 3. Create Draft in Typefully
         // We need 'social_set_id' for Typefully. 
@@ -126,7 +177,7 @@ serve(async (req) => {
             }
         });
 
-        await usageTracker.success({ result_summary: 'tweet_drafted', provider: 'gemini' });
+        await usageTracker.success({ result_summary: 'tweet_drafted', provider: usedProvider });
 
         return new Response(JSON.stringify({ success: true, draft_text: tweetText }), {
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
