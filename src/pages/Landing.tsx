@@ -216,7 +216,7 @@ export default function Landing() {
       <LandingNav />
 
       {/* Hero Section */}
-      <section className="relative overflow-hidden pt-24 pb-10 px-4">
+      <section className="relative overflow-hidden pt-12 pb-10 px-4">
         <div className="pointer-events-none absolute inset-0 hidden xl:block" aria-hidden="true">
           {heroStickyNotes.map((note, index) => (
             <div
@@ -257,7 +257,7 @@ export default function Landing() {
           ))}
         </div>
 
-        <div className="container mx-auto max-w-5xl pt-4 text-center sm:pt-44 xl:pt-0">
+        <div className="container mx-auto max-w-5xl pt-4 text-center sm:pt-22 xl:pt-0">
           <h1 className="text-4xl md:text-6xl lg:text-7xl font-bold mb-6 leading-tight">
             {t('landing.hero.title.part1')}{' '}
             <span className="bg-gradient-to-r from-primary via-primary/80 to-primary bg-clip-text text-transparent">
