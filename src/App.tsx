@@ -40,7 +40,7 @@ const App = () => (
               Skip to main content
             </a>
 
-            <BrowserRouter>
+            <BrowserRouter basename="/suite">
               <Routes>
                 {/* Public routes */}
                 <Route path="/" element={<Landing />} />
