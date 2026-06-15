@@ -84,7 +84,7 @@ const steps = [
   {
     number: '02',
     title: 'Set Outcomes',
-    description: 'Give SupaClaw objectives, constraints, and brand context once.',,
+    description: 'Give SupaClaw objectives, constraints, and brand context once.',
   },
   {
     number: '03',
@@ -369,6 +369,7 @@ export default function Landing() {
               <Layers className="mr-2 w-5 h-5" />
               Executive Dashboard
             </Button>
+          </div>
 
           {/* Stats Row - show final values immediately for fast scrollers */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-3xl mx-auto">

@@ -339,6 +339,11 @@ function getNestedValue(obj: any, path: string): any {
 }
 
 async function updateWebhookLog(supabase: any, eventId: string, updates: Record<string, any>) {
+  // Guard: skip update if eventId is missing/invalid to avoid "id=eq.undefined" errors
+  if (!eventId || eventId === 'undefined' || eventId === 'null') {
+    console.warn('updateWebhookLog: skipped, missing event_id');
+    return;
+  }
   await supabase
     .from('webhook_logs')
     .update(updates)

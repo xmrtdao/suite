@@ -1,5 +1,8 @@
 import { supabase } from '@/integrations/supabase/client';
 
+// Local Supabase base URL for edge functions (injected from env)
+const EF_BASE = (import.meta.env.VITE_SUPABASE_URL || 'http://127.0.0.1:54321') + '/functions/v1/';
+
 // Frontend Edge Function Registry - Synchronized with backend
 // Total: 115+ functions across 18 categories
 
@@ -15,7 +18,7 @@ export interface EdgeFunctionCapability {
 export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   {
     name: 'lovable-chat',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/lovable-chat',
+    url: `${EF_BASE}lovable-chat`,
     description: '✅ PRIMARY AI - Model-agnostic chat via Lovable AI Gateway (Gemini 2.5 Flash default, Kimi K2 OpenRouter fallback, supports OpenAI GPT-5)',
     capabilities: ['Advanced AI chat', 'Context awareness', 'Multi-model support', 'Memory integration', 'Tool calling', 'Multi-step workflows'],
     category: 'ai',
@@ -23,7 +26,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'kimi-chat',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/kimi-chat',
+    url: `${EF_BASE}kimi-chat`,
     description: '✅ FALLBACK AI - Model-agnostic chat via Kimi k2 AI Gateway (OpenRouter API)',
     capabilities: ['Advanced AI chat', 'Context awareness', 'Multi-model support', 'Memory integration', 'Tool calling', 'Multi-step workflows'],
     category: 'ai',
@@ -31,7 +34,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'gemini-chat',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/gemini-chat',
+    url: `${EF_BASE}gemini-chat`,
     description: '⚠️ LEGACY - Use lovable-chat instead. Kept for backward compatibility.',
     capabilities: ['AI conversation', 'Context-aware responses', 'Memory integration'],
     category: 'ai',
@@ -39,7 +42,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'openai-chat',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/openai-chat',
+    url: `${EF_BASE}openai-chat`,
     description: '⚠️ LEGACY - Use lovable-chat instead. Kept for backward compatibility.',
     capabilities: ['AI conversation', 'OpenAI GPT-4/GPT-5', 'Fallback AI'],
     category: 'ai',
@@ -47,7 +50,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'deepseek-chat',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/deepseek-chat',
+    url: `${EF_BASE}deepseek-chat`,
     description: '⚠️ LEGACY - Use lovable-chat instead. Kept for backward compatibility.',
     capabilities: ['Code generation', 'Technical reasoning', 'Code fixing'],
     category: 'ai',
@@ -55,7 +58,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'xmrt-mcp-server',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/xmrt-mcp-server',
+    url: `${EF_BASE}xmrt-mcp-server`,
     description: 'Model Context Protocol server for XMRT DAO Ecosystem - unified interface exposing all capabilities via standardized MCP protocol',
     capabilities: [
       'MCP protocol compliance (2025-06-18)',
@@ -75,7 +78,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'playwright-browse',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/playwright-browse',
+    url: `${EF_BASE}playwright-browse`,
     description: 'Web browsing and scraping using Playwright automation',
     capabilities: ['Web browsing', 'Page scraping', 'Dynamic content extraction', 'JavaScript rendering'],
     category: 'web',
@@ -83,7 +86,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'mining-proxy',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/mining-proxy',
+    url: `${EF_BASE}mining-proxy`,
     description: 'Unified mining statistics and worker management - combines pool stats from SupportXMR with worker registration',
     capabilities: [
       'Mining stats (hash rate, shares, earnings)',
@@ -98,7 +101,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'speech-to-text',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/speech-to-text',
+    url: `${EF_BASE}speech-to-text`,
     description: 'Convert speech audio to text',
     capabilities: ['Audio transcription', 'Voice input processing', 'Speech recognition'],
     category: 'speech',
@@ -106,7 +109,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'text-to-speech',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/text-to-speech',
+    url: `${EF_BASE}text-to-speech`,
     description: 'Convert text to speech audio',
     capabilities: ['Voice synthesis', 'Audio generation', 'TTS output'],
     category: 'speech',
@@ -114,7 +117,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'openai-tts',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/openai-tts',
+    url: `${EF_BASE}openai-tts`,
     description: 'OpenAI high-quality text-to-speech',
     capabilities: ['Premium voice synthesis', 'Multiple voice models', 'High quality audio'],
     category: 'speech',
@@ -122,7 +125,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'check-faucet-eligibility',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/check-faucet-eligibility',
+    url: `${EF_BASE}check-faucet-eligibility`,
     description: 'Check if user is eligible for XMRT faucet claim',
     capabilities: ['Eligibility verification', 'Cooldown checking', 'User validation'],
     category: 'faucet',
@@ -130,7 +133,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'claim-faucet-tokens',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/claim-faucet-tokens',
+    url: `${EF_BASE}claim-faucet-tokens`,
     description: 'Process XMRT token faucet claims',
     capabilities: ['Token distribution', 'Claim processing', 'Transaction creation'],
     category: 'faucet',
@@ -138,7 +141,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'get-faucet-stats',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/get-faucet-stats',
+    url: `${EF_BASE}get-faucet-stats`,
     description: 'Get XMRT faucet statistics and status',
     capabilities: ['Faucet statistics', 'Distribution data', 'Claim history'],
     category: 'faucet',
@@ -146,7 +149,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'ecosystem-webhook',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/ecosystem-webhook',
+    url: `${EF_BASE}ecosystem-webhook`,
     description: 'Handle ecosystem events and webhooks',
     capabilities: ['Event processing', 'Webhook handling', 'System notifications'],
     category: 'ecosystem',
@@ -154,7 +157,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'conversation-access',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/conversation-access',
+    url: `${EF_BASE}conversation-access`,
     description: 'Manage conversation persistence and history',
     capabilities: ['Session management', 'Message storage', 'Conversation retrieval'],
     category: 'ecosystem',
@@ -162,7 +165,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'render-api',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/render-api',
+    url: `${EF_BASE}render-api`,
     description: 'Interface with Render deployment API',
     capabilities: ['Deployment status', 'System version tracking', 'Service monitoring'],
     category: 'deployment',
@@ -170,7 +173,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'vercel-manager',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/vercel-manager',
+    url: `${EF_BASE}vercel-manager`,
     description: 'Frontend (Vercel) communication and monitoring gateway - connects Eliza to the xmrtdao.vercel.app frontend',
     capabilities: ['Send webhooks to frontend', 'Check frontend health status', 'Notify frontend of backend changes', 'Get Vercel project information', 'Monitor frontend availability'],
     category: 'deployment',
@@ -178,7 +181,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'python-executor',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/python-executor',
+    url: `${EF_BASE}python-executor`,
     description: 'Execute Python code in a sandboxed environment',
     capabilities: ['Python code execution', 'Data analysis', 'Script automation', 'Web scraping with libraries'],
     category: 'ai',
@@ -186,7 +189,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'github-integration',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/github-integration',
+    url: `${EF_BASE}github-integration`,
     description: '🔐 Complete GitHub OAuth integration using GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET. Supports 11 actions: list_issues, create_issue, comment_on_issue, list_discussions, create_discussion, get_repo_info, list_pull_requests, create_pull_request, get_file_content, commit_file, search_code',
     capabilities: ['GitHub OAuth authentication', 'Create/manage issues', 'Create PRs', 'Manage discussions', 'Commit files', 'Search code', 'Monitor repos', 'Repository info', 'Code search'],
     category: 'github',
@@ -194,7 +197,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'agent-manager',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/agent-manager',
+    url: `${EF_BASE}agent-manager`,
     description: 'Spawn, manage, and delegate to AI agents in the ecosystem',
     capabilities: ['Spawn new agents', 'Assign tasks', 'Monitor agent workload', 'Update agent status', 'Log decisions'],
     category: 'task-management',
@@ -202,7 +205,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'extract-knowledge',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/extract-knowledge',
+    url: `${EF_BASE}extract-knowledge`,
     description: 'Extracts structured knowledge entities from conversations',
     capabilities: ['Entity extraction', 'Knowledge graph building', 'Semantic analysis'],
     category: 'knowledge',
@@ -210,7 +213,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'knowledge-manager',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/knowledge-manager/store',
+    url: `${EF_BASE}knowledge-manager/store`,
     description: 'Manages the knowledge base and vector embeddings',
     capabilities: ['Vectorize text', 'Knowledge search', 'Data retrieval'],
     category: 'knowledge',
@@ -218,7 +221,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'summarize-conversation',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/summarize-conversation',
+    url: `${EF_BASE}summarize-conversation`,
     description: 'Summarizes long conversations for context',
     capabilities: ['Text summarization', 'Context compression', 'Conversation analysis'],
     category: 'knowledge',
@@ -226,7 +229,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'task-orchestrator',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/task-orchestrator',
+    url: `${EF_BASE}task-orchestrator`,
     description: 'Orchestrates complex multi-step tasks and workflows',
     capabilities: ['Task planning', 'Workflow execution', 'Dependency management'],
     category: 'task-management',
@@ -234,7 +237,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'system-diagnostics',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/system-diagnostics',
+    url: `${EF_BASE}system-diagnostics`,
     description: 'Runs diagnostic checks on the ecosystem',
     capabilities: ['Health checks', 'Error detection', 'Performance monitoring'],
     category: 'monitoring',
@@ -242,7 +245,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'system-health',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/system-health',
+    url: `${EF_BASE}system-health`,
     description: 'Provides a summary of the system health status',
     capabilities: ['Status reporting', 'Health summary', 'Issue highlighting'],
     category: 'monitoring',
@@ -250,7 +253,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'eliza-python-runtime',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/eliza-python-runtime',
+    url: `${EF_BASE}eliza-python-runtime`,
     description: 'Python code execution environment for Eliza agents',
     capabilities: ['Sandboxed Python execution', 'Access to libraries', 'Custom script running'],
     category: 'code-execution',
@@ -258,7 +261,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'python-db-bridge',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/python-db-bridge',
+    url: `${EF_BASE}python-db-bridge`,
     description: 'Bridge for Python scripts to interact with the Supabase database',
     capabilities: ['Database access from Python', 'Data manipulation', 'Query execution'],
     category: 'code-execution',
@@ -266,7 +269,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'python-network-proxy',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/python-network-proxy',
+    url: `${EF_BASE}python-network-proxy`,
     description: 'Proxy for Python scripts to make external network requests',
     capabilities: ['External API calls', 'Web scraping', 'Data fetching from internet'],
     category: 'code-execution',
@@ -274,7 +277,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'function-usage-analytics',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/function-usage-analytics',
+    url: `${EF_BASE}function-usage-analytics`,
     description: 'Query historical edge function usage patterns and analytics. See which functions are used most, success rates, execution times, and common use cases across all executives.',
     capabilities: ['analytics', 'historical data', 'learning', 'function insights', 'executive performance'],
     category: 'monitoring',
@@ -282,7 +285,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'propose-new-edge-function',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/propose-new-edge-function',
+    url: `${EF_BASE}propose-new-edge-function`,
     description: 'Propose a new edge function to the Executive Council. Requires 3/4 approval for deployment.',
     capabilities: ['governance', 'consensus', 'autonomous expansion', 'capability proposal'],
     category: 'autonomous',
@@ -290,7 +293,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'vote-on-proposal',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/vote-on-proposal',
+    url: `${EF_BASE}vote-on-proposal`,
     description: 'Cast a vote on a pending edge function proposal. Executives vote approve/reject/abstain with reasoning.',
     capabilities: ['voting', 'consensus', 'governance', 'executive decision'],
     category: 'autonomous',
@@ -298,7 +301,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'list-function-proposals',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/list-function-proposals',
+    url: `${EF_BASE}list-function-proposals`,
     description: 'List all edge function proposals with their status and vote counts.',
     capabilities: ['governance', 'transparency', 'proposal tracking'],
     category: 'autonomous',
@@ -306,7 +309,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'mobile-miner-register',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/mobile-miner-register',
+    url: `${EF_BASE}mobile-miner-register`,
     description: 'Register a new mobile miner and generate unique worker ID and configuration.',
     capabilities: ['mining', 'registration', 'mobile', 'configuration'],
     category: 'mining',
@@ -314,7 +317,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'mobile-miner-config',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/mobile-miner-config',
+    url: `${EF_BASE}mobile-miner-config`,
     description: 'Generate XMRig configuration for a registered mobile miner.',
     capabilities: ['mining', 'configuration', 'mobile'],
     category: 'mining',
@@ -322,7 +325,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'mobile-miner-script',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/mobile-miner-script',
+    url: `${EF_BASE}mobile-miner-script`,
     description: 'Serve the mobile mining setup script that automates installation and configuration.',
     capabilities: ['mining', 'automation', 'mobile', 'setup'],
     category: 'mining',
@@ -331,7 +334,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   // ============= VSCO WORKSPACE (CMS/Studio Management) =============
   {
     name: 'vsco-workspace',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/vsco-workspace',
+    url: `${EF_BASE}vsco-workspace`,
     description: '📸 VSCO Workspace CMS - Full studio management: contacts, jobs, events, quotes, products, worksheets, notes, invoices, and calendar',
     capabilities: ['Contact management', 'Job management', 'Event scheduling', 'Product pricing', 'Quote creation', 'Worksheets/templates', 'Notes', 'Invoice management', 'Calendar integration', 'Pipeline analytics'],
     category: 'vsco',
@@ -341,7 +344,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   // ============= USER ACQUISITION =============
   {
     name: 'qualify-lead',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/qualify-lead',
+    url: `${EF_BASE}qualify-lead`,
     description: '💰 Lead Qualification - Score leads based on conversation signals',
     capabilities: ['Lead scoring', 'Signal processing', 'Budget detection', 'Urgency assessment'],
     category: 'acquisition',
@@ -349,7 +352,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'identify-service-interest',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/identify-service-interest',
+    url: `${EF_BASE}identify-service-interest`,
     description: '🎯 Service Interest Detection - Identify services a lead wants',
     capabilities: ['Service detection', 'Interest scoring', 'Multi-service tracking'],
     category: 'acquisition',
@@ -357,7 +360,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'convert-session-to-user',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/convert-session-to-user',
+    url: `${EF_BASE}convert-session-to-user`,
     description: '👤 Session Conversion - Convert anonymous sessions to users',
     capabilities: ['User creation', 'Profile linking', 'Session migration'],
     category: 'acquisition',
@@ -366,7 +369,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   // ============= PAYMENTS =============
   {
     name: 'generate-stripe-link',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/generate-stripe-link',
+    url: `${EF_BASE}generate-stripe-link`,
     description: '💳 Stripe Payment Links - Generate payment links for upgrades',
     capabilities: ['Payment link generation', 'Checkout session', 'Tier pricing'],
     category: 'payments',
@@ -374,7 +377,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'stripe-payment-webhook',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/stripe-payment-webhook',
+    url: `${EF_BASE}stripe-payment-webhook`,
     description: '💳 Stripe Webhook - Process payments and auto-upgrade keys',
     capabilities: ['Payment verification', 'Webhook validation', 'Auto upgrade'],
     category: 'payments',
@@ -383,7 +386,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   // ============= AUTOMATION =============
   {
     name: 'suite-task-automation-engine',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/suite-task-automation-engine',
+    url: `${EF_BASE}suite-task-automation-engine`,
     description: '🤖 STAE - Task automation with templates and smart assignment',
     capabilities: ['Template-based tasks', 'Smart agent matching', 'Checklist management', 'Stage advancement'],
     category: 'automation',
@@ -391,7 +394,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'task-auto-advance',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/task-auto-advance',
+    url: `${EF_BASE}task-auto-advance`,
     description: '⏩ Task Auto-Advance - Auto-advance tasks through pipeline',
     capabilities: ['Stage advancement', 'Threshold monitoring', 'Agent notification'],
     category: 'automation',
@@ -399,7 +402,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'workflow-template-manager',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/workflow-template-manager',
+    url: `${EF_BASE}workflow-template-manager`,
     description: '🔄 Workflow Templates - Pre-built workflow templates for automation',
     capabilities: ['Template library', 'Workflow execution', 'Performance tracking'],
     category: 'automation',
@@ -408,7 +411,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   // ============= SUPERDUPER AGENTS =============
   {
     name: 'superduper-router',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/superduper-router',
+    url: `${EF_BASE}superduper-router`,
     description: '🚀 SuperDuper Router - Central router for specialist agents',
     capabilities: ['Agent routing', 'Request orchestration', 'Load balancing'],
     category: 'superduper',
@@ -416,7 +419,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'superduper-business-growth',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/superduper-business-growth',
+    url: `${EF_BASE}superduper-business-growth`,
     description: 'SuperDuper Agent: Business growth strategy',
     capabilities: ['Business strategy', 'Market analysis', 'Growth planning'],
     category: 'superduper',
@@ -424,7 +427,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'superduper-code-architect',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/superduper-code-architect',
+    url: `${EF_BASE}superduper-code-architect`,
     description: 'SuperDuper Agent: Software architecture',
     capabilities: ['Architecture design', 'Code review', 'System optimization'],
     category: 'superduper',
@@ -432,7 +435,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'superduper-finance-investment',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/superduper-finance-investment',
+    url: `${EF_BASE}superduper-finance-investment`,
     description: 'SuperDuper Agent: Financial planning',
     capabilities: ['Financial analysis', 'Investment strategy', 'Budget planning'],
     category: 'superduper',
@@ -440,7 +443,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'superduper-research-intelligence',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/superduper-research-intelligence',
+    url: `${EF_BASE}superduper-research-intelligence`,
     description: 'SuperDuper Agent: Research and intelligence',
     capabilities: ['Market research', 'Competitive analysis', 'Trend monitoring'],
     category: 'superduper',
@@ -449,7 +452,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   // ============= GOVERNANCE =============
   {
     name: 'governance-phase-manager',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/governance-phase-manager',
+    url: `${EF_BASE}governance-phase-manager`,
     description: '⚖️ Governance Phase Manager - Timed voting phase transitions',
     capabilities: ['Phase transitions', 'Executive deadlines', 'Community voting'],
     category: 'governance',
@@ -457,7 +460,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'evaluate-community-idea',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/evaluate-community-idea',
+    url: `${EF_BASE}evaluate-community-idea`,
     description: 'Evaluate community ideas for feasibility',
     capabilities: ['Idea evaluation', 'Feasibility analysis', 'Impact assessment'],
     category: 'governance',
@@ -465,7 +468,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'execute-approved-proposal',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/execute-approved-proposal',
+    url: `${EF_BASE}execute-approved-proposal`,
     description: '✅ Execute Approved Proposals - Finalize with code generation',
     capabilities: ['Code generation', 'Task creation', 'GitHub PR creation'],
     category: 'governance',
@@ -473,7 +476,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'handle-rejected-proposal',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/handle-rejected-proposal',
+    url: `${EF_BASE}handle-rejected-proposal`,
     description: '❌ Handle Rejected Proposals - Generate improvement suggestions',
     capabilities: ['Rejection handling', 'Improvement suggestions', 'Feedback'],
     category: 'governance',
@@ -482,7 +485,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   // ============= MONITORING =============
   {
     name: 'get-edge-function-logs',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/get-edge-function-logs',
+    url: `${EF_BASE}get-edge-function-logs`,
     description: '📊 Edge Function Logs - Retrieve detailed logs',
     capabilities: ['Log retrieval', 'Error filtering', 'Time-based queries'],
     category: 'monitoring',
@@ -490,7 +493,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'get-function-version-analytics',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/get-function-version-analytics',
+    url: `${EF_BASE}get-function-version-analytics`,
     description: '📈 Function Version Analytics - Compare versions',
     capabilities: ['Version comparison', 'Regression detection', 'Performance metrics'],
     category: 'monitoring',
@@ -498,7 +501,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'sync-function-logs',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/sync-function-logs',
+    url: `${EF_BASE}sync-function-logs`,
     description: '🔄 Sync Function Logs - Synchronize logs from Analytics',
     capabilities: ['Log synchronization', 'Backfill data', 'Version tracking'],
     category: 'monitoring',
@@ -506,7 +509,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'tool-usage-analytics',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/tool-usage-analytics',
+    url: `${EF_BASE}tool-usage-analytics`,
     description: '📊 Tool Usage Analytics - Comprehensive tool analytics',
     capabilities: ['Tool success rates', 'Executive breakdowns', 'Error patterns'],
     category: 'monitoring',
@@ -515,7 +518,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   // ============= REVENUE =============
   {
     name: 'service-monetization-engine',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/service-monetization-engine',
+    url: `${EF_BASE}service-monetization-engine`,
     description: '💰 Service Monetization - API key generation and billing',
     capabilities: ['API key management', 'Usage tracking', 'Tiered pricing', 'Revenue analytics'],
     category: 'revenue',
@@ -524,7 +527,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   // ============= RESEARCH =============
   {
     name: 'uspto-patent-mcp',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/uspto-patent-mcp',
+    url: `${EF_BASE}uspto-patent-mcp`,
     description: 'USPTO Patent MCP - Search 11M+ patents, retrieve full text, download PDFs',
     capabilities: ['Patent search', 'Full text retrieval', 'PDF downloads', 'Portfolio analysis'],
     category: 'research',
@@ -533,7 +536,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   // ============= AUTONOMOUS =============
   {
     name: 'autonomous-code-fixer',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/autonomous-code-fixer',
+    url: `${EF_BASE}autonomous-code-fixer`,
     description: 'Self-healing code execution - auto-fixes failed Python',
     capabilities: ['Auto-detect failures', 'Fix syntax errors', 'Re-execute code'],
     category: 'autonomous',
@@ -541,7 +544,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'autonomous-decision-maker',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/autonomous-decision-maker',
+    url: `${EF_BASE}autonomous-decision-maker`,
     description: '🧠 Autonomous Decision Maker - AI-driven decisions',
     capabilities: ['Decision analysis', 'Impact assessment', 'Recommendations'],
     category: 'autonomous',
@@ -549,7 +552,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'eliza-intelligence-coordinator',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/eliza-intelligence-coordinator',
+    url: `${EF_BASE}eliza-intelligence-coordinator`,
     description: 'Coordinates intelligence across all agents',
     capabilities: ['Intelligence coordination', 'Knowledge synthesis', 'Multi-agent orchestration'],
     category: 'autonomous',
@@ -557,7 +560,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'eliza-self-evaluation',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/eliza-self-evaluation',
+    url: `${EF_BASE}eliza-self-evaluation`,
     description: 'Self-evaluation for continuous improvement',
     capabilities: ['Performance analysis', 'Self-evaluation', 'Improvement recommendations'],
     category: 'autonomous',
@@ -565,7 +568,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'morning-discussion-post',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/morning-discussion-post',
+    url: `${EF_BASE}morning-discussion-post`,
     description: '🌅 Morning Discussion - Generate daily discussion topics',
     capabilities: ['Automated posting', 'Content generation', 'Scheduling'],
     category: 'autonomous',
@@ -573,7 +576,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'evening-summary-post',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/evening-summary-post',
+    url: `${EF_BASE}evening-summary-post`,
     description: '🌆 Evening Summary - Generate daily summary reports',
     capabilities: ['Automated posting', 'Content generation', 'Summary'],
     category: 'autonomous',
@@ -581,7 +584,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'weekly-retrospective-post',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/weekly-retrospective-post',
+    url: `${EF_BASE}weekly-retrospective-post`,
     description: '📅 Weekly Retrospective - Generate weekly retrospective',
     capabilities: ['Automated posting', 'Content generation', 'Retrospective'],
     category: 'autonomous',
@@ -589,7 +592,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'progress-update-post',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/progress-update-post',
+    url: `${EF_BASE}progress-update-post`,
     description: '📢 Progress Updates - Generate progress update posts',
     capabilities: ['Automated posting', 'Progress tracking', 'Updates'],
     category: 'autonomous',
@@ -597,7 +600,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'opportunity-scanner',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/opportunity-scanner',
+    url: `${EF_BASE}opportunity-scanner`,
     description: 'Autonomous opportunity scanning and identification',
     capabilities: ['Opportunity detection', 'Market scanning', 'Trend analysis'],
     category: 'autonomous',
@@ -606,7 +609,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   // ============= ECOSYSTEM =============
   {
     name: 'event-router',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/event-router',
+    url: `${EF_BASE}event-router`,
     description: '📨 Event Router - Central webhook ingress',
     capabilities: ['Webhook validation', 'Event normalization', 'Logging'],
     category: 'ecosystem',
@@ -614,7 +617,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'event-dispatcher',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/event-dispatcher',
+    url: `${EF_BASE}event-dispatcher`,
     description: '🎯 Event Dispatcher - Intelligent event routing',
     capabilities: ['Event routing', 'Action mapping', 'Workflow triggering'],
     category: 'ecosystem',
@@ -622,7 +625,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'xmrt-mcp-server',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/xmrt-mcp-server',
+    url: `${EF_BASE}xmrt-mcp-server`,
     description: 'XMRT MCP Server - Model Context Protocol server',
     capabilities: ['MCP protocol', '25+ unified tools', 'Resource subscriptions', 'Prompt templates'],
     category: 'ecosystem',
@@ -631,7 +634,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   // ============= DATABASE =============
   {
     name: 'redis-cache',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/redis-cache',
+    url: `${EF_BASE}redis-cache`,
     description: 'Upstash Redis caching for API responses and rate limiting',
     capabilities: ['Get/Set cache', 'TTL management', 'Rate limiting'],
     category: 'database',
@@ -639,7 +642,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   },
   {
     name: 'schema-manager',
-    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/schema-manager',
+    url: `${EF_BASE}schema-manager`,
     description: 'Database schema and migrations management',
     capabilities: ['Schema management', 'Migrations', 'Data access'],
     category: 'database',

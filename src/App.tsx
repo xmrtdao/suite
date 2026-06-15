@@ -21,6 +21,7 @@ import PrivacyPolicy from "./pages/PrivacyPolicy";
 import TermsOfService from "./pages/TermsOfService";
 import ExecutiveDashboard from "./pages/ExecutiveDashboard";
 import AuthCallback from "./pages/AuthCallback";
+import InboxPage from "./pages/Inbox";
 
 const queryClient = new QueryClient();
 

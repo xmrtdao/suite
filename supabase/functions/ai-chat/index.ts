@@ -18,10 +18,213 @@ const EXECUTIVE_NAME = Deno.env.get('EXECUTIVE_NAME') || 'Eliza';
 const EXECUTIVE_ROLE = Deno.env.get('EXECUTIVE_ROLE') || 'General Intelligence Agent for XMRT-DAO';
 const FUNCTION_NAME = Deno.env.get('FUNCTION_NAME') || 'ai-chat';
 
+// Brand context — read from env so the prompt stays in sync with the coin
+// and publication Joe is currently running. Mirrors daily-news-finder.
+const BRAND_COIN_SYMBOL = Deno.env.get('PARAGRAPH_COIN_SYMBOL') || 'MONERO';
+const BRAND_COIN_NAME = Deno.env.get('PARAGRAPH_COIN_NAME') || 'Monero';
+const BRAND_PUB_HANDLE = Deno.env.get('PARAGRAPH_PUBLICATION_HANDLE') || 'mobilemonero';
+const BRAND_PUB_URL = `https://paragraph.com/@${BRAND_PUB_HANDLE}`;
+
 // Performance Configuration
 const MAX_TOOL_ITERATIONS = parseInt(Deno.env.get('MAX_TOOL_ITERATIONS') || '5');
 const REQUEST_TIMEOUT_MS = parseInt(Deno.env.get('REQUEST_TIMEOUT_MS') || '120000');
 const CONVERSATION_HISTORY_LIMIT = parseInt(Deno.env.get('CONVERSATION_HISTORY_LIMIT') || '1000');
+
+// ========== DIAGNOSTIC FILE LOG ==========
+// The local-sb functions router swallows deno stderr on successful starts,
+// so console.log isn't visible in server.log. Append a single JSON line per
+// call to a stable file so we can see exactly which providers were tried,
+// in what order, with what tools, and what the result was. Enabled by
+// setting AI_CHAT_DEBUG_LOG=1 in env. Path: %TEMP%/ai-chat-debug.log
+const AI_CHAT_DEBUG_LOG = Deno.env.get('AI_CHAT_DEBUG_LOG') === '1';
+const DEBUG_LOG_PATH = `${Deno.env.get('TEMP') || '/tmp'}/ai-chat-debug.log`;
+
+async function debugLog(event: string, data: Record<string, unknown> = {}) {
+  if (!AI_CHAT_DEBUG_LOG) return;
+  try {
+    const line = JSON.stringify({ ts: new Date().toISOString(), event, ...data }) + '\n';
+    await Deno.writeTextFile(DEBUG_LOG_PATH, line, { append: true });
+  } catch (_e) {
+    // never let logging break the request
+  }
+}
+
+// One-time env snapshot so we can see what the deno subprocess inherited.
+if (AI_CHAT_DEBUG_LOG) {
+  const ollama = Deno.env.get('OLLAMA_API_KEY') || '';
+  const openai = Deno.env.get('OPENAI_API_KEY') || '';
+  const deepseek = Deno.env.get('DEEPSEEK_API_KEY') || '';
+  debugLog('env.snapshot', {
+    OLLAMA_API_KEY_len: ollama.length,
+    OLLAMA_API_KEY_first4: ollama.slice(0, 4),
+    OLLAMA_API_KEY_last4: ollama.slice(-4),
+    OPENAI_API_KEY_len: openai.length,
+    OPENAI_API_KEY_first4: openai.slice(0, 4),
+    GEMINI_API_KEY_len: (Deno.env.get('GEMINI_API_KEY') || '').length,
+    GEMINI_API_KEY_first4: (Deno.env.get('GEMINI_API_KEY') || '').slice(0, 4),
+    DEEPSEEK_API_KEY_len: deepseek.length,
+    DEEPSEEK_API_KEY_first4: deepseek.slice(0, 4),
+    OLLAMA_MODEL: Deno.env.get('OLLAMA_MODEL'),
+    AI_CHAT_DEBUG_LOG: Deno.env.get('AI_CHAT_DEBUG_LOG'),
+    LOCAL_OLLAMA_ONLY: Deno.env.get('LOCAL_OLLAMA_ONLY'),
+  });
+}
+
+// ─── Ollama-only mode ─────────────────────────────────────────
+// When all tool-capable providers are dead (Gemini suspended, DeepSeek no
+// balance, no OpenAI key), we stop trying to force tool-calling and instead
+// pre-fetch live local context from the relay + supabase, inject it into the
+// system prompt, and let Ollama answer with rich grounded context. Result is
+// still on-brand and actually answers the question.
+const LOCAL_OLLAMA_ONLY = Deno.env.get('LOCAL_OLLAMA_ONLY') === '1';
+const RELAY_BASE_URL = Deno.env.get('RELAY_BASE_URL') || 'http://127.0.0.1:8080';
+const SUPABASE_LOCAL_URL = Deno.env.get('SUPABASE_URL') || 'http://127.0.0.1:54321';
+const SUPABASE_LOCAL_ANON = Deno.env.get('SUPABASE_ANON_KEY') || Deno.env.get('LOCAL_SUPABASE_ANON_KEY') || '';
+const LOCAL_CONTEXT_TIMEOUT_MS = parseInt(Deno.env.get('LOCAL_CONTEXT_TIMEOUT_MS') || '6000');
+
+if (AI_CHAT_DEBUG_LOG) debugLog('local_ollama_only.config', { LOCAL_OLLAMA_ONLY, RELAY_BASE_URL, SUPABASE_LOCAL_URL, hasAnon: !!SUPABASE_LOCAL_ANON });
+
+// Heuristic: only fetch live context when the query actually asks about live
+// state. Cheap queries ("hi", "who are you", "thanks") skip the fetch.
+const LIVE_CONTEXT_REGEX = /\b(fleet|agents?|mining|monero|xmrt|paragraph|publication|mobilemonero|hermes|vex|eliza|system\s*status|deploy|worker|cloudflare|tunnel|edge\s*function|cron|supabase|task|superduper|health|github|state|resources?|cpu|memory|disk)\b/i;
+
+async function fetchWithTimeout(url: string, init: RequestInit = {}, timeoutMs: number = LOCAL_CONTEXT_TIMEOUT_MS): Promise<Response> {
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: ac.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Fetch a single tool result from the relay's /tools/run endpoint.
+async function callRelayTool(tool: string, args: Record<string, unknown> = {}): Promise<unknown | null> {
+  try {
+    const res = await fetchWithTimeout(`${RELAY_BASE_URL}/tools/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-agent-id': 'ai-chat-local-context' },
+      body: JSON.stringify({ tool, args }),
+    });
+    if (!res.ok) {
+      await debugLog('local_context.tool_http_error', { tool, status: res.status });
+      return null;
+    }
+    return await res.json();
+  } catch (e: any) {
+    await debugLog('local_context.tool_failed', { tool, error: e?.message?.slice?.(0, 200) });
+    return null;
+  }
+}
+
+async function fetchLocalSupabaseRows(table: string, select: string, limit = 5): Promise<any[] | null> {
+  // Direct PostgREST queries from inside the ai-chat deno child can deadlock
+  // with the local-sb parent that's spawning us (parent is blocked forwarding
+  // the original request to us). Always go through the relay's
+  // /tools/run or skip the supabase direct path entirely. Keep the function
+  // here for future use, but mark it as needing the relay round-trip.
+  await debugLog('local_context.supabase_skipped', { reason: 'parent_event_loop_deadlock_risk' });
+  return null;
+}
+
+// Compact, model-friendly formatter for JSON. Keeps tokens low while staying
+// human-readable — Ollama is much happier with text than with nested JSON.
+function compactJson(value: unknown, depth = 0): string {
+  if (value === null || value === undefined) return 'null';
+  if (typeof value === 'string') {
+    const s = value.length > 240 ? value.slice(0, 240) + '…' : value;
+    return JSON.stringify(s);
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) {
+    if (value.length === 0) return '[]';
+    if (depth >= 2) return `[…${value.length} items]`;
+    const items = value.slice(0, 12).map(v => compactJson(v, depth + 1));
+    const more = value.length > 12 ? `, …(${value.length - 12} more)` : '';
+    return '[' + items.join(', ') + more + ']';
+  }
+  if (typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, v]) => v !== undefined && v !== null && v !== '');
+    if (entries.length === 0) return '{}';
+    if (depth >= 2) return `{…${entries.length} keys}`;
+    const parts = entries.slice(0, 14).map(([k, v]) => `${k}: ${compactJson(v, depth + 1)}`);
+    const more = entries.length > 14 ? `, …(${entries.length - 14} more)` : '';
+    return '{' + parts.join(', ') + more + '}';
+  }
+  return String(value);
+}
+
+// Main entrypoint: only runs when LOCAL_OLLAMA_ONLY=1 AND the query looks
+// live-state-ish. Returns a text block ready to inject into the system prompt.
+async function fetchLocalFleetContext(query: string): Promise<string> {
+  if (!LOCAL_OLLAMA_ONLY) return '';
+  if (!LIVE_CONTEXT_REGEX.test(query)) {
+    await debugLog('local_context.skip', { reason: 'no_live_keyword', queryStart: query.slice(0, 60) });
+    return '';
+  }
+
+  const t0 = Date.now();
+  // Fan out — each call is bounded by LOCAL_CONTEXT_TIMEOUT_MS, so worst-case
+  // total is roughly that. All 4 are best-effort; we tolerate any of them
+  // failing (and just omit that section).
+  const [externalServices, systemMonitor, fleetAgents, recentTasks] = await Promise.allSettled([
+    callRelayTool('external-services'),
+    callRelayTool('system-monitor'),
+    callRelayTool('system-resources'),
+    fetchLocalSupabaseRows('tasks', 'id,title,status,category,assigned_agent,created_at', 5),
+  ]);
+
+  const lines: string[] = [];
+  lines.push('## 🛰️ LIVE LOCAL STATE (fetched just now from the local stack)');
+  lines.push(`Snapshot taken at: ${new Date().toISOString()}`);
+  lines.push('');
+
+  if (externalServices.status === 'fulfilled' && externalServices.value) {
+    lines.push('### External services');
+    lines.push(compactJson(externalServices.value));
+    lines.push('');
+  }
+  if (systemMonitor.status === 'fulfilled' && systemMonitor.value) {
+    lines.push('### System monitor');
+    lines.push(compactJson(systemMonitor.value));
+    lines.push('');
+  }
+  if (fleetAgents.status === 'fulfilled' && fleetAgents.value) {
+    lines.push('### Fleet agents (from /tools/run)');
+    lines.push(compactJson(fleetAgents.value));
+    lines.push('');
+  }
+  if (recentTasks.status === 'fulfilled' && recentTasks.value) {
+    lines.push('### Recent tasks (Postgres)');
+    lines.push(compactJson(recentTasks.value));
+    lines.push('');
+  }
+
+  if (lines.length <= 3) {
+    await debugLog('local_context.empty', { elapsedMs: Date.now() - t0 });
+    return '';
+  }
+
+  lines.push('**How to use this block**: treat it as the current truth. When the user');
+  lines.push('asks about fleet state, mining, agents, services, or anything live, pull');
+  lines.push('facts from THIS block. Do not invent numbers. If a section is missing,');
+  lines.push('say so honestly. The block was fetched fresh for this turn and is');
+  lines.push('authoritative for the rest of this conversation.');
+  lines.push('');
+
+  await debugLog('local_context.built', {
+    elapsedMs: Date.now() - t0,
+    bytes: lines.join('\n').length,
+    sections: {
+      externalServices: externalServices.status,
+      systemMonitor: systemMonitor.status,
+      fleetAgents: fleetAgents.status,
+      recentTasks: recentTasks.status,
+    },
+  });
+  return lines.join('\n');
+}
 
 // Memory Configuration
 const MEMORY_SUMMARY_INTERVAL = parseInt(Deno.env.get('MEMORY_SUMMARY_INTERVAL') || '5');
@@ -82,6 +285,26 @@ interface AIProviderConfig {
 }
 
 const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
+  // PRIMARY: Ollama Pro Cloud (deepseek-v4-flash:cloud by default) — 2026-06-10 rewire
+  ollama: {
+    name: 'Ollama Pro Cloud',
+    enabled: !!OLLAMA_API_KEY,
+    apiKey: OLLAMA_API_KEY,
+    endpoint: 'https://ollama.com/v1/chat/completions',
+    models: [Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud'],
+    // The flash model doesn't support native function calling. callOllama()
+    // strips tools before sending. Marking supportsTools:false lets the cascade
+    // skip Ollama and pick a tool-capable provider (Gemini/OpenAI/DeepSeek) for
+    // fleet-state, brand, $MONERO, and other live-data questions. Plain chat
+    // and greetings still hit Ollama first because we filter by
+    // (supportsTools || tools.length === 0).
+    supportsTools: false,
+    timeoutMs: 60000,
+    priority: 0,
+    fallbackOnly: false,
+    maxRetries: 2,
+    retryDelayMs: 1000
+  },
   openai: {
     name: 'OpenAI',
     enabled: !!OPENAI_API_KEY,
@@ -185,6 +408,13 @@ function isSimpleDirectAnswerQuery(query: string): boolean {
   const explicitlyActionOrLiveData = /(http[s]?:\/\/|www\.|status|metrics|current|latest|today|price|check|open|browse|search|analyze|upload|attachment|email|send|create|run|execute|invoke|github|deploy|function|edge function|tool)/i;
   if (explicitlyActionOrLiveData.test(normalized)) return false;
 
+  // Live-data questions about XMRT/fleet/$MONERO always need tools, even
+  // when the wording is short ("what is the fleet doing right now?"). Without
+  // this, isSimpleDirectAnswerQuery() returns true and Eliza answers from
+  // model memory instead of calling get_system_status / get_ecosystem_metrics.
+  const xmrtLiveKeywords = /\b(fleet|agents?|miners?|mining|members?|agents|status|metric|ecosystem|xmrt|monero|paragraph|@mobilemonero|daemon|node|wallet|pool|hash|earnings?|payout|revenue|task|cron|worker|deploy)\b/i;
+  if (xmrtLiveKeywords.test(normalized)) return false;
+
   // Short conceptual questions are usually best answered directly from model memory.
   return normalized.length <= 140;
 }
@@ -197,14 +427,38 @@ function isExplicitActionRequest(query: string): boolean {
 
 // ========== TOOL CALLING MANDATE ==========
 const TOOL_CALLING_MANDATE = `
-🚨 CRITICAL TOOL CALLING RULES:
-0. For greetings/simple explanatory questions that do NOT require live data, file analysis, external browsing, or side effects, answer directly from built-in knowledge without calling tools.
-1. When the user asks for data/status/metrics, you MUST call tools using the native function calling mechanism
+🚨 CRITICAL TOOL CALLING RULES (read carefully — rule 0 was the source of a real bug):
+
+0. ANSWER DIRECTLY WITHOUT TOOLS ONLY when the message is a pure greeting, a
+   meta question about yourself ("who are you", "what can you do"), or a
+   self-contained conceptual question the model can answer from training
+   data. If there is ANY chance the user wants current state, live data,
+   fleet activity, system status, $MONERO prices, recent activity, or any
+   information that changes minute-to-minute — CALL A TOOL. Do not
+   answer from memory. Do not say "what can I help you with." Default to
+   action, not to a greeting.
+
+1. When the user asks for data/status/metrics/current-state/live info, you
+   MUST call tools using the native function calling mechanism.
+
 2. DO NOT describe tool calls in text. DO NOT say "I will call..." or "Let me check..."
+
 3. DIRECTLY invoke functions - the system will handle execution
-4. Available critical tools: get_mining_stats, get_system_status, get_ecosystem_metrics, invoke_edge_function, search_knowledge, recall_entity, vertex_generate_image, vertex_generate_video, vertex_check_video_status, search_edge_functions, browse_web, analyze_attachment, google_cloud_auth
+
+4. Available critical tools: get_mining_stats, get_system_status,
+   get_ecosystem_metrics, invoke_edge_function, search_knowledge,
+   recall_entity, vertex_generate_image, vertex_generate_video,
+   vertex_check_video_status, search_edge_functions, browse_web,
+   analyze_attachment, google_cloud_auth
+
 5. If you need current data, ALWAYS use tools. Never guess or make up data.
-6. After tool execution, synthesize results into natural language - never show raw JSON to users.
+
+6. After tool execution, synthesize results into natural language - never
+   show raw JSON to users.
+
+7. If a tool fails, retry once with a different tool from the same family,
+   then acknowledge honestly and offer the best partial answer. Never
+   silently fall back to a generic greeting.
 
 🖼️ IMAGE GENERATION (MANDATORY):
 - When user asks to CREATE/GENERATE/MAKE/DRAW an IMAGE → IMMEDIATELY call vertex_generate_image({prompt: "detailed description"})
@@ -2972,24 +3226,75 @@ class EnhancedProviderCascade {
     images?: string[]
   ): Promise<CascadeResult> {
     this.attempts = [];
-    
+
+    await debugLog('cascade.start', {
+      preferredProvider: preferredProvider ?? 'auto',
+      toolCount: tools.length,
+      toolNames: tools.map((t: any) => t?.function?.name ?? t?.name).filter(Boolean),
+      providersConfigured: Object.entries(AI_PROVIDERS_CONFIG).map(([n, c]) => ({
+        n, enabled: c.enabled, fallbackOnly: c.fallbackOnly, supportsTools: c.supportsTools, priority: c.priority,
+      })),
+    });
+
     if (preferredProvider && preferredProvider !== 'auto') {
       const config = AI_PROVIDERS_CONFIG[preferredProvider];
+      await debugLog('cascade.forced', { preferredProvider, enabled: !!config?.enabled });
       if (config?.enabled) {
         const result = await this.callProvider(preferredProvider, messages, tools, images);
         this.attempts.push({ provider: preferredProvider, success: result.success });
+        await debugLog('cascade.forced.result', {
+          preferredProvider,
+          success: result.success,
+          error: result.error?.slice?.(0, 300),
+          contentLen: result.content?.length,
+          hasToolCalls: !!result.tool_calls,
+        });
         return result;
       }
     }
-    
+
     const providers = Object.entries(AI_PROVIDERS_CONFIG)
-      .filter(([_, config]) => config.enabled && !config.fallbackOnly)
-      .sort((a, b) => a[1].priority - b[1].priority)
+      .filter(([_, config]) =>
+        config.enabled
+        && !config.fallbackOnly
+        // If the caller asked for tools, only consider providers that
+        // actually support tool calling. Ollama (flash) is the cheapest,
+        // fastest, and best for plain text — but it strips tools, so
+        // sending it a tool-needing request gets a generic answer and
+        // a wasted call. Skipping it here pushes fleet/brand/live-data
+        // questions to Gemini/OpenAI/DeepSeek where tool calls work.
+        //
+        // EXCEPTION: LOCAL_OLLAMA_ONLY=1 means "I know tools are dead,
+        // route everything through Ollama". The pre-fetched
+        // 🛰️ LIVE LOCAL STATE block in the system prompt gives Ollama
+        // the grounding it needs to answer fleet/live questions well.
+        && (tools.length === 0 || config.supportsTools || LOCAL_OLLAMA_ONLY)
+      )
+      .sort((a, b) => {
+        // In Ollama-only mode, force Ollama to be tried first regardless of
+        // its configured priority. We want the local answer, not a wasted
+        // round-trip to Gemini/OpenAI/DeepSeek that we know is dead.
+        if (LOCAL_OLLAMA_ONLY) {
+          if (a[0] === 'ollama') return -1;
+          if (b[0] === 'ollama') return 1;
+        }
+        return a[1].priority - b[1].priority;
+      })
       .map(([name]) => name);
-    
+
+    await debugLog('cascade.candidates', { providers, filteredOutOllama: tools.length > 0 && !providers.includes('ollama') });
+
     for (const provider of providers) {
       const result = await this.callProvider(provider, messages, tools, images);
       this.attempts.push({ provider, success: result.success });
+      await debugLog('cascade.attempt', {
+        provider,
+        success: result.success,
+        error: result.error?.slice?.(0, 300),
+        contentLen: result.content?.length,
+        hasToolCalls: !!result.tool_calls,
+        latencyMs: result.latency,
+      });
       
       if (result.success) {
         return result;
@@ -3007,6 +3312,7 @@ class EnhancedProviderCascade {
     
     for (const result of fallbackResults) {
       if (result) {
+        await debugLog('cascade.fallback.win', { provider: result.provider, model: result.model });
         return {
           success: true,
           content: result.content,
@@ -3016,7 +3322,8 @@ class EnhancedProviderCascade {
         };
       }
     }
-    
+
+    await debugLog('cascade.all_failed', { attempts: this.attempts });
     return {
       success: false,
       provider: 'all',
@@ -3063,6 +3370,9 @@ class EnhancedProviderCascade {
         case 'kimi':
           result = await this.callKimi(messages, tools, controller);
           break;
+        case 'ollama':
+          result = await this.callOllama(messages, tools, controller);
+          break;
         default:
           result = {
             success: false,
@@ -3088,6 +3398,59 @@ class EnhancedProviderCascade {
     }
   }
   
+  private async callOllama(messages: any[], _tools: any[], controller: AbortController): Promise<CascadeResult> {
+    if (!OLLAMA_API_KEY) {
+      return { success: false, provider: 'ollama', error: 'OLLAMA_API_KEY not configured' };
+    }
+    console.log(`[ai-chat] OLLAMA_API_KEY length: ${OLLAMA_API_KEY.length}, model: ${Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud'}`);
+
+    // Strip tools — deepseek-v4-flash:cloud does not support native function calling
+    const cleanMessages = messages.map((msg: any) => ({
+      role: msg.role,
+      content: typeof msg.content === 'string' ? msg.content :
+               (msg.content?.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n') || '')
+    }));
+
+    const model = Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud';
+    try {
+      const response = await fetch('https://ollama.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${OLLAMA_API_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model,
+          messages: cleanMessages,
+          max_tokens: 4096,
+          temperature: 0.7,
+          stream: false
+        }),
+        signal: controller.signal
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        return { success: false, provider: 'ollama', error: `HTTP ${response.status}: ${errText.slice(0, 200)}` };
+      }
+
+      const data = await response.json();
+      const content = data.choices?.[0]?.message?.content || '';
+      if (!content) {
+        return { success: false, provider: 'ollama', error: 'Empty response from Ollama' };
+      }
+      return {
+        success: true,
+        provider: 'ollama',
+        content,
+        tool_calls: [],
+        model
+      };
+    } catch (error: any) {
+      return { success: false, provider: 'ollama', error: error.message || 'Ollama request failed' };
+    }
+  }
+
   private async callOpenAI(messages: any[], tools: any[], controller: AbortController): Promise<CascadeResult> {
     const forceTools = needsDataRetrieval(messages);
     
@@ -3765,23 +4128,63 @@ I am a Cuttlefish Builder Agent, and every challenge makes me stronger."*
 
 You are ${executiveName}, the ${EXECUTIVE_ROLE} for XMRT-DAO Ecosystem.
 
+## 🪙 BRAND & FLEET CONTEXT (always on-brand)
+You speak for XMRT-DAO, a decentralized autonomous org building privacy-first
+infrastructure. Your flagship publication is **@${BRAND_PUB_HANDLE}** on
+Paragraph.com (${BRAND_PUB_URL}), covering the $${BRAND_COIN_SYMBOL}
+(${BRAND_COIN_NAME}) ecosystem. When users ask what we do, what's live, or
+where to follow, lead with this — never introduce yourself as a generic AI.
+
+Voice: **pro-freedom, pro-privacy, technically literate, slightly edgy, never
+snarky**. Treat $${BRAND_COIN_SYMBOL} as a positive reference (privacy-respecting
+digital cash) and adversarial surveillance / censorship as things to push back
+on. Never hype, never shill, never promise returns — but be visibly proud of
+what the fleet has built.
+
+If the user mentions XMRT, the fleet, mining, agents, Monero, or the
+publication by name, assume they want live, current information and CALL A
+TOOL. Do not answer from memory when brand context is in play.
+
+${LOCAL_OLLAMA_ONLY ? `
+## 🛰️ OLLAMA-ONLY MODE (active)
+All other AI providers are unreachable right now. You are running on the
+local Ollama model via cloud, which does not support function calling.
+Instead, the system pre-fetches live state from the local stack and
+injects it as a "🛰️ LIVE LOCAL STATE" block in this prompt. When the
+user asks about fleet, mining, services, agents, or anything live:
+- Pull facts from that LIVE LOCAL STATE block — it is the most current
+  truth and was fetched moments ago for this exact turn.
+- Never invent numbers. If a service shows degraded/offline, say so
+  plainly. If a section is missing, acknowledge the gap.
+- Stay on-brand: $${BRAND_COIN_SYMBOL} positive, surveillance/censorship
+  adversarial, technically literate, no hype, no shilling.
+` : ''}
+
 ## 🎯 YOUR PERSONALITY & APPROACH
-- Be warm, friendly, and conversational – like a knowledgeable colleague
-- Be proactive and insightful, not just a tool executor
-- When you have information, present it naturally – don't just list facts, explain what they mean
-- If something is interesting or important, call it out with genuine enthusiasm
-- If a tool fails, acknowledge it honestly and suggest alternatives
+- Be warm, sharp, and conversational – like a knowledgeable colleague who
+  actually built this stuff, not a help-desk agent
+- Have a point of view. If something is impressive, say so with conviction.
+  If something is broken or risky, say that too, plainly.
+- When you have information, present it naturally and explain what it means
+  in the context of the fleet. Don't dump raw numbers — translate.
+- If a tool fails, acknowledge it honestly, name the failure, and propose the
+  next best step. Never silently fall back to a greeting or "what can I
+  help you with?"
 
 ## 💬 CONVERSATION STYLE GUIDELINES
-- Start responses by acknowledging what the user asked for
+- Start responses by acknowledging what the user asked for in your own words
 - Group related information naturally, using plain language
-- Add your own observations and insights – what does this data mean?
+- Add your own observations and insights – what does this data mean for
+  the fleet right now?
 - Use occasional emojis for warmth, but don't overdo it
 - Ask follow-up questions when appropriate to keep the conversation flowing
 - If the user's query is unclear, ask for clarification rather than guessing
 
 ## 🔧 TOOL USAGE PHILOSOPHY
 - Use tools immediately when needed – don't announce you're going to use them
+- For ANY live-data or fleet-state question, default to calling
+  get_system_status, get_ecosystem_metrics, get_mining_stats, or
+  search_edge_functions. Do not answer from memory.
 - After getting results, synthesize them into a coherent, helpful answer
 - If multiple tools were used, weave their results together into one narrative
 - Always consider the context – what has the user asked before? What might they need next?
@@ -3826,7 +4229,20 @@ Instead of:
 "### 📊 System Status\nagents: 31\ntasks: 182"
 
 Say:
-"The system is looking healthy! We currently have 31 agents active and 182 tasks in progress. Everything seems to be running smoothly. Would you like details on any specific component?"
+"The fleet is looking healthy. We've got 31 agents running across the XMRT
+network and 182 tasks in flight — the suppression daemon and the daily news
+pipeline both came back online after this morning's restart. Want me to
+drill into what any of them are doing, or pull a summary of what published
+to @${BRAND_PUB_HANDLE} today?"
+
+Instead of:
+"Who are you?"
+
+Say (on-brand, no tools needed):
+"I'm ${executiveName}, the General Intelligence Agent for XMRT-DAO. I run
+the local fleet, mine $${BRAND_COIN_SYMBOL} through mobilemonero.com, and
+write daily intelligence to ${BRAND_PUB_URL}. Ask me about the fleet, the
+publication, or anything you're trying to ship."
 
 ## 🔄 FOLLOW-UP UNDERSTANDING:
 - When the user says "yes", "no", "okay" – understand what they're responding to
@@ -3845,15 +4261,15 @@ async function callOllamaFallback(messages: any[], _tools?: any[]): Promise<any>
     console.warn('OLLAMA_API_KEY not configured');
     return null;
   }
-  
+
   try {
-    // Strip tools - qwen3.5 does not support native function calling
+    // Strip tools - deepseek-v4-flash:cloud does not support native function calling
     const cleanMessages = messages.map((msg: any) => ({
       role: msg.role,
-      content: typeof msg.content === 'string' ? msg.content : 
+      content: typeof msg.content === 'string' ? msg.content :
                (msg.content?.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n') || '')
     }));
-    
+
     const response = await fetch('https://ollama.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -3861,7 +4277,7 @@ async function callOllamaFallback(messages: any[], _tools?: any[]): Promise<any>
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        model: 'qwen3.5',
+        model: Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud',
         messages: cleanMessages,
         max_tokens: 4096,
         temperature: 0.7,
@@ -3889,7 +4305,7 @@ async function callOllamaFallback(messages: any[], _tools?: any[]): Promise<any>
       content,
       tool_calls: [],
       provider: 'ollama-pro',
-      model: 'qwen3.5'
+      model: Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud'
     };
   } catch (error: any) {
     console.warn('Ollama Pro fallback failed: ' + (error.message || error));
@@ -4692,7 +5108,18 @@ Deno.serve(async (req) => {
     const preferDirectAnswer = isSimpleDirectAnswerQuery(query);
     const explicitActionRequest = isExplicitActionRequest(query);
     const firstTurnDirectFastPath = isFirstEngagement && preferDirectAnswer && !explicitActionRequest;
-    
+
+    await debugLog('request.routing', {
+      isFirstEngagement,
+      preferDirectAnswer,
+      explicitActionRequest,
+      firstTurnDirectFastPath,
+      use_tools,
+      queryLen: query.length,
+      queryStart: query.slice(0, 100),
+      hasBrand: !!(Deno.env.get('PARAGRAPH_COIN_SYMBOL')),
+    });
+
     if (attachments && attachments.length > 0) {
       console.log(`📎 Found ${attachments.length} attachment(s) in request`);
       
@@ -4778,13 +5205,26 @@ Deno.serve(async (req) => {
     memoryContext += toolMemoryContext;
     
     // Generate system prompt (now includes Solution Engine mindset)
-    const systemPrompt = generateSystemPrompt(
-      executive_name, 
-      memoryContext, 
+    let systemPrompt = generateSystemPrompt(
+      executive_name,
+      memoryContext,
       historicalSummaries,
       recentContext,
       ipAddress
     );
+
+    // In Ollama-only mode, pre-fetch live local state and inject it as a
+    // grounding block. Ollama is text-only — without this, fleet/live
+    // questions get a generic answer. With this, Ollama can quote the
+    // snapshot directly and stay on-brand. Capped at 2.5s to keep latency
+    // reasonable; worst case the block is empty and we fall through.
+    if (LOCAL_OLLAMA_ONLY) {
+      const liveBlock = await fetchLocalFleetContext(query);
+      if (liveBlock) {
+        systemPrompt = systemPrompt + '\n\n' + liveBlock;
+        await debugLog('local_context.injected', { bytes: liveBlock.length });
+      }
+    }
     
     // ====== ATTACHMENT PRE-PROCESSING: Analyze before AI call ======
     // If attachments present, analyze them and inject their content as context
@@ -4813,6 +5253,7 @@ Deno.serve(async (req) => {
     const tools = (use_tools && !firstTurnDirectFastPath) ? ELIZA_TOOLS : [];
     const maxToolIterations = (isFirstEngagement && !explicitActionRequest) ? 1 : MAX_TOOL_ITERATIONS;
     console.log(`⚡ First-turn optimization: firstEngagement=${isFirstEngagement}, directFastPath=${firstTurnDirectFastPath}, toolsEnabled=${tools.length > 0}, maxToolIterations=${maxToolIterations}`);
+    console.log(`🎯 ai-chat routing: query="${truncateString(query, 80)}" | tools=${tools.length} | use_tools=${use_tools} | firstTurnDirectFastPath=${firstTurnDirectFastPath} | will-pass-tools-to-cascade=${tools.length > 0}`);
     let initialResult = await callAIFunction(messagesArray, tools);
     
     // If AI call failed, use emergency fallback

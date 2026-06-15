@@ -26,29 +26,11 @@ AI-Powered Mining & DAO Management Platform for XMRT Ecosystem with real-time mi
 
 ### Prerequisites
 
-- Node.js 18+ 
-- Supabase CLI
-- Docker (optional, for local development)
+- Node.js 18+
+- PostgreSQL 15+ (for local-sb mode)
+- Git
 
-### Installation
-
-```bash
-# Clone the repository
-git clone https://github.com/xmrtdao/suite.git
-cd suite
-
-# Install dependencies
-npm install
-
-# Set up environment variables
-cp .env.example .env.local
-
-# Start Supabase locally (optional)
-supabase start
-
-# Start development server
-npm run dev
-```
+---
 
 ## 🏗️ Architecture
 
@@ -59,11 +41,167 @@ suite/
 │   ├── services/          # Business logic
 │   └── types/             # TypeScript types
 ├── supabase/              # Supabase configuration
-│   ├── functions/         # Edge functions
+│   ├── functions/         # 120+ Edge functions
 │   └── migrations/        # Database migrations
+├── scripts/               # Utility scripts
 ├── .github/               # GitHub Actions workflows
 └── docs/                  # Documentation
 ```
+
+The suite has **two deployment modes**:
+
+| Mode | Backend | Best For |
+|------|---------|----------|
+| **Supabase Cloud** | supabase.co (hosted) | Production / remote teams |
+| **local-sb** | local-supabase/ + local Postgres | Offline dev / low-resource environments |
+
+---
+
+## ☁️ Mode 1: Supabase Cloud
+
+### Setup
+
+```bash
+git clone https://github.com/xmrtdao/suite.git
+cd suite
+npm install --legacy-peer-deps
+```
+
+### Configure
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` — uncomment the **Cloud** block and enter your Supabase project credentials:
+
+```env
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=eyJ... (anon key)
+SUPABASE_SERVICE_ROLE_KEY=eyJ... (service_role)
+SUPABASE_ACCESS_TOKEN=sbp_... (management token)
+```
+
+### Run
+
+```bash
+npm run dev
+```
+
+### Deploy Edge Functions
+
+```bash
+# Requires Supabase CLI
+npx supabase login
+npx supabase functions deploy <function-name>
+```
+
+### Run Migrations
+
+```bash
+npx supabase db push
+```
+
+---
+
+## 🏠 Mode 2: Local Supabase (local-sb)
+
+Local-sb is a drop-in Supabase replacement — zero Docker containers, runs entirely on Node + Deno + Postgres.
+
+### 1. Start Postgres
+
+Ensure PostgreSQL is running locally with the `xmrt_suite` database:
+
+```bash
+# Windows (using relay supervisor)
+cd relay && node start-pg.mjs
+
+# Or manually via pg_ctl / service
+```
+
+The default connection string is:
+```
+postgres://postgres@127.0.0.1:5432/xmrt_suite
+```
+
+### 2. Apply Schema Migrations
+
+```bash
+node scripts/apply-schema.mjs
+```
+
+This runs all `.sql` files from `supabase/migrations/` against your local DB.
+
+### 3. Configure
+
+Edit `.env` — make sure the **local-sb** block is active:
+
+```env
+VITE_SUPABASE_URL=http://127.0.0.1:54321
+VITE_SUPABASE_PUBLISHABLE_KEY=local-anon-key
+SUPABASE_SERVICE_ROLE_KEY=local-dev-service-role-key
+SUPABASE_ACCESS_TOKEN=local
+```
+
+### 4. Start local-sb Server
+
+Navigate to the `local-supabase/` directory (sibling of `suite/`) and run:
+
+```bash
+cd ../local-supabase
+node server.mjs
+```
+
+This starts the Supabase-compatible proxy on **port 54321** serving:
+- `http://127.0.0.1:54321/rest/v1/*` — PostgREST-compatible REST API
+- `http://127.0.0.1:54321/functions/v1/*` — Deno edge function runner
+- `http://127.0.0.1:54321/auth/v1/*` — Auth stub
+- `http://127.0.0.1:54321/storage/v1/*` — Storage stub
+
+### 5. Start Vite Dev Server
+
+```bash
+cd suite && npm run dev
+```
+
+### 6. Test the Stack
+
+```bash
+# Smoke test: edge function runner
+curl http://127.0.0.1:54321/functions/v1/_local_smoke
+
+# Smoke test: REST API
+curl http://127.0.0.1:54321/rest/v1/knowledge_entities?limit=1 \
+  -H "apikey: local-anon-key" \
+  -H "Authorization: Bearer local-anon-key"
+```
+
+### 7. (Optional) Backfill Knowledge
+
+Seed the memory pipeline with structured domain knowledge:
+
+```bash
+node scripts/backfill-knowledge.mjs
+```
+
+This inserts 5 core entities (XMRT DAO, local-sb, Memory Pipeline, Fleet Chat, PFP) into `knowledge_entities` + `memory_contexts`, then triggers `vectorize-memory` for embeddings.
+
+### local-sb Configuration
+
+| Env Var | Default | Description |
+|---------|---------|-------------|
+| `LOCAL_SUPABASE_PORT` | `54321` | Port for the local-sb server |
+| `LOCAL_SUPABASE_HOST` | `127.0.0.1` | Bind address |
+| `LOCAL_DATABASE_URL` | `postgres://postgres@127.0.0.1:5432/xmrt_suite` | Postgres connection |
+| `SUPABASE_FUNCTIONS_DIR` | `../suite/supabase/functions` | Edge function source |
+
+### Known local-sb Limitations
+
+- **Realtime**: WebSocket stub broadcasts NOOP — no live subscriptions
+- **Auth**: GoTrue stub provides basic token validation only — no signup/oauth flow
+- **Storage**: File-backed stub — no CDN, no image transforms
+- **Deno**: Cold-start per function call (~500ms) — no long-running workers
+- **PostgREST edge cases**: Some advanced queries (`.single()`, enum `in.(...)`) may need workarounds — see `local-supabase/routes/rest.mjs`
 
 ## 🔧 Development
 

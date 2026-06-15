@@ -799,7 +799,8 @@ async function callKimi(
 /**
  * Call Ollama Cloud via ollama.com API (OpenAI-compatible).
  * Uses OLLAMA_API_KEY secret from Supabase.
- * Model examples: qwen3.5:397b, gpt-oss:120b, deepseek-v4-pro
+ * Default model: deepseek-v4-flash:cloud (Vex primary)
+ * Backup models available on ollama.com: gpt-oss:120b, deepseek-v4-pro, qwen3.5:397b
  */
 async function callOllamaPro(
   messages: AIMessage[],
@@ -812,7 +813,8 @@ async function callOllamaPro(
   }
 
   try {
-    console.log('🔮 FINAL FALLBACK: Attempting Ollama Pro Cloud (qwen3.5:397b)...');
+    const ollamaModel = Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud';
+    console.log(`🔮 PRIMARY: Attempting Ollama Pro Cloud (${ollamaModel})...`);
 
     const effectiveSystemPrompt = getEffectiveSystemPrompt(options);
     const effectiveTools = getEffectiveTools(options);
@@ -825,7 +827,7 @@ async function callOllamaPro(
     const maxTokens = options.maxTokens || options.max_tokens || RESPONSE_MAX_TOKENS;
 
     const requestBody: any = {
-      model: 'qwen3.5',
+      model: ollamaModel,
       messages: requestMessages,
       temperature: options.temperature || 0.7,
       max_tokens: maxTokens,
@@ -887,13 +889,13 @@ async function callOllamaPro(
 /**
  * MAIN ENTRY POINT: Unified AI Fallback Cascade
  *
- * Order:
- *   1. Vertex AI via Service Account OAuth2 (GCP — most reliable)
- *   2. Gemini API key (direct, fast fallback)
- *   3. Vertex AI Express Mode (via Gemini key)
- *   4. DeepSeek V3
- *   5. Kimi
- *   6. Ollama Pro (qwen3.5 — OpenAI-compatible, final fallback)
+ * Order (rewired 2026-06-10 per Vex/joe instruction):
+ *   1. PRIMARY: Ollama Pro Cloud (OLLAMA_API_KEY, model = OLLAMA_MODEL or deepseek-v4-flash:cloud)
+ *   2-5. Backup inference (tried only if Ollama fails):
+ *       - Vertex AI via Service Account OAuth2
+ *       - Gemini API key (direct)
+ *       - DeepSeek V3
+ *       - Kimi
  */
 export async function callAIWithFallback(
   messages: AIMessage[],
@@ -901,39 +903,37 @@ export async function callAIWithFallback(
 ): Promise<any> {
   const errors: string[] = [];
 
-  // 1. PRIMARY: Vertex AI via Service Account OAuth2
-  console.log('🔑 Trying Vertex AI SA OAuth2 (primary)...');
+  // 1. PRIMARY: Ollama Pro Cloud (deepseek-v4-flash:cloud by default)
+  const ollamaResult = await callOllamaPro(messages, options);
+  if (ollamaResult.success) return transformResult(ollamaResult);
+  errors.push(`OllamaPro: ${ollamaResult.error}`);
+  console.warn('⚠️ Ollama Pro failed, trying Vertex SA backup...');
+
+  // 2. BACKUP: Vertex AI via Service Account OAuth2
+  console.log('🔑 Trying Vertex AI SA OAuth2 (backup)...');
   const saResult = await callVertexWithServiceAccount(messages, options);
   if (saResult.success) return transformResult(saResult);
   errors.push(`VertexSA: ${saResult.error}`);
-  console.warn('⚠️ Vertex SA failed, trying API key fallback...');
 
-  // 2. FALLBACK: Gemini API key
+  // 3. BACKUP: Gemini API key
   const geminiResult = await callGemini(messages, options);
   if (geminiResult.success) return transformResult(geminiResult);
   errors.push(`Gemini: ${geminiResult.error}`);
 
-  // 3. Vertex AI Express Mode (reuses Gemini key)
+  // 4. BACKUP: Vertex AI Express Mode (reuses Gemini key)
   const vertexResult = await callVertex(messages, options);
   if (vertexResult.success) return transformResult(vertexResult);
   errors.push(`Vertex: ${vertexResult.error}`);
 
-  // 4. Lovable skipped (no key configured)
-
-  // 4. DeepSeek V3
+  // 5. BACKUP: DeepSeek V3
   const deepSeekResult = await callDeepSeek(messages, options);
   if (deepSeekResult.success) return transformResult(deepSeekResult);
   errors.push(`DeepSeek: ${deepSeekResult.error}`);
 
-  // 5. Kimi
+  // 6. BACKUP: Kimi
   const kimiResult = await callKimi(messages, options);
   if (kimiResult.success) return transformResult(kimiResult);
   errors.push(`Kimi: ${kimiResult.error}`);
-
-  // 6. FINAL FALLBACK: Ollama Pro (OpenAI-compatible, qwen3.5)
-  const ollamaResult = await callOllamaPro(messages, options);
-  if (ollamaResult.success) return transformResult(ollamaResult);
-  errors.push(`OllamaPro: ${ollamaResult.error}`);
 
   throw new Error(`All AI providers failed: ${errors.join(' | ')}`);
 }
@@ -965,35 +965,67 @@ function transformResult(result: ProviderResult): any {
 let embeddingSession: any = null;
 
 export async function generateEmbedding(text: string): Promise<number[]> {
+  // ── TRY 1: Supabase Native AI (cloud / managed) ──────────────────────────
   try {
-    console.log(`🧠 Generating embedding for ${text.length} chars using Supabase Native AI (gte-small)...`);
+    // @ts-ignore: Supabase is a global in Edge Runtime
+    if (typeof Supabase !== 'undefined' && Supabase.ai) {
+      console.log(`🧠 Generating embedding via Supabase Native AI (gte-small)...`);
 
-    // Initialize session only once (Singleton)
-    if (!embeddingSession) {
-      // @ts-ignore: Supabase is a global in Edge Runtime
-      if (typeof Supabase === 'undefined' || !Supabase.ai) {
-        throw new Error('Supabase Native AI not available in this environment');
+      // Initialize session only once (Singleton)
+      if (!embeddingSession) {
+        console.log('🔌 Initializing new Supabase.ai Session (gte-small)...');
+        // @ts-ignore: Supabase is a global in Edge Runtime
+        embeddingSession = new Supabase.ai.Session('gte-small');
       }
-      console.log('🔌 Initializing new Supabase.ai Session (gte-small)...');
-      // @ts-ignore: Supabase is a global in Edge Runtime
-      embeddingSession = new Supabase.ai.Session('gte-small');
-    }
 
-    // Generate embedding
-    const output = await embeddingSession.run(text, {
-      mean_pool: true,
-      normalize: true,
+      const output = await embeddingSession.run(text, {
+        mean_pool: true,
+        normalize: true,
+      });
+
+      if (output && Array.isArray(output)) {
+        console.log(`✅ Supabase Native AI embedding: ${output.length} dims`);
+        return output;
+      }
+      console.warn('⚠️ Supabase AI returned invalid format, falling back to Ollama...');
+    }
+  } catch (error) {
+    console.warn('⚠️ Supabase Native AI unavailable, falling back to local Ollama:', error.message);
+    embeddingSession = null;
+  }
+
+  // ── TRY 2: Local Ollama embedding API (all-minilm, 384-dim) ──────────────
+  const ollamaHost = (Deno.env.get('OLLAMA_HOST') || 'http://localhost:11434').replace(/\/$/, '');
+  const embedModel = 'all-minilm';
+
+  try {
+    console.log(`🧠 Generating embedding via local Ollama (${ollamaHost}, ${embedModel})...`);
+
+    const res = await fetch(`${ollamaHost}/api/embed`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: embedModel,
+        input: text,
+      }),
     });
 
-    if (!output || !Array.isArray(output)) {
-      throw new Error('Invalid embedding format from Supabase AI');
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`Ollama embed failed (${res.status}): ${err}`);
     }
 
-    return output;
+    const data = await res.json();
+    const embedding = data.embeddings?.[0];
+
+    if (!embedding || !Array.isArray(embedding)) {
+      throw new Error('Invalid embedding format from Ollama');
+    }
+
+    console.log(`✅ Local Ollama embedding: ${embedding.length} dims (model=${data.model || embedModel})`);
+    return embedding;
   } catch (error) {
-    console.error('❌ Embedding generation error:', error);
-    // If session is possibly corrupted, clear it for next retry
-    embeddingSession = null;
+    console.error('❌ Both embedding providers failed:', error.message);
     throw error;
   }
 }

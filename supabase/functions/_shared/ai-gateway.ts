@@ -1,6 +1,6 @@
 // Unified AI Gateway with Comprehensive Fallback System
-// Priority: Vertex AI (gemini-2.5-pro/flash, GCP credits) → Gemini API key → DeepSeek → OpenAI → Kimi
-// Last updated: 2026-05-06 — Kimi endpoint updated to kimi-for-coding (api.kimi.com/coding/v1)
+// Priority: Ollama Pro Cloud (deepseek-v4-flash:cloud, OLLAMA_API_KEY) → Vertex AI → Gemini → DeepSeek → OpenAI → Kimi
+// Last updated: 2026-06-10 — Ollama is PRIMARY; all others are backup inference
 
 import { getVertexAuth, getVertexEndpoint } from './vertexAuthHelper.ts';
 
@@ -30,7 +30,7 @@ const GATEWAY_CONFIG: GatewayConfig = {
       name: 'ollama-pro',
       get apiKey() { return Deno.env.get('OLLAMA_API_KEY') || '' },
       endpoint: 'https://ollama.com/v1/chat/completions',
-      model: 'qwen3.5',
+      model: Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud',
       priority: 1,
       rateLimit: 1200,
       timeout: 60000,
