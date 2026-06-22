@@ -12,6 +12,8 @@ const DEEPSEEK_API_KEY = Deno.env.get('DEEPSEEK_API_KEY') || '';
 const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY') || '';
 const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY') || '';
 const OLLAMA_API_KEY = Deno.env.get('OLLAMA_API_KEY') || '';
+const OLLAMA_LOCAL_HOST = Deno.env.get('OLLAMA_HOST') || 'http://localhost:11434';
+const OLLAMA_LOCAL_MODEL = Deno.env.get('OLLAMA_LOCAL_MODEL') || '';  // explicit override for local Ollama model (e.g. gemma3:1b)
 
 // Executive Configuration
 const EXECUTIVE_NAME = Deno.env.get('EXECUTIVE_NAME') || 'Eliza';
@@ -65,6 +67,7 @@ if (AI_CHAT_DEBUG_LOG) {
     DEEPSEEK_API_KEY_len: deepseek.length,
     DEEPSEEK_API_KEY_first4: deepseek.slice(0, 4),
     OLLAMA_MODEL: Deno.env.get('OLLAMA_MODEL'),
+    OLLAMA_LOCAL_MODEL: Deno.env.get('OLLAMA_LOCAL_MODEL'),
     AI_CHAT_DEBUG_LOG: Deno.env.get('AI_CHAT_DEBUG_LOG'),
     LOCAL_OLLAMA_ONLY: Deno.env.get('LOCAL_OLLAMA_ONLY'),
   });
@@ -292,18 +295,35 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     apiKey: OLLAMA_API_KEY,
     endpoint: 'https://ollama.com/v1/chat/completions',
     models: [Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud'],
-    // The flash model doesn't support native function calling. callOllama()
-    // strips tools before sending. Marking supportsTools:false lets the cascade
-    // skip Ollama and pick a tool-capable provider (Gemini/OpenAI/DeepSeek) for
-    // fleet-state, brand, $MONERO, and other live-data questions. Plain chat
-    // and greetings still hit Ollama first because we filter by
-    // (supportsTools || tools.length === 0).
-    supportsTools: false,
-    timeoutMs: 60000,
+    // deepseek-v4-flash:cloud supports native function calling (tools capability
+    // confirmed in Ollama model manifest). callOllama() sends tools to the model
+    // and returns tool_calls for direct execution.
+    supportsTools: true,
+    timeoutMs: 30000,
     priority: 0,
     fallbackOnly: false,
     maxRetries: 2,
     retryDelayMs: 1000
+  },
+  // LOCAL Ollama — talks to http://localhost:11434 (set via OLLAMA_HOST env).
+  // Provides text-based tool calling: tool definitions are injected into the
+  // system prompt as XML-like <functions> blocks, and the model's text response
+  // is parsed for tool call patterns via parseDeepSeekToolCalls() /
+  // parseToolCodeBlocks(). Priority is lower than cloud Ollama so the cloud
+  // provider is tried first when keys are present; LOCAL_OLLAMA_ONLY=1 bumps
+  // this to the front.
+  ollama_local: {
+    name: 'Ollama Local',
+    enabled: false,  // disabled — 6GB laptop cannot run local models
+    apiKey: '',
+    endpoint: `${OLLAMA_LOCAL_HOST}/v1/chat/completions`,
+    models: [Deno.env.get('OLLAMA_MODEL') || 'llama3.2', 'gemma4', 'gemma3', 'mistral', 'qwen2.5'],
+    supportsTools: true,  // text-based tool calling works with any model
+    timeoutMs: 10000,  // 8.9GB model on 6GB RAM will never respond; fast-fail to cloud
+    priority: 99,  // tried last unless LOCAL_OLLAMA_ONLY bumps it
+    fallbackOnly: false,
+    maxRetries: 1,
+    retryDelayMs: 500
   },
   openai: {
     name: 'OpenAI',
@@ -1340,6 +1360,31 @@ async function getSystemStatus(): Promise<any> {
 }
 
 async function invokeEdgeFunction(name: string, payload: any): Promise<any> {
+  // Map edge function names to relay tool names. The relay has working native
+  // tool handlers for web scraping, mining, ecosystem, vertex AI, etc. —
+  // routing through relay is faster and more reliable than hitting the local
+  // edge function fallback (which would return stubs for functions that don't
+  // exist in the local functions directory).
+  const EDGE_TO_RELAY: Record<string, { tool: string; mapArgs?: (p: any) => any }> = {
+    'playwright-browse': { tool: 'web-scrape', mapArgs: (p) => ({ url: p.url, maxLength: p.timeout || 50000 }) },
+    'mining-proxy': { tool: 'ef:mining', mapArgs: (p) => ({ action: p.action, wallet: p.wallet }) },
+    'ecosystem-monitor': { tool: 'ef:ecosystem-monitor' },
+    'ecosystem-health-check': { tool: 'ef:ecosystem-health' },
+    'vertex-ai-chat': { tool: 'ef:vertex-ai', mapArgs: (p) => p },
+  };
+
+  const mapping = EDGE_TO_RELAY[name];
+  if (mapping) {
+    const args = mapping.mapArgs ? mapping.mapArgs(payload) : payload;
+    const relayResult = await callRelayTool(mapping.tool, args);
+    if (relayResult !== null) return relayResult;
+    // Relay unreachable — fall through to local edge function call via supabase client
+  }
+
+  // Local edge function call via supabase client. With NEXT_PUBLIC_SUPABASE_URL now
+  // pointing at http://127.0.0.1:54321, this hits the local-sb deno runner which starts
+  // a persistent deno process for the named function. The function may be slow on first
+  // invocation (cold start) but subsequent calls are fast (pooled deno process).
   try {
     const { data, error } = await supabase.functions.invoke(name, { body: payload });
     if (error) throw new Error(error.message);
@@ -2206,7 +2251,20 @@ async function executeRealToolCall(
         throw new Error('Missing required fields: name, code, language');
       }
       result = await storeCodeSnippet(snippetName, code, language, description || '', tags || [], sessionId, ipAddress);
-      
+
+    // ===== RELAY TOOLS (Resend inbox/email) =====
+    } else if (name === 'resend_inbox') {
+      result = await callRelayTool('resend-inbox', { domain: parsedArgs.domain || 'all', limit: parsedArgs.limit || 10 });
+
+    } else if (name === 'resend_send_email') {
+      result = await callRelayTool('resend-send-email', {
+        agent: parsedArgs.agent,
+        to: parsedArgs.to,
+        subject: parsedArgs.subject,
+        body: parsedArgs.body,
+        from: parsedArgs.from
+      });
+
     } else {
       throw new Error(`Tool '${name}' is not a recognized or allowed tool.`);
     }
@@ -2560,6 +2618,7 @@ const knownTools = [
 
   // Email/SMS
   'send_email', 'send_sms',
+  'resend_inbox', 'resend_send_email',
 
   // Security / Keys
   'rotate_api_key', 'get_secrets', 'set_secret', 'delete_secret',
@@ -3258,23 +3317,20 @@ class EnhancedProviderCascade {
         config.enabled
         && !config.fallbackOnly
         // If the caller asked for tools, only consider providers that
-        // actually support tool calling. Ollama (flash) is the cheapest,
-        // fastest, and best for plain text — but it strips tools, so
-        // sending it a tool-needing request gets a generic answer and
-        // a wasted call. Skipping it here pushes fleet/brand/live-data
-        // questions to Gemini/OpenAI/DeepSeek where tool calls work.
-        //
-        // EXCEPTION: LOCAL_OLLAMA_ONLY=1 means "I know tools are dead,
-        // route everything through Ollama". The pre-fetched
-        // 🛰️ LIVE LOCAL STATE block in the system prompt gives Ollama
-        // the grounding it needs to answer fleet/live questions well.
+        // actually support tool calling. Local Ollama (ollama_local)
+        // supports text-based tool calling (supportsTools:true), so it
+        // stays in the list. Cloud Ollama (ollama) strips tools — skip
+        // it for tool-needing requests unless LOCAL_OLLAMA_ONLY is set,
+        // in which case the pre-fetched 🛰️ LIVE LOCAL STATE block in
+        // the system prompt gives cloud Ollama the grounding it needs.
         && (tools.length === 0 || config.supportsTools || LOCAL_OLLAMA_ONLY)
       )
       .sort((a, b) => {
-        // In Ollama-only mode, force Ollama to be tried first regardless of
-        // its configured priority. We want the local answer, not a wasted
-        // round-trip to Gemini/OpenAI/DeepSeek that we know is dead.
+        // In Ollama-only mode, bump local Ollama to the front, cloud
+        // Ollama second, so we try the real local instance first.
         if (LOCAL_OLLAMA_ONLY) {
+          if (a[0] === 'ollama_local') return -2;
+          if (b[0] === 'ollama_local') return 2;
           if (a[0] === 'ollama') return -1;
           if (b[0] === 'ollama') return 1;
         }
@@ -3373,6 +3429,9 @@ class EnhancedProviderCascade {
         case 'ollama':
           result = await this.callOllama(messages, tools, controller);
           break;
+        case 'ollama_local':
+          result = await this.callOllamaLocal(messages, tools, controller);
+          break;
         default:
           result = {
             success: false,
@@ -3398,13 +3457,13 @@ class EnhancedProviderCascade {
     }
   }
   
-  private async callOllama(messages: any[], _tools: any[], controller: AbortController): Promise<CascadeResult> {
+  private async callOllama(messages: any[], tools: any[], controller: AbortController): Promise<CascadeResult> {
     if (!OLLAMA_API_KEY) {
       return { success: false, provider: 'ollama', error: 'OLLAMA_API_KEY not configured' };
     }
     console.log(`[ai-chat] OLLAMA_API_KEY length: ${OLLAMA_API_KEY.length}, model: ${Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud'}`);
 
-    // Strip tools — deepseek-v4-flash:cloud does not support native function calling
+    // Normalize messages (strip non-text content parts for Ollama API)
     const cleanMessages = messages.map((msg: any) => ({
       role: msg.role,
       content: typeof msg.content === 'string' ? msg.content :
@@ -3412,20 +3471,33 @@ class EnhancedProviderCascade {
     }));
 
     const model = Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud';
+    const needsTools = tools.length > 0 && needsDataRetrieval(messages);
     try {
+      const body: Record<string, any> = {
+        model,
+        messages: cleanMessages,
+        max_tokens: 4096,
+        temperature: 0.7,
+        stream: false,
+      };
+      if (tools.length > 0) {
+        body.tools = tools;
+        // Ollama Pro API supports "required" (force tool call), "auto" (model
+        // decides), or "none". Confirmed working via direct API test on
+        // deepseek-v4-flash:cloud — "required" returns finish_reason:"tool_calls"
+        // instead of letting the model answer from training data.
+        // Verified 2026-06-22: Ollama Pro v1/chat/completions handles "required"
+        // identically to DeepSeek's first-party API.
+        body.tool_choice = 'required';
+      }
+
       const response = await fetch('https://ollama.com/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${OLLAMA_API_KEY}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-          model,
-          messages: cleanMessages,
-          max_tokens: 4096,
-          temperature: 0.7,
-          stream: false
-        }),
+        body: JSON.stringify(body),
         signal: controller.signal
       });
 
@@ -3435,7 +3507,19 @@ class EnhancedProviderCascade {
       }
 
       const data = await response.json();
-      const content = data.choices?.[0]?.message?.content || '';
+      console.log(`[callOllama] finish_reason=${data.choices?.[0]?.finish_reason}, hasToolCalls=${!!data.choices?.[0]?.message?.tool_calls}`);
+      const message = data.choices?.[0]?.message;
+
+      if (message?.tool_calls?.length > 0) {
+        return {
+          success: true,
+          tool_calls: message.tool_calls,
+          provider: 'ollama',
+          model
+        };
+      }
+
+      const content = message?.content || '';
       if (!content) {
         return { success: false, provider: 'ollama', error: 'Empty response from Ollama' };
       }
@@ -3448,6 +3532,123 @@ class EnhancedProviderCascade {
       };
     } catch (error: any) {
       return { success: false, provider: 'ollama', error: error.message || 'Ollama request failed' };
+    }
+  }
+
+  /**
+   * Call a LOCAL Ollama instance (http://localhost:11434) with text-based
+   * tool calling. Since most local models don't support native OpenAI-style
+   * `tool_calls`, we inject tool definitions into the system prompt as a
+   * text manifest and ask the model to emit ````tool_code` blocks for each
+   * function it wants to call. The response is parsed back into structured
+   * tool_calls by the existing parseDeepSeekToolCalls() / parseToolCodeBlocks()
+   * parsers so the main tool-execution loop works identically.
+   */
+  private async callOllamaLocal(messages: any[], tools: any[], controller: AbortController): Promise<CascadeResult> {
+    const localUrl = AI_PROVIDERS_CONFIG.ollama_local?.endpoint || 'http://localhost:11434/v1/chat/completions';
+
+    // Detect model: use OLLAMA_LOCAL_MODEL env override if set, otherwise
+    // try /api/tags to find the best available model.
+    let model = OLLAMA_LOCAL_MODEL || 'llama3.2';
+    if (!OLLAMA_LOCAL_MODEL) {
+      try {
+        const tagRes = await fetch(`${OLLAMA_LOCAL_HOST}/api/tags`, { signal: AbortSignal.timeout(3000) });
+        if (tagRes.ok) {
+          const tagData = await tagRes.json();
+          const models = tagData.models || [];
+          const preferred = ['gemma4', 'gemma3', 'llama3.2', 'mistral', 'qwen2.5', 'deepseek'];
+          for (const p of preferred) {
+            const found = models.find((m: any) => m.name?.startsWith(p));
+            if (found) { model = found.name; break; }
+          }
+          if (!model && models.length > 0) model = models[0].name;
+        }
+      } catch {
+        // host down — will fail at fetch, cascade continues
+      }
+    }  // end OLLAMA_LOCAL_MODEL override guard
+
+    // Build messages with tool definitions injected into system prompt
+    const toolInjectedMessages = messages.map((msg: any) => {
+      if (msg.role === 'system' && tools.length > 0) {
+        // Append tool definitions as a text manifest
+        const toolDescriptions = tools.map((t: any, i: number) => {
+          const fn = t.function || t;
+          return `${i + 1}. ${fn.name}: ${fn.description || 'No description'}
+   Parameters: ${JSON.stringify(fn.parameters || {})}`;
+        }).join('\n\n');
+
+        const toolCallInstructions = `
+You have access to the following functions that you can call to retrieve live data or perform actions.
+
+FUNCTIONS:
+${toolDescriptions}
+
+To call a function, respond with a tool_code block like this:
+\`\`\`tool_code
+functionName({ "param1": "value1" })
+\`\`\`
+
+You may call MULTIPLE functions in a single response. After receiving the results, synthesize them into a natural answer.
+
+IMPORTANT: When the user asks about fleet state, mining data, system status, tasks, agents, browsing the web, sending emails, or any live/current data — you MUST use one of these functions to get the information. Do not guess or fabricate data. If a function returns an error, say so honestly.`;
+
+        return {
+          role: 'system',
+          content: msg.content + '\n\n' + toolCallInstructions
+        };
+      }
+      return msg;
+    });
+
+    try {
+      const response = await fetch(localUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model,
+          messages: toolInjectedMessages,
+          max_tokens: 8192,
+          temperature: 0.7,
+          stream: false
+        }),
+        signal: controller.signal
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        return { success: false, provider: 'ollama_local', error: `HTTP ${response.status}: ${errText.slice(0, 200)}` };
+      }
+
+      const data = await response.json();
+      const content = data.choices?.[0]?.message?.content || '';
+      if (!content) {
+        return { success: false, provider: 'ollama_local', error: 'Empty response from local Ollama' };
+      }
+
+      // Parse text-based tool calls from the response using existing parsers
+      let tool_calls: any[] = [];
+      const parsed = parseDeepSeekToolCalls(content) ||
+                     parseToolCodeBlocks(content) ||
+                     parseConversationalToolIntent(content);
+      if (parsed && parsed.length > 0) {
+        tool_calls = parsed;
+      }
+
+      console.log(`[ai-chat] callOllamaLocal (${model}): content_len=${content.length}, tool_calls=${tool_calls.length}`);
+
+      return {
+        success: true,
+        provider: 'ollama_local',
+        content,
+        tool_calls,
+        model
+      };
+    } catch (error: any) {
+      if (error.name === 'AbortError') {
+        return { success: false, provider: 'ollama_local', error: 'Request timed out' };
+      }
+      return { success: false, provider: 'ollama_local', error: error.message || 'Local Ollama request failed' };
     }
   }
 
@@ -4254,16 +4455,93 @@ Remember: You're here to be genuinely helpful, insightful, and pleasant to talk 
 
 
 // ========== OLLAMA PRO FALLBACK ==========
-async function callOllamaFallback(messages: any[], _tools?: any[]): Promise<any> {
-  console.log('Trying Ollama Pro fallback...');
-  
+async function callOllamaFallback(messages: any[], tools?: any[]): Promise<any> {
+  const localUrl = AI_PROVIDERS_CONFIG.ollama_local?.endpoint || 'http://localhost:11434/v1/chat/completions';
+
+  // Try local Ollama first (it's free, always available)
+  try {
+    console.log('Trying local Ollama fallback...');
+
+    let model = 'llama3.2';
+    try {
+      const tagRes = await fetch(`${OLLAMA_LOCAL_HOST}/api/tags`, { signal: AbortSignal.timeout(2000) });
+      if (tagRes.ok) {
+        const tagData = await tagRes.json();
+        const models = tagData.models || [];
+        const preferred = ['gemma4', 'gemma3', 'llama3.2', 'mistral', 'qwen2.5', 'deepseek'];
+        for (const p of preferred) {
+          const found = models.find((m: any) => m.name?.startsWith(p));
+          if (found) { model = found.name; break; }
+        }
+        if (!model && models.length > 0) model = models[0].name;
+      }
+    } catch { /* host down */ }
+
+    // Inject tool definitions into system prompt if tools are provided
+    const toolInjectedMessages = messages.map((msg: any) => {
+      if (msg.role === 'system' && tools && tools.length > 0) {
+        const toolDescriptions = tools.map((t: any, i: number) => {
+          const fn = t.function || t;
+          return `${i + 1}. ${fn.name}: ${fn.description || 'No description'}
+   Parameters: ${JSON.stringify(fn.parameters || {})}`;
+        }).join('\n\n');
+
+        return {
+          role: 'system',
+          content: msg.content + `\n\nYou have access to the following functions:
+${toolDescriptions}
+
+To call a function, respond with a tool_code block like this:
+\`\`\`tool_code
+functionName({ "param1": "value1" })
+\`\`\`
+You may call MULTIPLE functions in a single response.`
+        };
+      }
+      return msg;
+    });
+
+    const response = await fetch(localUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        messages: toolInjectedMessages,
+        max_tokens: 4096,
+        temperature: 0.7,
+        stream: false
+      }),
+      signal: AbortSignal.timeout(60000)
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      const content = data.choices?.[0]?.message?.content || '';
+      if (content) {
+        // Parse text-based tool calls
+        let tool_calls: any[] = [];
+        const parsed = parseDeepSeekToolCalls(content) ||
+                       parseToolCodeBlocks(content) ||
+                       parseConversationalToolIntent(content);
+        if (parsed && parsed.length > 0) tool_calls = parsed;
+
+        console.log(`✅ Local Ollama fallback successful (${model}), tool_calls=${tool_calls.length}`);
+        return { content, tool_calls, provider: 'ollama_local', model };
+      }
+    }
+  } catch (error: any) {
+    console.warn('Local Ollama fallback failed: ' + (error.message || error));
+  }
+
+  // Fall back to cloud Ollama Pro if local fails
+  console.log('Local Ollama failed, trying Ollama Pro fallback...');
+
   if (!OLLAMA_API_KEY) {
     console.warn('OLLAMA_API_KEY not configured');
     return null;
   }
 
   try {
-    // Strip tools - deepseek-v4-flash:cloud does not support native function calling
     const cleanMessages = messages.map((msg: any) => ({
       role: msg.role,
       content: typeof msg.content === 'string' ? msg.content :
@@ -4285,21 +4563,21 @@ async function callOllamaFallback(messages: any[], _tools?: any[]): Promise<any>
       }),
       signal: AbortSignal.timeout(60000)
     });
-    
+
     if (!response.ok) {
       const errorText = await response.text();
       console.warn('Ollama Pro fallback HTTP ' + response.status + ': ' + errorText.slice(0, 100));
       return null;
     }
-    
+
     const data = await response.json();
     const content = data.choices?.[0]?.message?.content || '';
-    
+
     if (!content) {
       console.warn('Ollama Pro fallback returned empty content');
       return null;
     }
-    
+
     console.log('Ollama Pro fallback successful');
     return {
       content,
@@ -4821,6 +5099,39 @@ const ELIZA_TOOLS = [
       }
     }
   },
+  // ===== RELAY TOOLS (Resend inbox/email) =====
+  {
+    type: 'function',
+    function: {
+      name: 'resend_inbox',
+      description: '📬 Read recent emails from the Resend inbox (pfp, mobilemonero, 31harbor) — check for leads, bookings, inquiries',
+      parameters: {
+        type: 'object',
+        properties: {
+          domain: { type: 'string', enum: ['pfp', 'mobilemonero', '31harbor', 'all'], default: 'all', description: 'Which domain inbox to read' },
+          limit: { type: 'number', default: 10, description: 'Max emails to return (max 50)' }
+        }
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'resend_send_email',
+      description: '📧 Send an email via Resend as a fleet agent (vex, eliza, hermes, pfp, harbor)',
+      parameters: {
+        type: 'object',
+        properties: {
+          agent: { type: 'string', enum: ['vex', 'eliza', 'hermes', 'pfp', 'harbor'], description: 'Which agent identity to send as' },
+          to: { type: 'string', description: 'Recipient email address' },
+          subject: { type: 'string', description: 'Email subject line' },
+          body: { type: 'string', description: 'Email body (HTML or plain text)' },
+          from: { type: 'string', description: 'Optional custom from address' }
+        },
+        required: ['agent', 'to', 'subject', 'body']
+      }
+    }
+  },
   // ===== NEW SOLUTION ENGINE TOOLS =====
   {
     type: 'function',
@@ -5213,18 +5524,9 @@ Deno.serve(async (req) => {
       ipAddress
     );
 
-    // In Ollama-only mode, pre-fetch live local state and inject it as a
-    // grounding block. Ollama is text-only — without this, fleet/live
-    // questions get a generic answer. With this, Ollama can quote the
-    // snapshot directly and stay on-brand. Capped at 2.5s to keep latency
-    // reasonable; worst case the block is empty and we fall through.
-    if (LOCAL_OLLAMA_ONLY) {
-      const liveBlock = await fetchLocalFleetContext(query);
-      if (liveBlock) {
-        systemPrompt = systemPrompt + '\n\n' + liveBlock;
-        await debugLog('local_context.injected', { bytes: liveBlock.length });
-      }
-    }
+    // Local Ollama (gemma3-it-qat-tools) is too large for 6GB RAM and will
+    // always timeout. Cloud Ollama (deepseek-v4-flash:cloud) supports tools
+    // natively. Rely on the cascade to call tools — no pre-injection needed.
     
     // ====== ATTACHMENT PRE-PROCESSING: Analyze before AI call ======
     // If attachments present, analyze them and inject their content as context

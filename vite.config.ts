@@ -12,6 +12,7 @@ export default defineConfig(async ({ mode }) => {
   }
 
   return {
+    base: "/suite/",
     server: {
       host: "::",
       port: 5173,

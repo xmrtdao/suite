@@ -1,5 +1,13 @@
 import { useState, useEffect, DragEvent, TouchEvent as ReactTouchEvent } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import {
+  fetchTasks as localFetchTasks,
+  fetchAgents as localFetchAgents,
+  updateTask as localUpdateTask,
+  updateAgent as localUpdateAgent,
+  createActivityLog as localCreateActivityLog,
+  subscribeTasks as localSubscribeTasks,
+  subscribeAgents as localSubscribeAgents,
+} from '@/integrations/local-api';
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/contexts/AuthContext";
 import { Button } from '@/components/ui/button';
@@ -219,13 +227,14 @@ function AgentCard({ agent, taskCount, assignedTasks, onAgentClick, onTaskDropTo
 interface TaskCardProps {
   task: Task;
   agentName: string | null;
+  hasUnresolvedAgent: boolean;
   onDragStart: (e: DragEvent<HTMLDivElement>, task: Task) => void;
   onDragEnd: () => void;
   isDragging: boolean;
   onTaskClick: (task: Task) => void;
 }
 
-function TaskCard({ task, agentName, onDragStart, onDragEnd, isDragging, onTaskClick }: TaskCardProps) {
+function TaskCard({ task, agentName, hasUnresolvedAgent, onDragStart, onDragEnd, isDragging, onTaskClick }: TaskCardProps) {
   const statusStyle = STATUS_STYLES[task.status] || STATUS_STYLES.PENDING;
   const categoryColor = task.category ? CATEGORY_COLORS[task.category.toLowerCase()] || 'bg-muted' : 'bg-muted';
   const progressPercentage = Math.min(100, Math.max(0, task.progress_percentage || 0));
@@ -275,10 +284,10 @@ function TaskCard({ task, agentName, onDragStart, onDragEnd, isDragging, onTaskC
       </div>
 
       <div className="flex items-center gap-2 flex-wrap">
-        {agentName && (
-          <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-5 gap-1">
+        {(agentName || hasUnresolvedAgent) && (
+          <Badge variant="outline" className={`text-[10px] px-1.5 py-0 h-5 gap-1 ${hasUnresolvedAgent && !agentName ? 'border-amber-500/50 text-amber-400' : ''}`}>
             <User className="w-2.5 h-2.5" />
-            {getPrimaryName(agentName, 'Agent')}
+            {agentName ? getPrimaryName(agentName, 'Agent') : 'Unidentified'}
           </Badge>
         )}
 
@@ -415,6 +424,7 @@ function StageColumn({
                 key={task.id}
                 task={task}
                 agentName={task.assignee_agent_id ? agents.get(task.assignee_agent_id)?.name || null : null}
+                hasUnresolvedAgent={!!task.assignee_agent_id && !agents.has(task.assignee_agent_id)}
                 onDragStart={onDragStart}
                 onDragEnd={onDragEnd}
                 isDragging={draggedTask?.id === task.id}
@@ -461,35 +471,13 @@ function ProvisionAgentDialog({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsLoading(true);
-    try {
-      const { data, error } = await supabase.functions.invoke('agent-manager', {
-        body: {
-          action: 'provision_openclaw_agent',
-          data: formData
-        }
-      });
-
-      if (error) throw error;
-      if (!data.ok) throw new Error(data.error || 'Failed to provision agent');
-
-      toast({
-        title: 'Agent Provisioned',
-        description: `Successfully registered ${formData.name}`,
-      });
-      onSuccess();
-      onOpenChange(false);
-      setFormData({ name: '', id: '', role: 'developer', description: '', priority: 5, gateway_url: 'http://localhost:18789', session_key: 'agent:main:main' });
-    } catch (err) {
-      console.error('Provisioning failed:', err);
-      toast({
-        title: 'Provisioning Failed',
-        description: err instanceof Error ? err.message : 'Unknown error',
-        variant: 'destructive',
-      });
-    } finally {
-      setIsLoading(false);
-    }
+    // Agent provisioning requires the cloud edge function (agent-manager) which is not available locally.
+    toast({
+      title: 'Provisioning Unavailable',
+      description: 'Agent provisioning requires the cloud agent-manager edge function, which is not available in the local stack.',
+      variant: 'destructive',
+    });
+    setIsLoading(false);
   };
 
   return (
@@ -684,39 +672,29 @@ export function AgentTaskVisualizer() {
 
     try {
       // Update task in database
-      const { error: updateError } = await supabase
-        .from('tasks')
-        .update({
-          assignee_agent_id: newAgentId,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', taskId);
-
-      if (updateError) throw updateError;
+      const { error: updateError } = await localUpdateTask(taskId, {
+        assignee_agent_id: newAgentId,
+        updated_at: new Date().toISOString()
+      });
+      if (updateError) throw new Error(updateError.message);
 
       // Update agent workloads
       if (oldAgentId) {
-        await supabase
-          .from('agents')
-          .update({
-            current_workload: Math.max(0, (oldAgent?.current_workload || 1) - 1),
-            status: 'IDLE'
-          })
-          .eq('id', oldAgentId);
+        await localUpdateAgent(oldAgentId, {
+          current_workload: Math.max(0, (oldAgent?.current_workload || 1) - 1),
+          status: 'IDLE'
+        });
       }
 
       if (newAgentId) {
-        await supabase
-          .from('agents')
-          .update({
-            current_workload: (newAgent?.current_workload || 0) + 1,
-            status: 'BUSY'
-          })
-          .eq('id', newAgentId);
+        await localUpdateAgent(newAgentId, {
+          current_workload: (newAgent?.current_workload || 0) + 1,
+          status: 'BUSY'
+        });
       }
 
       // Log activity
-      await supabase.from('eliza_activity_log').insert({
+      await localCreateActivityLog({
         activity_type: 'task_reassigned',
         title: newAgentId
           ? `Task assigned to ${newAgent?.name || 'agent'}`
@@ -768,27 +746,13 @@ export function AgentTaskVisualizer() {
     }
   };
 
-  // Generate AI handoff confirmation
+  // Generate AI handoff confirmation — static fallback (cloud lovable-chat edge function unavailable locally)
   const generateHandoffConfirmation = async (
     task: Task,
     newAgent: Agent,
     oldAgent?: Agent
   ): Promise<string> => {
-    try {
-      const { data, error } = await supabase.functions.invoke('lovable-chat', {
-        body: {
-          message: `Generate a brief 1-2 sentence handoff confirmation from agent "${newAgent.name}" (role: ${newAgent.role}) accepting task "${task.title}" at ${task.progress_percentage || 0}% progress in ${task.stage} stage. Make it sound like the agent understands the work context and is ready to continue. Be concise and professional.`,
-          quick: true
-        }
-      });
-
-      if (error) throw error;
-      return data?.response || data?.content || `${newAgent.name} acknowledges task and is reviewing current progress.`;
-    } catch (err) {
-      console.error('[AgentTaskVisualizer] Failed to generate handoff confirmation:', err);
-      // Fallback to static confirmation
-      return `${newAgent.name} acknowledges "${task.title}" at ${task.progress_percentage || 0}% completion and is taking over from the ${task.stage} stage.`;
-    }
+    return `${newAgent.name} acknowledges "${task.title}" at ${task.progress_percentage || 0}% completion and is taking over from the ${task.stage} stage.`;
   };
 
   const handleTaskDropToAgent = async (e: DragEvent<HTMLDivElement>, agentId: string) => {
@@ -834,39 +798,29 @@ export function AgentTaskVisualizer() {
 
     try {
       // Update task in database
-      const { error: updateError } = await supabase
-        .from('tasks')
-        .update({
-          assignee_agent_id: newAgentId,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', taskId);
-
-      if (updateError) throw updateError;
+      const { error: updateError } = await localUpdateTask(taskId, {
+        assignee_agent_id: newAgentId,
+        updated_at: new Date().toISOString()
+      });
+      if (updateError) throw new Error(updateError.message);
 
       // Update agent workloads
       if (oldAgentId) {
-        await supabase
-          .from('agents')
-          .update({
-            current_workload: Math.max(0, (oldAgent?.current_workload || 1) - 1),
-            status: 'IDLE'
-          })
-          .eq('id', oldAgentId);
+        await localUpdateAgent(oldAgentId, {
+          current_workload: Math.max(0, (oldAgent?.current_workload || 1) - 1),
+          status: 'IDLE'
+        });
       }
 
       if (newAgentId) {
-        await supabase
-          .from('agents')
-          .update({
-            current_workload: (newAgent?.current_workload || 0) + 1,
-            status: 'BUSY'
-          })
-          .eq('id', newAgentId);
+        await localUpdateAgent(newAgentId, {
+          current_workload: (newAgent?.current_workload || 0) + 1,
+          status: 'BUSY'
+        });
       }
 
       // Log activity with AI handoff confirmation
-      await supabase.from('eliza_activity_log').insert({
+      await localCreateActivityLog({
         activity_type: 'task_handoff',
         title: newAgentId
           ? `Task handed off: ${oldAgent?.name || 'Unassigned'} → ${newAgent?.name}`
@@ -979,19 +933,15 @@ export function AgentTaskVisualizer() {
       }
 
       // Update the task stage/status in database
-      const { error: updateError } = await supabase
-        .from('tasks')
-        .update(updates)
-        .eq('id', draggedTask.id);
-
-      if (updateError) throw updateError;
+      const { error: updateError } = await localUpdateTask(draggedTask.id, updates);
+      if (updateError) throw new Error(updateError.message);
 
       // Log activity to unified activity log (supports nullable text agent_id)
       const activityTitle = isForward
         ? `Task queued for execution: ${draggedTask.title}`
         : `Task sent back for discussion: ${draggedTask.title}`;
 
-      await supabase.from('eliza_activity_log').insert({
+      await localCreateActivityLog({
         activity_type: 'task_stage_change',
         title: activityTitle,
         description: `Task moved from ${fromLabel} to ${toLabel}`,
@@ -1042,27 +992,14 @@ export function AgentTaskVisualizer() {
 
       console.log('[AgentTaskVisualizer] Fetching data...');
 
-      let taskQuery = supabase
-        .from('tasks')
-        .select('id, title, stage, status, priority, category, assignee_agent_id, blocking_reason, updated_at, stage_started_at, auto_advance_threshold_hours, progress_percentage');
-
-      if (profile?.selected_organization_id) {
-        taskQuery = taskQuery.eq('organization_id', profile.selected_organization_id);
-      } else {
-        // Personal View: Show tasks created by user OR system tasks (null creator) that have no org
-        // This ensures automated tasks (like "News Headline Analysis") are visible
-        taskQuery = taskQuery.is('organization_id', null).or(`created_by_user_id.eq.${user?.id},created_by_user_id.is.null`);
-      }
-
       const [tasksRes, agentsRes] = await Promise.all([
-        taskQuery
-          .in('status', ['PENDING', 'IN_PROGRESS', 'CLAIMED', 'BLOCKED'])
-          .order('priority', { ascending: false })
-          .limit(50),
-        supabase
-          .from('agents')
-          .select('id, name, status, role, current_workload')
-          .in('status', ['IDLE', 'BUSY'])
+        localFetchTasks({
+          status_in: ['PENDING', 'IN_PROGRESS', 'CLAIMED', 'BLOCKED'],
+          limit: 50,
+        }),
+        localFetchAgents({
+          status_in: ['IDLE', 'BUSY', 'OFFLINE', 'ERROR', 'ARCHIVED', 'UNKNOWN']
+        })
       ]);
 
       console.log('[AgentTaskVisualizer] Results:', {
@@ -1099,54 +1036,38 @@ export function AgentTaskVisualizer() {
 
     fetchData();
 
-    // Real-time subscriptions
-    const tasksChannel = supabase
-      .channel('visualizer-tasks')
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'tasks'
-      }, (payload) => {
-        setIsLive(true);
-        if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-          const newTask = payload.new as Task;
-          setTasks(prev => {
-            const filtered = prev.filter(t => t.id !== newTask.id);
-            if (['PENDING', 'IN_PROGRESS', 'CLAIMED', 'BLOCKED'].includes(newTask.status)) {
-              return [...filtered, newTask].sort((a, b) => b.priority - a.priority).slice(0, 50);
-            }
-            return filtered;
-          });
-        } else if (payload.eventType === 'DELETE') {
-          setTasks(prev => prev.filter(t => t.id !== payload.old.id));
-        }
-      })
-      .subscribe();
-
-    const agentsChannel = supabase
-      .channel('visualizer-agents')
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'agents'
-      }, (payload) => {
-        setIsLive(true);
-        if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-          const agent = payload.new as Agent;
-          if (['IDLE', 'BUSY'].includes(agent.status)) {
-            setAgents(prev => {
-              const filtered = prev.filter(a => a.id !== agent.id);
-              return [...filtered, agent];
-            });
-            setAgentMap(prev => new Map(prev).set(agent.id, agent));
+    // Polling subscriptions (replaces Supabase Realtime)
+    const unsubTasks = localSubscribeTasks((payload) => {
+      setIsLive(true);
+      if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+        const newTask = payload.new as Task;
+        setTasks(prev => {
+          const filtered = prev.filter(t => t.id !== newTask.id);
+          if (['PENDING', 'IN_PROGRESS', 'CLAIMED', 'BLOCKED'].includes(newTask.status)) {
+            return [...filtered, newTask].sort((a, b) => b.priority - a.priority).slice(0, 50);
           }
+          return filtered;
+        });
+      }
+    }, 3000);
+
+    const unsubAgents = localSubscribeAgents((payload) => {
+      setIsLive(true);
+      if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+        const agent = payload.new as Agent;
+        if (['IDLE', 'BUSY'].includes(agent.status)) {
+          setAgents(prev => {
+            const filtered = prev.filter(a => a.id !== agent.id);
+            return [...filtered, agent];
+          });
+          setAgentMap(prev => new Map(prev).set(agent.id, agent));
         }
-      })
-      .subscribe();
+      }
+    }, 5000);
 
     return () => {
-      supabase.removeChannel(tasksChannel);
-      supabase.removeChannel(agentsChannel);
+      unsubTasks();
+      unsubAgents();
     };
   }, [refreshKey]);
 

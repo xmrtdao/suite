@@ -22,7 +22,7 @@ const corsHeaders = {
 
 // Stripe Payment Links
 const STRIPE_LINKS = {
-  'StudioStation-2': 'https://buy.stripe.com/8x25kD7ezg6h4iC15YbZe03',
+  'StudioStation-2': 'https://buy.stripe.com/cNicN5gP9g6haH0bKCbZe0d',
   'StudioStation-3': 'https://buy.stripe.com/9B63cv9mH07j3eyeWObZe06',
   'StudioStation-4': 'https://buy.stripe.com/eVqcN556r4nz16qeWObZe04',
 };
