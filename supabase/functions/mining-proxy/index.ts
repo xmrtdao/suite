@@ -32,98 +32,10 @@ serve(async (req) => {
     const url = new URL(req.url);
     const path = url.pathname;
 
-    // ============================================================
-    // Referral endpoints
-    // ============================================================
-
-    // GET /referral-code/:wallet — Get or create a referral code for a wallet
-    if (path.includes('/referral-code') && req.method === 'GET') {
-      const wallet = url.searchParams.get('wallet') || path.split('/referral-code/')[1];
-      if (!wallet) {
-        return new Response(
-          JSON.stringify({ success: false, error: 'wallet parameter required' }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-
-      const { data, error } = await supabase.rpc('api_get_referral_code', { p_wallet: wallet });
-      if (error) {
-        console.error('Referral code error:', error);
-        return new Response(
-          JSON.stringify({ success: false, error: error.message }),
-          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-
-      return new Response(
-        JSON.stringify({ success: true, referral_code: data }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    // GET /referral-dashboard/:wallet — Get referral stats for a wallet
-    if (path.includes('/referral-dashboard') && req.method === 'GET') {
-      const wallet = url.searchParams.get('wallet') || path.split('/referral-dashboard/')[1];
-      if (!wallet) {
-        return new Response(
-          JSON.stringify({ success: false, error: 'wallet parameter required' }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-
-      const { data, error } = await supabase.rpc('api_get_referral_dashboard', { p_wallet: wallet });
-      if (error) {
-        console.error('Referral dashboard error:', error);
-        return new Response(
-          JSON.stringify({ success: false, error: error.message }),
-          { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-
-      return new Response(
-        JSON.stringify({ success: true, dashboard: data }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    // POST /apply-referral — Record a referral when someone registers with a code
-    if (path.includes('/apply-referral') && req.method === 'POST') {
-      const body = await req.json();
-      const { referral_code, referred_wallet, referred_worker_id } = body;
-
-      if (!referral_code) {
-        return new Response(
-          JSON.stringify({ success: false, error: 'referral_code is required' }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-
-      const { data, error } = await supabase.rpc('apply_referral_code', {
-        p_referral_code: referral_code,
-        p_referred_wallet: referred_wallet || null,
-        p_referred_worker_id: referred_worker_id || null
-      });
-
-      if (error) {
-        console.error('Apply referral error:', error);
-        return new Response(
-          JSON.stringify({ success: false, error: error.message }),
-          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
-      }
-
-      return new Response(
-        JSON.stringify({ success: true, referral_link_id: data, message: 'Referral applied successfully' }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
-
-    // ============================================================
-    // Worker registration endpoint (POST /worker or /register)
-    // ============================================================
+    // Handle worker registration endpoint (POST /worker or /register)
     if ((path.includes('/worker') || path.includes('/register')) && req.method === 'POST') {
       const body = await req.json();
-      const { worker_id, wallet, alias, user_id, session_key, referral_code } = body;
+      const { worker_id, wallet, alias, user_id, session_key } = body;
 
       if (!worker_id || !wallet) {
         return new Response(
@@ -149,6 +61,7 @@ serve(async (req) => {
           alias: alias || null,
           user_id: user_id || null,
           session_key: session_key || null,
+          device_type: body.device_type || 'unknown',
           registration_method: body.registration_method || 'direct',
           last_active: new Date().toISOString(),
           is_active: true,
@@ -180,45 +93,12 @@ serve(async (req) => {
 
       console.log('Worker registered successfully:', workerData);
 
-      // If referral_code was provided, apply the referral link
-      let referralResult = null;
-      if (referral_code) {
-        try {
-          const { data: refData, error: refError } = await supabase.rpc('apply_referral_code', {
-            p_referral_code: referral_code,
-            p_referred_wallet: wallet || null,
-            p_referred_worker_id: worker_id || null
-          });
-          if (refError) {
-            console.warn('Referral code application failed (non-fatal):', refError.message);
-          } else {
-            referralResult = { referral_link_id: refData };
-            console.log('Referral applied:', refData, 'for worker:', worker_id);
-          }
-        } catch (refErr: any) {
-          console.warn('Referral code application error (non-fatal):', refErr?.message);
-        }
-      }
-
-      // Get or create the worker's own referral code
-      let ownReferralCode = null;
-      if (wallet) {
-        try {
-          const { data: codeData } = await supabase.rpc('api_get_referral_code', { p_wallet: wallet });
-          ownReferralCode = codeData;
-        } catch { /* non-fatal */ }
-      }
-
-      const responsePayload: any = {
-        success: true,
-        worker: workerData,
-        message: 'Worker registered successfully'
-      };
-      if (referralResult) responsePayload.referral = referralResult;
-      if (ownReferralCode) responsePayload.your_referral_code = ownReferralCode;
-
       return new Response(
-        JSON.stringify(responsePayload),
+        JSON.stringify({
+          success: true,
+          worker: workerData,
+          message: 'Worker registered successfully'
+        }),
         {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         }
@@ -405,19 +285,6 @@ serve(async (req) => {
       .filter(w => w.active)
       .map(w => w.alias || w.identifier);
 
-    // Look up referral code for the main miner wallet
-    let referralInfo = null;
-    try {
-      const { data: refData } = await supabase.rpc('api_get_referral_dashboard', {
-        p_wallet: minerAddress
-      });
-      if (refData) {
-        referralInfo = refData;
-      }
-    } catch (refErr) {
-      // Non-fatal — referral data is bonus info
-      console.log('Referral lookup skipped (non-fatal)');
-    }
 
     // Return both workers array AND original data with XMR conversion
     const responseData = {
@@ -429,8 +296,6 @@ serve(async (req) => {
       amountPaid: atomicUnitsToXMR(data.amtPaid || 0), // Alias for compatibility
       // Worker data — always present (empty array rather than undefined)
       workers: workers,
-      // Referral info (null if no referral code exists yet)
-      referral: referralInfo,
       // Pre-computed active worker metrics for easy downstream consumption
       active_workers: effectiveWorkerCount,
       worker_ids: activeWorkerIds,

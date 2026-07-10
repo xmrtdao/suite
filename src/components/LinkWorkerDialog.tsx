@@ -17,10 +17,10 @@ interface LinkWorkerDialogProps {
 export function LinkWorkerDialog({ userId, existingWorkerIds, onWorkerLinked }: LinkWorkerDialogProps) {
   const [open, setOpen] = useState(false);
   const [workerId, setWorkerId] = useState('');
-  const [referralCode, setReferralCode] = useState('');
   const [isVerifying, setIsVerifying] = useState(false);
   const [verificationStatus, setVerificationStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
+  const [referralCode, setReferralCode] = useState('');
 
   const handleVerifyAndLink = async () => {
     const cleanWorkerId = workerId.trim().toUpperCase();
@@ -69,19 +69,16 @@ export function LinkWorkerDialog({ userId, existingWorkerIds, onWorkerLinked }: 
 
       if (updateError) throw updateError;
 
-      // Apply referral code if one was provided
+      // If a referral code was provided, apply it
       if (referralCode.trim()) {
-        const { error: refError } = await supabase.rpc('apply_referral_code', {
-          p_referral_code: referralCode.trim().toUpperCase(),
-          p_referred_worker_id: cleanWorkerId,
-          p_referred_wallet: null,
-        });
-
-        if (!refError) {
-          toast.success('Referral applied! You are now earning 20% commission.');
-        } else {
-          console.warn('Referral application failed (non-fatal):', refError);
-          toast.error(refError.message || 'Could not apply referral code');
+        try {
+          await supabase.rpc('apply_referral_code', {
+            p_referral_code: referralCode.trim().toUpperCase(),
+            p_worker_id: cleanWorkerId
+          });
+        } catch (refError) {
+          console.error('Failed to apply referral code:', refError);
+          // Don't block worker linking if referral fails
         }
       }
 
@@ -106,7 +103,12 @@ export function LinkWorkerDialog({ userId, existingWorkerIds, onWorkerLinked }: 
   };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={(newOpen) => {
+      if (!newOpen) {
+        setReferralCode('');
+      }
+      setOpen(newOpen);
+    }}>
       <DialogTrigger asChild>
         <Button variant="outline" size="sm" className="gap-2">
           <Plus className="h-4 w-4" />
@@ -137,10 +139,7 @@ export function LinkWorkerDialog({ userId, existingWorkerIds, onWorkerLinked }: 
             </p>
           </div>
 
-          <ReferralCodeInput
-            value={referralCode}
-            onChange={setReferralCode}
-          />
+          <ReferralCodeInput value={referralCode} onChange={setReferralCode} />
 
           {verificationStatus === 'error' && (
             <div className="flex items-center gap-2 text-destructive text-sm">

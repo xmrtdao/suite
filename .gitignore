@@ -50,25 +50,10 @@ node_modules/
 jspm_packages/
 
 # Environment files
-.env
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
-
-# Local data / scratch dirs
-.pgdata/
-.deno_cache/
-supabase/.deno_cache/
-
-# Transient build/scratch artifacts
-*.bak
-deno.lock
-temp_*
-
-# Supabase CLI temp files
-.temp/
-supabase/.temp/
 
 # OS generated files
 .DS_Store

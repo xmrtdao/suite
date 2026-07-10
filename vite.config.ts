@@ -12,10 +12,9 @@ export default defineConfig(async ({ mode }) => {
   }
 
   return {
-    base: "/suite/",
     server: {
       host: "::",
-      port: 5173,
+      port: 8080,
     },
     plugins: [
       react(),

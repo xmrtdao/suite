@@ -175,8 +175,7 @@ class UnifiedDataService {
       console.log('📊 UnifiedData: Fetching mining statistics...');
       
       // Use Supabase proxy endpoint which handles CORS
-      const base = import.meta.env.VITE_SUPABASE_URL || 'http://127.0.0.1:54321';
-      const response = await fetch(`${base}/functions/v1/mining-proxy`);
+      const response = await fetch('https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/mining-proxy');
       
       if (!response.ok) {
         console.warn('⚠️ Mining API request failed:', response.status);

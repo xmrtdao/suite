@@ -18,7 +18,6 @@ import {
   Zap,
   Sparkles,
   PencilLine,
-  Layers,
 } from 'lucide-react';
 
 const executives = [
@@ -84,7 +83,7 @@ const steps = [
   {
     number: '02',
     title: 'Set Outcomes',
-    description: 'Give SupaClaw objectives, constraints, and brand context once.',
+    description: 'Give Suite objectives, constraints, and brand context once.',
   },
   {
     number: '03',
@@ -216,7 +215,7 @@ export default function Landing() {
       <LandingNav />
 
       {/* Hero Section */}
-      <section className="relative overflow-hidden pt-12 pb-10 px-4">
+      <section className="relative overflow-hidden pt-24 pb-10 px-4">
         <div className="pointer-events-none absolute inset-0 hidden xl:block" aria-hidden="true">
           {heroStickyNotes.map((note, index) => (
             <div
@@ -257,7 +256,7 @@ export default function Landing() {
           ))}
         </div>
 
-        <div className="container mx-auto max-w-5xl pt-4 text-center sm:pt-22 xl:pt-0">
+        <div className="container mx-auto max-w-5xl pt-4 text-center sm:pt-44 xl:pt-0">
           <h1 className="text-4xl md:text-6xl lg:text-7xl font-bold mb-6 leading-tight">
             {t('landing.hero.title.part1')}{' '}
             <span className="bg-gradient-to-r from-primary via-primary/80 to-primary bg-clip-text text-transparent">
@@ -329,15 +328,6 @@ export default function Landing() {
                   <Play className="mr-2 w-5 h-5" />
                   {t('landing.hero.watch.demo')}
                 </Button>
-                <Button
-                  size="lg"
-                  variant="outline"
-                  className="text-lg px-8 py-6 border-emerald-500/30 text-emerald-400 hover:border-emerald-500/60 hover:bg-emerald-500/10"
-                  onClick={() => window.location.href = '/executives'}
-                >
-                  <Layers className="mr-2 w-5 h-5" />
-                  Executive Dashboard
-                </Button>
               </div>
             </div>
           </div>
@@ -359,15 +349,6 @@ export default function Landing() {
             >
               <Play className="mr-2 w-5 h-5" />
               {t('landing.hero.watch.demo')}
-            </Button>
-            <Button
-              size="lg"
-              variant="outline"
-              className="text-lg px-8 py-6 border-emerald-500/30 text-emerald-400 hover:border-emerald-500/60 hover:bg-emerald-500/10"
-              onClick={() => window.location.href = '/executives'}
-            >
-              <Layers className="mr-2 w-5 h-5" />
-              Executive Dashboard
             </Button>
           </div>
 
@@ -400,7 +381,7 @@ export default function Landing() {
             ))}
           </div>
           <p className="mt-4 text-xs text-muted-foreground">
-            * Forecast metrics are generated from SupaClaw AI forecasts and executive swarm predictive analysis.
+            * Forecast metrics are generated from Suite AI forecasts and executive swarm predictive analysis.
           </p>
         </div>
       </section>

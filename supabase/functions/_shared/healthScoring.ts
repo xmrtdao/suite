@@ -8,7 +8,8 @@
  */
 export const ESSENTIAL_API_SERVICES = [
   'github',       // Core for code operations
-  'deepseek',     // Primary AI provider
+  'ollama',       // Primary AI provider
+  'deepseek',     // Secondary AI provider
   'gemini',       // Vision fallback
   'openai'        // Fallback AI
 ];
@@ -336,4 +337,3 @@ export function buildHealthMetrics(params: {
     failedCommands: commandStats.failed || 0
   };
 }
-

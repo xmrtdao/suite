@@ -125,6 +125,25 @@ export async function executeToolCall(
     if (inferredUserId && !payload.user_id) payload.user_id = inferredUserId;
     if (!payload.requested_from) payload.requested_from = sourceTool;
 
+    // Enforce Gmail payload hygiene for reliable delivery through google-cloud-auth.
+    if (payload.action === 'send_email' || payload.action === 'create_draft') {
+      if (typeof payload.subject === 'string') {
+        // Remove header-breaking characters and emoji from subject.
+        payload.subject = payload.subject
+          .replace(/[\r\n]+/g, ' ')
+          .replace(/[\p{Extended_Pictographic}\p{Emoji_Presentation}]/gu, '')
+          .replace(/\s+/g, ' ')
+          .trim();
+      }
+
+      if (typeof payload.body === 'string') {
+        const looksLikeHtml = /<([a-z][\w-]*)(\s[^>]*)?>/i.test(payload.body);
+        if (looksLikeHtml && payload.is_html !== true) {
+          payload.is_html = true;
+        }
+      }
+    }
+
     return payload;
   };
 
@@ -217,22 +236,13 @@ export async function executeToolCall(
         // Note: In Edge Functions, process.env is via Deno.env usually, but here we check if passed in context or fetch from simple map
         // For this architecture we assume ANTIGRAVITY_URL is set as a secret in the Edge Function environment
         const antigravityUrl = Deno.env.get('ANTIGRAVITY_URL');
-        const antigravityToken = Deno.env.get('ANTIGRAVITY_TOKEN');
+        const antigravityToken = Deno.env.get('ANTIGRAVITY_TOKEN') || 'default-dev-token';
 
         if (!antigravityUrl) {
           result = {
             success: false,
             error: 'Configuration Error',
             learning_point: 'The ANTIGRAVITY_URL secret is not set in the Edge Function. Please set it to your active ngrok URL.'
-          };
-          break;
-        }
-
-        if (!antigravityToken) {
-          result = {
-            success: false,
-            error: 'Configuration Error',
-            learning_point: 'The ANTIGRAVITY_TOKEN secret is not set in the Edge Function. Please set it in Supabase secrets.'
           };
           break;
         }
@@ -450,9 +460,10 @@ export async function executeToolCall(
 
       case 'invoke_edge_function':
       case 'call_edge_function':
-        let { function_name, payload, body } = parsedArgs;
+        let { function_name, payload, body, timeout_ms } = parsedArgs;
         let targetFunction = function_name || parsedArgs.function_name;
         let targetPayload = payload || body || {};
+        const edgeTimeoutMs = Number(timeout_ms) > 0 ? Number(timeout_ms) : 5000;
 
         // Auto-correct common VSCO function name hallucinations
         // AI sometimes hallucinates "vsco-manage-events" instead of using vsco_manage_events tool
@@ -468,8 +479,12 @@ export async function executeToolCall(
           }
         }
 
-        console.log(`📡 [${executiveName}] Invoking edge function: ${targetFunction}`);
-        const funcResult = await supabase.functions.invoke(targetFunction, { body: targetPayload });
+        console.log(`📡 [${executiveName}] Invoking edge function: ${targetFunction} (timeout ${edgeTimeoutMs}ms)`);
+        const invocation = supabase.functions.invoke(targetFunction, { body: targetPayload });
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error(`Timed out after ${edgeTimeoutMs}ms`)), edgeTimeoutMs);
+        });
+        const funcResult = await Promise.race([invocation, timeoutPromise]);
 
         if (funcResult.error) {
           console.error(`❌ [${executiveName}] Edge function error:`, funcResult.error);
@@ -557,7 +572,7 @@ export async function executeToolCall(
           body: {
             action: 'create_discussion',
             data: {
-              repositoryId: 'R_kgDOSSxKTQ',
+              repositoryId: 'R_kgDONfvCEw',
               title: parsedArgs.title,
               body: parsedArgs.body,
               categoryId: parsedArgs.categoryId || 'DIC_kwDOPHeChc4CkXxI',
@@ -2410,6 +2425,85 @@ export async function getVscoToolHandler(name: string, parsedArgs: any, supabase
           category: parsedArgs.category
         }
       }).then((res: any) => res.error ? { success: false, error: res.error.message } : res.data);
+
+    // ====================================================================
+    // 🎨 MUAPI MEDIA GENERATION (PRIMARY)
+    // ====================================================================
+    case 'muapi_generate_media': {
+      console.log(`🎨 [${executiveName}] Muapi Media Generation: action=${parsedArgs.action}, prompt=${parsedArgs.prompt?.substring(0, 50)}...`);
+      // Route to superduper-content-media (primary) or muapi-media-generator (fallback)
+      return supabase.functions.invoke('superduper-content-media', {
+        body: {
+          action: parsedArgs.action || 'generate_image',
+          prompt: parsedArgs.prompt,
+          style: parsedArgs.style,
+          aspect_ratio: parsedArgs.aspect_ratio,
+          duration_seconds: parsedArgs.duration_seconds,
+          model: parsedArgs.model
+        }
+      }).then((res: any) => {
+        if (res.error) {
+          // Fallback to muapi-media-generator if superduper-content-media fails
+          console.warn(`⚠️ [${executiveName}] superduper-content-media failed, trying muapi-media-generator`);
+          return supabase.functions.invoke('muapi-media-generator', {
+            body: {
+              action: parsedArgs.action || 'generate_image',
+              prompt: parsedArgs.prompt,
+              style: parsedArgs.style,
+              aspect_ratio: parsedArgs.aspect_ratio,
+              duration_seconds: parsedArgs.duration_seconds
+            }
+          }).then((res2: any) => res2.error
+            ? { success: false, error: `Both media generators failed. Primary: ${res.error.message}, Fallback: ${res2.error.message}` }
+            : { success: true, result: res2.data, provider: 'muapi-media-generator', source: 'fallback' });
+        }
+        return {
+          success: true,
+          result: res.data,
+          provider: 'superduper-content-media',
+          source: 'primary',
+          storage_note: 'All generated media is stored in Supabase Storage and accessible via the returned CDN URLs.'
+        };
+      });
+    }
+
+    case 'muapi_list_models': {
+      console.log(`📋 [${executiveName}] Muapi List Models: type=${parsedArgs.type || 'all'}`);
+      return supabase.functions.invoke('muapi-media-generator', {
+        body: { action: 'list_models', type: parsedArgs.type || 'all' }
+      }).then((res: any) => res.error
+        ? { success: false, error: res.error.message }
+        : { success: true, result: res.data, provider: 'muapi-media-generator' });
+    }
+
+    case 'muapi_estimate_cost': {
+      console.log(`💰 [${executiveName}] Muapi Estimate Cost: action=${parsedArgs.action}`);
+      return supabase.functions.invoke('muapi-media-generator', {
+        body: { action: 'estimate_cost', model: parsedArgs.model, count: parsedArgs.count }
+      }).then((res: any) => res.error
+        ? { success: false, error: res.error.message }
+        : { success: true, result: res.data, provider: 'muapi-media-generator' });
+    }
+
+    case 'muapi_generate_slideshow': {
+      console.log(`🎬 [${executiveName}] Muapi Generate Slideshow: ${parsedArgs.scenes?.length || 0} scenes`);
+      return supabase.functions.invoke('superduper-content-media', {
+        body: {
+          action: 'generate_slideshow',
+          scenes: parsedArgs.scenes,
+          style: parsedArgs.style,
+          transition: parsedArgs.transition || 'fade',
+          duration_per_scene: parsedArgs.duration_per_scene || 4
+        }
+      }).then((res: any) => res.error
+        ? { success: false, error: res.error.message }
+        : {
+          success: true,
+          result: res.data,
+          provider: 'superduper-content-media',
+          storage_note: 'Slideshow video is stored in Supabase Storage and accessible via the returned CDN URL.'
+        });
+    }
 
     // ====================================================================
     // 🔷 VERTEX AI EXPRESS TOOLS

@@ -7,7 +7,7 @@ import { HeroSection, Stats } from '@/components/HeroSection';
 import { SEOHead } from '@/components/SEOHead';
 import { useAudio } from '@/contexts/AudioContext';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { fetchDashboardStats } from '@/integrations/local-api';
+import { supabase } from '@/integrations/supabase/client';
 
 const DASHBOARD_EDGE_FUNCTION_TOTAL = 293;
 
@@ -32,19 +32,139 @@ const Index = () => {
     playWelcomeOnce();
   }, [playWelcomeOnce]);
 
-  // Fetch stats from local relay API
+  // Fetch stats from database directly (lifted from HeroSection)
   useEffect(() => {
     const fetchStats = async () => {
-      const result = await fetchDashboardStats();
-      setStats(prev => ({
-        ...prev,
-        ...result,
-      }));
+      // Fetch basic counts directly from database
+      const [
+        functionLogs,
+        superduperLogs,
+        agents,
+        tasks,
+        knowledgeEntitiesTotal,
+        userContextKnowledge,
+        userWorkflows,
+        latestHealth,
+      ] = await Promise.all([
+        supabase
+          .from('function_usage_logs')
+          .select('*', { count: 'estimated', head: true }),
+        supabase
+          .from('superduper_execution_log')
+          .select('*', { count: 'estimated', head: true }),
+        supabase
+          .from('agents')
+          .select('*', { count: 'exact', head: true })
+          .in('status', ['IDLE', 'BUSY']),
+        supabase
+          .from('tasks')
+          .select('*', { count: 'exact', head: true })
+          .in('status', ['PENDING', 'IN_PROGRESS', 'CLAIMED', 'BLOCKED']),
+        supabase
+          .from('knowledge_entities')
+          .select('*', { count: 'exact', head: true }),
+        supabase
+          .from('knowledge_entities')
+          .select('*', { count: 'exact', head: true })
+          .or('entity_type.ilike.%user%,metadata->>source.ilike.%user%'),
+        supabase
+          .from('workflow_templates')
+          .select('*', { count: 'exact', head: true })
+          .eq('is_active', true),
+        // Get cached health from latest system_health_check activity log entry
+        supabase
+          .from('eliza_activity_log')
+          .select('metadata')
+          .eq('activity_type', 'system_health_check')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ]);
+
+      // Extract health score from cached activity log entry
+      let healthScore = 100;
+      let healthStatus: 'healthy' | 'degraded' | 'critical' = 'healthy';
+      let healthIssues: string[] = [];
+
+      if (latestHealth.data?.metadata) {
+        const metadata = latestHealth.data.metadata as {
+          health_score?: number;
+          status?: string;
+          issues_count?: number;
+        };
+        healthScore = metadata.health_score ?? 100;
+        healthStatus =
+          metadata.status === 'critical'
+            ? 'critical'
+            : metadata.status === 'degraded'
+              ? 'degraded'
+              : 'healthy';
+        if (metadata.issues_count && metadata.issues_count > 0) {
+          healthIssues = [`${metadata.issues_count} issue(s) detected`];
+        }
+      }
+
+      setStats({
+        totalExecutions:
+          (functionLogs.count || 0) + (superduperLogs.count || 0),
+        activeAgents: agents.count || 0,
+        activeTasks: tasks.count || 0,
+        healthScore,
+        healthStatus,
+        healthIssues,
+        knowledgeEntitiesTotal: knowledgeEntitiesTotal.count || 0,
+        userContextKnowledge: userContextKnowledge.count || 0,
+        userWorkflows: userWorkflows.count || 0,
+        registeredEdgeFunctions: DASHBOARD_EDGE_FUNCTION_TOTAL,
+      });
     };
+
     fetchStats();
-    // Refresh every 30 seconds
-    const id = setInterval(fetchStats, 30000);
-    return () => clearInterval(id);
+
+    // Subscribe to updates for real-time health changes
+    const channel = supabase
+      .channel('dashboard-stats')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'eliza_activity_log' },
+        (payload) => {
+          setStats((prev) => ({
+            ...prev,
+            totalExecutions: prev.totalExecutions + 1,
+          }));
+
+          // Update health score if this is a health check
+          if (
+            payload.new.activity_type === 'system_health_check' &&
+            payload.new.metadata
+          ) {
+            const metadata = payload.new.metadata as {
+              health_score?: number;
+              status?: string;
+              issues_count?: number;
+            };
+            setStats((prev) => ({
+              ...prev,
+              healthScore: metadata.health_score ?? prev.healthScore,
+              healthStatus:
+                metadata.status === 'critical'
+                  ? 'critical'
+                  : metadata.status === 'degraded'
+                    ? 'degraded'
+                    : 'healthy',
+              healthIssues:
+                metadata.issues_count && metadata.issues_count > 0
+                  ? [`${metadata.issues_count} issue(s) detected`]
+                  : [],
+            }));
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   return (
@@ -69,7 +189,10 @@ const Index = () => {
           {/* 2. Chat Interface */}
           <Card className="glass-card overflow-hidden">
             <CardContent className="p-0">
-              <UnifiedChat enableMiningStats={false} />
+              <UnifiedChat
+                enableMiningStats={false}
+                className="h-[1667px] sm:h-[2000px]"
+              />
             </CardContent>
           </Card>
 

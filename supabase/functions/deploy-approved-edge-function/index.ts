@@ -314,7 +314,7 @@ async function deployProposal(
       body: {
         action: 'create_discussion',
         data: {
-          repositoryId: 'R_kgDOSSxKTQ',
+          repositoryId: 'R_kgDONfvCEw',
           categoryId: 'DIC_kwDOPHeChc4CkXxI',
           title: `🚀 [Deployed] ${function_name} is now live!`,
           body: generateDeploymentAnnouncement(proposal, commit_sha, health_check),

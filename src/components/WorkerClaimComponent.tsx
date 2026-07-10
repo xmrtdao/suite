@@ -118,16 +118,13 @@ export function WorkerClaimComponent() {
 
       // Apply referral code if provided
       if (referralCode.trim()) {
-        const { error: refError } = await supabase.rpc('apply_referral_code', {
-          p_referral_code: referralCode.trim().toUpperCase(),
-          p_referred_worker_id: data.worker.worker_id,
-          p_referred_wallet: null,
-        });
-
-        if (!refError) {
-          toast.success('Referral code applied! You are now earning 20% commission.');
-        } else {
-          console.warn('Referral application failed (non-fatal):', refError);
+        try {
+          await supabase.rpc('apply_referral_code', {
+            p_referral_code: referralCode.trim().toUpperCase(),
+            p_worker_id: data.worker.worker_id
+          });
+        } catch (refError) {
+          console.error('Failed to apply referral code:', refError);
         }
       }
 
@@ -360,10 +357,7 @@ export function WorkerClaimComponent() {
               </p>
             </div>
 
-            <ReferralCodeInput
-              value={referralCode}
-              onChange={setReferralCode}
-            />
+            <ReferralCodeInput value={referralCode} onChange={setReferralCode} />
           </div>
           
           <DialogFooter>
@@ -372,6 +366,7 @@ export function WorkerClaimComponent() {
               onClick={() => {
                 setClaimDialogOpen(false);
                 setClaimToken('');
+                setReferralCode('');
               }}
               disabled={claiming}
             >

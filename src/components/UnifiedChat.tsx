@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Card } from './ui/card';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
@@ -12,12 +12,12 @@ import { ReasoningSteps, type ReasoningStep } from './ReasoningSteps';
 import { GitHubPATInput } from './GitHubContributorRegistration';
 import { mobilePermissionService } from '@/services/mobilePermissionService';
 import { formatTime } from '@/utils/dateFormatter';
-import { Send, Volume2, VolumeX, Trash2, Wifi, Users, Vote, Paperclip, X, Mic, MicOff, Video, VideoOff, Copy, Check } from 'lucide-react';
+import { Send, Volume2, VolumeX, Trash2, Wifi, Users, Vote, Paperclip, X, Mic, MicOff, Video, VideoOff, Copy, Check, Bot } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { AttachmentPreview, type AttachmentFile } from './AttachmentPreview';
-import { QuickResponseButtons } from './QuickResponseButtons';
+import { QuickResponseButtons, getQuickResponsePrompts } from './QuickResponseButtons';
 import { ExecutiveCouncilChat } from './ExecutiveCouncilChat';
 import { ImageResponsePreview, extractImagesFromResponse, isLargeResponse, sanitizeLargeResponse } from './ImageResponsePreview';
 import { GovernanceStatusBadge } from './GovernanceStatusBadge';
@@ -45,9 +45,9 @@ import { knowledgeEntityService } from '@/services/knowledgeEntityService';
 
 // Debug environment variables on component load
 console.log('UnifiedChat Environment Check:', {
-  VITE_GEMINI_API_KEY_exists: !!import.meta.env.VITE_GEMINI_API_KEY,
-  VITE_GEMINI_API_KEY_length: import.meta.env.VITE_GEMINI_API_KEY?.length || 0,
-  VITE_ELEVENLABS_API_KEY_exists: !!import.meta.env.VITE_ELEVENLABS_API_KEY,
+  DEEPSEEK_API_KEY_exists: !!import.meta.env.DEEPSEEK_API_KEY,
+  DEEPSEEK_API_KEY_length: import.meta.env.DEEPSEEK_API_KEY?.length || 0,
+  ELEVENLABS_API_KEY_exists: !!import.meta.env.ELEVENLABS_API_KEY,
   all_env_vars: Object.keys(import.meta.env).filter(key => key.startsWith('VITE_'))
 });
 
@@ -89,6 +89,52 @@ interface UnifiedMessage {
 const normalizeMessageContent = (content: string): string =>
   (content || '').replace(/\s+/g, ' ').trim();
 
+interface ToolMarkupSanitizationResult {
+  cleanText: string;
+  removedRawToolMarkup: boolean;
+}
+
+const sanitizeRawToolMarkup = (content: string): ToolMarkupSanitizationResult => {
+  let cleanText = content || '';
+  const originalText = cleanText;
+
+  // Remove XML-style tool wrappers that should never be shown to users
+  cleanText = cleanText
+    .replace(/<tool_use>[\s\S]*?<\/tool_use>/gi, '')
+    .replace(/<tool_code>[\s\S]*?<\/tool_code>/gi, '');
+
+  // Remove fenced snippets that look like pseudo tool invocation code
+  cleanText = cleanText.replace(
+    /```(?:python|tool|tool_code)?\s*\n[\s\S]*?default_api\.[\s\S]*?```/gi,
+    ''
+  );
+
+  // Remove single-line pseudo tool invocation remnants
+  cleanText = cleanText.replace(/^\s*print\(\s*default_api\.[^\n]*\)\s*$/gim, '');
+
+  return {
+    cleanText: cleanText.trim(),
+    removedRawToolMarkup: cleanText.trim() !== originalText.trim(),
+  };
+};
+
+const FULL_AUTONOMY_RESUME_PROMPT = "Where were we at? Let's proceed from there.";
+
+const isDefaultBackupResponse = (content: string): boolean => {
+  const normalized = normalizeMessageContent(content).toLowerCase();
+  if (!normalized) return false;
+
+  return [
+    "i'm eliza, general intelligence agent",
+    'i am eliza, general intelligence agent',
+    'technical difficulties',
+    'please try again in a moment',
+    'please try again later',
+    'encountered an error processing your request',
+    "i apologize, but i'm experiencing technical difficulties",
+  ].some((marker) => normalized.includes(marker));
+};
+
 // MiningStats imported from unifiedDataService
 import { ExecutiveName, EXECUTIVE_PROFILES } from './ExecutiveBio';
 
@@ -114,6 +160,27 @@ interface ProcessingStickyNote extends ProcessingStickyTemplate {
   createdAt: number;
   isFallingAway?: boolean;
   variant?: 'default' | 'error';
+}
+
+interface ContextTodoItem {
+  id: string;
+  text: string;
+  completed: boolean;
+  updatedAt: number;
+}
+
+interface ContextTodoStore {
+  [organizationId: string]: ContextTodoItem[];
+}
+
+interface PriorityChecklistStore {
+  [scopeId: string]: ContextTodoItem[];
+}
+
+interface CurrentContextPanelProps {
+  organizationName: string;
+  focusLine: string;
+  modeLabel: string;
 }
 
 const PROCESSING_STICKY_TEMPLATES: ProcessingStickyTemplate[] = [
@@ -148,7 +215,7 @@ const ProcessingStickyNotes = React.memo(({ notes }: { notes: ProcessingStickyNo
   ];
 
   return (
-    <div className="pointer-events-none fixed right-2 top-24 z-40 sm:absolute sm:right-6 sm:top-36 sm:z-30">
+    <div className="pointer-events-none fixed right-2 top-36 z-40 sm:absolute sm:right-6 sm:top-44 sm:z-30">
       <div className="relative h-[248px] w-[152px] sm:h-[286px] sm:w-[220px]">
         {visibleNotes.map((note, index) => {
           const offset = stackOffsets[index] ?? {
@@ -199,8 +266,266 @@ const ProcessingStickyNotes = React.memo(({ notes }: { notes: ProcessingStickyNo
   );
 });
 
+const ContextTodoPaper = React.memo(({
+  todos,
+  onToggle,
+}: {
+  todos: ContextTodoItem[];
+  onToggle: (todoId: string) => void;
+}) => {
+  const visibleTodos = todos.slice(0, 6);
+  return (
+    <div className="w-full sm:absolute sm:right-6 sm:top-[40rem] sm:z-30 sm:w-[220px]">
+      <div className="relative rounded-[3px] border border-sky-200/80 bg-gradient-to-b from-white via-sky-50/25 to-white p-2 sm:p-3 shadow-[0_16px_32px_rgba(37,99,235,0.16)]">
+        <div className="pointer-events-none absolute inset-0 rounded-[3px] [background-image:repeating-linear-gradient(to_bottom,transparent_0px,transparent_18px,rgba(59,130,246,0.26)_19px)] sm:[background-image:repeating-linear-gradient(to_bottom,transparent_0px,transparent_22px,rgba(59,130,246,0.26)_23px)]" />
+        <div className="pointer-events-none absolute left-4 sm:left-5 top-0 h-full w-px bg-rose-200/70" />
+        <div className="relative pl-4 sm:pl-6">
+          <p className="text-[9px] sm:text-[10px] font-semibold uppercase tracking-[0.15em] text-sky-800/80">Recent Actions</p>
+          {visibleTodos.length > 0 ? (
+            <ul className="mt-2 space-y-1.5">
+              {visibleTodos.map((todo) => (
+                <li key={todo.id} className="flex items-start gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => onToggle(todo.id)}
+                    className={`mt-0.5 h-3.5 w-3.5 rounded-sm border text-[9px] leading-[1] transition-colors ${
+                      todo.completed
+                        ? 'border-sky-400 bg-sky-500 text-white'
+                        : 'border-sky-500/70 bg-white text-transparent hover:bg-sky-50'
+                    }`}
+                    aria-label={`Mark task ${todo.completed ? 'incomplete' : 'complete'}: ${todo.text}`}
+                  >
+                    ✓
+                  </button>
+                  <span className={`text-[9px] sm:text-[11px] leading-snug ${todo.completed ? 'text-sky-900/45 line-through' : 'text-sky-950/90'}`}>
+                    {todo.text}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-2 text-[11px] leading-snug text-sky-900/60">Tracking actions will appear here as work progresses.</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+});
+
+const FocusAreasPaper = React.memo(({
+  items,
+  onToggle,
+}: {
+  items: ContextTodoItem[];
+  onToggle: (todoId: string) => void;
+}) => {
+  if (!items.length) return null;
+
+  return (
+    <div className="w-full sm:absolute sm:right-[15.5rem] sm:top-[31rem] sm:z-30 sm:w-[220px]">
+      <div className="relative rounded-[3px] border border-sky-200/80 bg-gradient-to-b from-white via-sky-50/25 to-white p-2 sm:p-3 shadow-[0_16px_32px_rgba(37,99,235,0.16)]">
+        <div className="pointer-events-none absolute inset-0 rounded-[3px] [background-image:repeating-linear-gradient(to_bottom,transparent_0px,transparent_18px,rgba(59,130,246,0.26)_19px)] sm:[background-image:repeating-linear-gradient(to_bottom,transparent_0px,transparent_22px,rgba(59,130,246,0.26)_23px)]" />
+        <div className="pointer-events-none absolute left-4 sm:left-5 top-0 h-full w-px bg-rose-200/70" />
+        <div className="relative pl-4 sm:pl-6">
+          <p className="text-[9px] sm:text-[10px] font-semibold uppercase tracking-[0.15em] text-sky-800/80">Focus Areas</p>
+          <ul className="mt-2 space-y-1.5">
+            {items.slice(0, 6).map((item) => (
+              <li key={item.id} className="flex items-start gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => onToggle(item.id)}
+                  className={`mt-0.5 h-3.5 w-3.5 rounded-sm border text-[9px] leading-[1] transition-colors ${
+                    item.completed
+                      ? 'border-sky-400 bg-sky-500 text-white'
+                      : 'border-sky-500/70 bg-white text-transparent hover:bg-sky-50'
+                  }`}
+                  aria-label={`Mark priority ${item.completed ? 'incomplete' : 'complete'}: ${item.text}`}
+                >
+                  ✓
+                </button>
+                <span className={`text-[9px] sm:text-[11px] leading-snug ${item.completed ? 'text-sky-900/45 line-through' : 'text-sky-950/90'}`}>
+                  {item.text}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+});
+
+const CurrentContextPanel = React.memo(({
+  organizationName,
+  focusLine,
+  modeLabel,
+}: CurrentContextPanelProps) => (
+  <div className="w-full rounded-lg border border-border/60 bg-card/80 p-2 sm:w-[220px]">
+    <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-primary/80">Current Context</p>
+    <p className="mt-1 text-[11px] font-medium text-foreground/90">{organizationName}</p>
+    <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">{focusLine}</p>
+    <p className="mt-2 text-[10px] uppercase tracking-[0.12em] text-muted-foreground/90">{modeLabel}</p>
+  </div>
+));
+
 const normalizeStickyText = (value?: string | null) =>
   value?.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+const extractFocusAreaBullets = (assistantOutput?: string | null): string[] => {
+  const source = (assistantOutput || '').trim();
+  if (!source) return [];
+
+  const normalized = source
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/[#>*`]/g, ' ')
+    .replace(/\[(.*?)\]\((.*?)\)/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!normalized) return [];
+
+  const sentenceCandidates = normalized
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const scored = sentenceCandidates
+    .map((sentence) => {
+      const lower = sentence.toLowerCase();
+      let score = 0;
+      if (/\b(next|recommend|should|priority|action|consensus|align|agree|plan|follow up)\b/.test(lower)) score += 2;
+      if (/\b(we|team|stakeholders|everyone|all)\b/.test(lower)) score += 1;
+      if (sentence.length < 140) score += 1;
+      return { sentence, score };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  const picks = scored
+    .slice(0, 4)
+    .map(({ sentence }) => sentence.replace(/^[-\d.)\s]+/, '').trim())
+    .filter((line) => line.length > 0 && line.length <= 140);
+
+  if (picks.length > 0) return picks;
+
+  return sentenceCandidates
+    .slice(0, 3)
+    .map((s) => s.replace(/^[-\d.)\s]+/, '').trim())
+    .filter(Boolean);
+};
+
+const buildContextTodoStorageKey = (profileId?: string | null) =>
+  `suite-context-todos:${profileId ?? 'anon'}`;
+
+const getScopeStorageId = (organizationId?: string | null) =>
+  organizationId || 'global';
+
+const buildPriorityChecklistStorageKey = (profileId?: string | null) =>
+  `suite-priority-checklist:${profileId ?? 'anon'}`;
+
+const extractPriorityChecklistCandidates = (assistantOutput?: string | null): string[] => {
+  const source = (assistantOutput || '').trim();
+  if (!source) return [];
+
+  const lines = source
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const taskLikeLines = lines
+    .filter((line) => /^[-*•]|\d+[.)]|\[[ xX]\]/.test(line))
+    .map((line) => line.replace(/^[-*•\d.)\s[\]xX]+/, '').trim())
+    .filter((line) =>
+      line.length > 6
+      && !/^(hi|hello|thanks|great question|certainly|absolutely|sure)\b/i.test(line)
+      && /\b(next|priority|phase|task|assign|owner|follow[- ]?up|deliver|ship|implement|review)\b/i.test(line)
+    );
+
+  if (taskLikeLines.length > 0) return taskLikeLines.slice(0, 8);
+
+  return source
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/[#>*`]/g, ' ')
+    .replace(/\[(.*?)\]\((.*?)\)/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length >= 16 && s.length <= 180)
+    .filter((sentence) => /\b(next steps?|next phases?|priorit(?:y|ies)|unassigned|ongoing work|action items?)\b/i.test(sentence))
+    .map((sentence) => sentence.replace(/^[-\d.)\s]+/, '').trim())
+    .slice(0, 6);
+};
+
+const reconcilePriorityChecklist = (
+  current: ContextTodoItem[],
+  candidates: string[],
+  assistantOutput: string,
+  autoClearCompleted: boolean,
+): ContextTodoItem[] => {
+  let next = [...current];
+
+  candidates.forEach((candidate) => {
+    const normalized = normalizeStickyText(candidate);
+    if (!normalized) return;
+    const existing = next.find((item) => item.text.toLowerCase() === normalized.toLowerCase());
+    if (existing) {
+      next = next.map((item) =>
+        item.id === existing.id ? { ...item, updatedAt: Date.now() } : item
+      );
+      return;
+    }
+
+    next = [{
+      id: `prio-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      text: normalized,
+      completed: false,
+      updatedAt: Date.now(),
+    }, ...next];
+  });
+
+  const completionSignals = assistantOutput.toLowerCase();
+  if (/\b(completed|done|finished|resolved|closed|shipped|deployed)\b/.test(completionSignals)) {
+    next = next.map((item) => {
+      const itemTokens = item.text.toLowerCase().split(/\W+/).filter((token) => token.length > 4).slice(0, 4);
+      const hasTokenMatch = itemTokens.some((token) => completionSignals.includes(token));
+      return hasTokenMatch ? { ...item, completed: true, updatedAt: Date.now() } : item;
+    });
+  }
+
+  if (autoClearCompleted) {
+    next = next.filter((item) => !item.completed);
+  }
+
+  return next.slice(0, 12);
+};
+
+const ensureContextTodo = (
+  current: ContextTodoItem[],
+  text: string,
+): ContextTodoItem[] => {
+  const normalizedText = normalizeStickyText(text);
+  if (!normalizedText) return current;
+
+  const existing = current.find(
+    (todo) => todo.text.toLowerCase() === normalizedText.toLowerCase(),
+  );
+
+  if (existing) {
+    return current.map((todo) =>
+      todo.id === existing.id ? { ...todo, updatedAt: Date.now() } : todo
+    );
+  }
+
+  return [
+    {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      text: normalizedText,
+      completed: false,
+      updatedAt: Date.now(),
+    },
+    ...current,
+  ].slice(0, 10);
+};
 
 const CODE_KEYWORD_PATTERN = /\b(function|const|let|var|class|import|export|return|if|else|for|while|try|catch|def|async|await|SELECT|INSERT|UPDATE|DELETE|FROM|WHERE)\b/;
 const CODE_SYMBOL_PATTERN = /[{}[\]();=<>]|=>|::|#include|<\/?[a-z][\s\S]*?>/i;
@@ -306,7 +631,7 @@ const MessageCodeBlock = React.memo(({ code, language, ...props }: { code: strin
 
   return (
     <div className="relative group my-4">
-      <div className="absolute right-2 top-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="absolute left-2 top-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
         <Button
           size="icon"
           variant="secondary"
@@ -378,10 +703,10 @@ const markdownComponents = {
   }
 };
 
-const ChatMessage = React.memo(({ message }: { message: UnifiedMessage }) => {
+const ChatMessage = React.memo(({ message, isLatest }: { message: UnifiedMessage; isLatest?: boolean }) => {
   return (
     <div
-      className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'} flex-col gap-2 animate-fade-in`}
+      className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'} flex-col gap-2 animate-fade-in ${isLatest ? 'scale-[1.01] origin-left transition-transform duration-300' : ''}`}
     >
       {message.sender === 'assistant' && message.isCouncilDeliberation && message.councilDeliberation && (
         <div className="max-w-[95%]">
@@ -401,7 +726,7 @@ const ChatMessage = React.memo(({ message }: { message: UnifiedMessage }) => {
             className={`group p-3 rounded-xl ${message.sender === 'user'
               ? 'bg-white text-gray-900 rounded-br-sm border border-gray-300 shadow-sm'
               : 'bg-gray-50 text-gray-900 rounded-bl-sm border border-gray-300'
-              }`}
+              } ${isLatest ? 'ring-2 ring-primary/20 shadow-md border-primary/30' : ''}`}
           >
             {message.attachments?.images && message.attachments.images.length > 0 && (
               <div className="flex flex-wrap gap-2 mb-2">
@@ -444,7 +769,7 @@ const ChatMessage = React.memo(({ message }: { message: UnifiedMessage }) => {
             </div>
 
             {message.sender === 'assistant' && (
-              <div className="mt-2 flex justify-end">
+              <div className="mt-2 flex justify-start">
                 <MessageCopyButton content={message.content} />
               </div>
             )}
@@ -531,7 +856,7 @@ const GeneratedVideoPreview = React.memo(({ url, index }: { url: string; index: 
 // Internal component using ElevenLabs and Gemini
 
 const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
-  apiKey = import.meta.env.VITE_GEMINI_API_KEY || "",
+  apiKey = import.meta.env.DEEPSEEK_API_KEY || "",
   className = '',
   miningStats: externalMiningStats,
   enableMiningStats = true,
@@ -568,8 +893,10 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   // Voice/TTS state
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [voiceEnabled, setVoiceEnabled] = useState(() => {
-    // Check if user previously enabled voice
-    return localStorage.getItem('audioEnabled') === 'true';
+    // Default to enabled unless user explicitly turned audio off.
+    const storedPreference = localStorage.getItem('audioEnabled');
+    if (storedPreference === null) return true;
+    return storedPreference === 'true';
   });
   const [audioInitialized, setAudioInitialized] = useState(false);
   const [interimTranscript, setInterimTranscript] = useState(''); // New state for real-time feedback
@@ -599,49 +926,106 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   const [miningStats, setMiningStats] = useState<MiningStats | null>(externalMiningStats || null);
   const [userContext, setUserContext] = useState<UserContext | null>(null);
   const [organizationContext, setOrganizationContext] = useState<any>(null);
+  const [contextTodosByOrg, setContextTodosByOrg] = useState<ContextTodoStore>({});
+  const [priorityChecklistByScope, setPriorityChecklistByScope] = useState<PriorityChecklistStore>({});
+  const [visualContextSummary, setVisualContextSummary] = useState<string>('');
   const [lastElizaMessage, setLastElizaMessage] = useState<string>("");
 
   // Council mode state - initialize from prop
   const [councilMode, setCouncilMode] = useState<boolean>(defaultCouncilMode);
 
-  // Auto-advance state — council meeting self-drives after each synthesis
+  // Full Autonomy state — auto-advances via suggested quick prompt after assistant replies
+  const [fullAutonomyEnabled, setFullAutonomyEnabled] = useState(false);
   const [autoAdvanceCountdown, setAutoAdvanceCountdown] = useState<number | null>(null);
-  const [autoAdvancePaused, setAutoAdvancePaused] = useState(false);
   const autoAdvanceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const pendingAutoAdvanceText = useRef<string>('');
+  const pendingAutoAdvancePromptRef = useRef<string>('');
+  const lastAutoAdvancePromptRef = useRef<string>('');
+  const shouldInjectResumePromptRef = useRef(false);
+  const fullAutonomyTurnCountRef = useRef(0);
+  const FULL_AUTONOMY_AUTO_ADVANCE_SECONDS = 60;
+  const FULL_AUTONOMY_BREAKOUT_PROMPT = language === 'es'
+    ? 'Audita tu progreso para asegurar que se está realizando trabajo real: revisa tu base de conocimientos para confirmar que guardaste lo que creías haber guardad.'
+    : 'Audit your progress to ensure real work is being done - if you are doing research, check your knowledgebase to ensure you stored things you learned, if you are working with emails ensure they were actually sent, or if you are working with documents, ensure your most recent changes were actually made.';
   // Ref to handleSendMessage — avoids stale closure in setInterval callbacks
   // Updated BEFORE the interval fires via assignment in component body below
   const handleSendMessageRef = useRef<((msg?: string) => void) | undefined>(undefined);
 
-  /**
-   * Parse the synthesis output to extract the lead executive's next steps.
-   * Returns a structured prompt string the council can act on, or null if
-   * the synthesis is asking the user a direct question (which pauses auto-advance).
-   */
-  const extractNextCouncilStep = (synthesis: string): string | null => {
-    // If synthesis ends with a question directed at the user, let them answer
-    const lastSentences = synthesis.split(/[.!]/).slice(-3).join(' ').toLowerCase();
-    if (/\?/.test(lastSentences) && /(your|founder|you prefer|what is|which|shall we|do you)/.test(lastSentences)) {
-      return null; // User input genuinely needed
+  const clearAutoAdvanceTimer = useCallback(() => {
+    if (autoAdvanceTimerRef.current) {
+      clearInterval(autoAdvanceTimerRef.current);
+      autoAdvanceTimerRef.current = null;
     }
+    pendingAutoAdvancePromptRef.current = '';
+    setAutoAdvanceCountdown(null);
+  }, []);
 
-    // Extract Lead Executive
-    const leadMatch = synthesis.match(/\*\*Lead Executive:\*\*\s*([^\n]+)/i);
-    const leadName = leadMatch ? leadMatch[1].trim() : 'Lead Executive';
+  const scheduleFullAutonomyAdvance = useCallback((assistantMessage: UnifiedMessage) => {
+    if (!fullAutonomyEnabled || assistantMessage.sender !== 'assistant') return;
 
-    // Extract the numbered next steps from "Unified Recommendation" or end of synthesis
-    const recSection = synthesis.match(/(Unified Recommendation|next steps?|must now)[\s\S]*?(?=\*\*Lead Executive|$)/i)?.[0] || synthesis;
-    const bullets = recSection
-      .split('\n')
-      .filter(line => /^[\d•*\-]/.test(line.trim()) && line.trim().length > 10)
-      .slice(0, 3)
-      .map(line => line.replace(/^[\d.•*\-]+\s*/, '').replace(/\*\*/g, '').trim())
-      .filter(Boolean);
+    fullAutonomyTurnCountRef.current += 1;
+    const isBreakoutTurn = !councilMode && fullAutonomyTurnCountRef.current % 10 === 0;
 
-    if (bullets.length === 0) return null;
+    const quickResponseContext = {
+      lastMessageRole: 'assistant' as const,
+      hasUserEngaged,
+      hasPastConversations: conversationSummaries.length > 0 || totalMessageCount > 0,
+      lastMessageContent: assistantMessage.content,
+      lastExecutive: assistantMessage.executive,
+      turnCount: messages.length + 1,
+      councilMode,
+      fullAutonomyEnabled,
+      language,
+    };
 
-    return `${leadName}, please proceed: ${bullets.join(' | ')}. Move the meeting forward with decisive action.`;
-  };
+    const prompt = isBreakoutTurn
+      ? FULL_AUTONOMY_BREAKOUT_PROMPT
+      : (() => {
+          const quickPrompts = getQuickResponsePrompts(quickResponseContext);
+          const filteredPrompts = councilMode
+            ? quickPrompts.filter((candidatePrompt) =>
+                candidatePrompt.includes('Proceed Intelligently') ||
+                candidatePrompt.includes('Continuar con el plan') ||
+                candidatePrompt.startsWith('Move forward ⏭️') ||
+                candidatePrompt.startsWith('Avanzar ⏭️')
+              )
+            : quickPrompts;
+
+          if (filteredPrompts.length === 0) return null;
+          const nextPrompt = filteredPrompts.find(
+            (candidatePrompt) => candidatePrompt !== lastAutoAdvancePromptRef.current
+          );
+          return nextPrompt ?? filteredPrompts[0] ?? null;
+        })();
+
+    if (!prompt) return;
+
+    clearAutoAdvanceTimer();
+    lastAutoAdvancePromptRef.current = prompt;
+    pendingAutoAdvancePromptRef.current = prompt;
+    let remaining = FULL_AUTONOMY_AUTO_ADVANCE_SECONDS;
+    setAutoAdvanceCountdown(remaining);
+
+    autoAdvanceTimerRef.current = setInterval(() => {
+      remaining -= 1;
+      setAutoAdvanceCountdown(remaining);
+      if (remaining <= 0) {
+        const pendingPrompt = pendingAutoAdvancePromptRef.current;
+        clearAutoAdvanceTimer();
+        if (pendingPrompt) handleSendMessageRef.current?.(pendingPrompt);
+      }
+    }, 1000);
+  }, [
+    fullAutonomyEnabled,
+    hasUserEngaged,
+    conversationSummaries.length,
+    totalMessageCount,
+    messages.length,
+    councilMode,
+    clearAutoAdvanceTimer,
+    FULL_AUTONOMY_AUTO_ADVANCE_SECONDS,
+    FULL_AUTONOMY_BREAKOUT_PROMPT,
+    language,
+  ]);
 
 
   // File attachment state
@@ -658,6 +1042,74 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
     pendingNoteTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
     pendingNoteTimeoutsRef.current = [];
   }, []);
+
+  const activeOrganizationId = profile?.selected_organization_id || '';
+  const activeContextScopeId = getScopeStorageId(activeOrganizationId);
+  const activeOrganizationName = organizationContext?.name || 'Selected context';
+  const activeContextTodos = contextTodosByOrg[activeContextScopeId] || [];
+  const latestUserMessage = [...messages].reverse().find((msg) => msg.sender === 'user');
+  const latestAssistantMessage = [...messages].reverse().find((msg) => msg.sender === 'assistant');
+  const currentContextFocusLine = visualContextSummary
+    || normalizeStickyText(latestUserMessage?.content)?.slice(0, 90)
+    || 'Awaiting active priorities from this chat.';
+  const currentContextModeLabel = councilMode ? 'Executive Council active' : 'Eliza direct mode';
+  const focusAreaBullets = useMemo(
+    () => extractFocusAreaBullets(latestAssistantMessage?.content),
+    [latestAssistantMessage?.content],
+  );
+  const activePriorityChecklist = priorityChecklistByScope[activeContextScopeId] || [];
+
+  const persistContextTodos = useCallback((nextTodos: ContextTodoStore) => {
+    localStorage.setItem(
+      buildContextTodoStorageKey(profile?.id),
+      JSON.stringify(nextTodos),
+    );
+  }, [profile?.id]);
+
+  const persistPriorityChecklist = useCallback((nextChecklist: PriorityChecklistStore) => {
+    localStorage.setItem(
+      buildPriorityChecklistStorageKey(profile?.id),
+      JSON.stringify(nextChecklist),
+    );
+  }, [profile?.id]);
+
+  const upsertContextTodo = useCallback((todoText: string) => {
+    setContextTodosByOrg((prev) => {
+      const current = prev[activeContextScopeId] || [];
+      const updated = ensureContextTodo(current, todoText);
+      const next = { ...prev, [activeContextScopeId]: updated };
+      persistContextTodos(next);
+      return next;
+    });
+  }, [activeContextScopeId, persistContextTodos]);
+
+  const toggleContextTodo = useCallback((todoId: string) => {
+    setContextTodosByOrg((prev) => {
+      const current = prev[activeContextScopeId] || [];
+      const next = {
+        ...prev,
+        [activeContextScopeId]: current.map((todo) =>
+          todo.id === todoId ? { ...todo, completed: !todo.completed, updatedAt: Date.now() } : todo
+        ),
+      };
+      persistContextTodos(next);
+      return next;
+    });
+  }, [activeContextScopeId, persistContextTodos]);
+
+  const togglePriorityChecklistItem = useCallback((todoId: string) => {
+    setPriorityChecklistByScope((prev) => {
+      const current = prev[activeContextScopeId] || [];
+      const next = {
+        ...prev,
+        [activeContextScopeId]: current.map((item) =>
+          item.id === todoId ? { ...item, completed: !item.completed, updatedAt: Date.now() } : item
+        ),
+      };
+      persistPriorityChecklist(next);
+      return next;
+    });
+  }, [activeContextScopeId, persistPriorityChecklist]);
 
   const enqueueProcessingNote = useCallback((text: string, variant: ProcessingStickyNote['variant'] = 'default') => {
     const normalizedText = normalizeStickyText(text);
@@ -694,7 +1146,9 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       setProcessingNotes((prev) => prev.filter((note) => note.id !== noteToRemoveId));
     }, 900);
     pendingNoteTimeoutsRef.current.push(timeout);
-  }, []);
+
+    upsertContextTodo(text);
+  }, [upsertContextTodo]);
 
   const dropOldestProcessingNote = useCallback(() => {
     let noteToRemoveId: string | null = null;
@@ -805,7 +1259,11 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   // Auto-initialize TTS on mount for immediate use
   useEffect(() => {
     const initializeTTS = async () => {
-      const wasEnabled = localStorage.getItem('audioEnabled') === 'true';
+      const storedPreference = localStorage.getItem('audioEnabled');
+      const wasEnabled = storedPreference === null || storedPreference === 'true';
+      if (storedPreference === null) {
+        localStorage.setItem('audioEnabled', 'true');
+      }
       if (wasEnabled) {
         await handleEnableAudio();
       } else {
@@ -828,10 +1286,12 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   // to be called synchronously within a user gesture (no async gaps allowed).
   useEffect(() => {
     if (simplifiedVoiceService.isSupported()) {
-      simplifiedVoiceService.prepareInstance();
+      simplifiedVoiceService.prepareInstance({
+        language: language === 'es' ? 'es-ES' : 'en-US'
+      });
       console.log('🎤 SpeechRecognition pre-built and ready');
     }
-  }, []);
+  }, [language]);
 
   // Subscribe to Office Clerk (WebLLM) progress
   useEffect(() => {
@@ -841,18 +1301,16 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
     return () => unsubscribe();
   }, []);
 
-  // Auto-scroll within chat container only (no page-level scrolling)
+  // Keep newest content visible directly under the top composer.
   useEffect(() => {
-    // Only scroll if there are messages and not just loading
     if (messages.length > 0 && !isProcessing) {
-      // Use setTimeout to ensure DOM updates are complete
       setTimeout(() => {
-        // Only scroll within the chat container itself
         if (scrollAreaRef.current) {
-          scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight;
+          const scrollContainer = scrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]');
+          if (scrollContainer) {
+            scrollContainer.scrollTop = 0;
+          }
         }
-        // Removed scrollIntoView to prevent page-level scrolling
-        // User stays at their current position on the page
       }, 100);
     }
   }, [messages, isProcessing]);
@@ -888,24 +1346,33 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
             console.log(`📚 Found ${context.summaries.length} summaries for ${context.totalMessageCount} total messages`);
           }
 
-          // Load enhanced Supabase backend data
-          if (userCtx?.ip) {
-            // Load user preferences from user_preferences table
+          // Load enhanced Supabase backend data (unrestricted)
+          try {
+            // Load user preferences
             const preferences = await conversationPersistence.getUserPreferences();
-            console.log('⚙️ User preferences:', Object.keys(preferences).length, 'items');
+            console.log('⚙️ User preferences:', Object.keys(preferences ?? {}).length, 'items');
 
-            // Load memory contexts from memory_contexts table (semantic search)
-            const memoryContexts = await memoryContextService.getRelevantContexts(userCtx.ip, 5);
+            // Load memory contexts:
+            // - if IP exists, use personalized semantic search
+            // - otherwise, use a global/fallback loader (implement if missing)
+            const memoryContexts = userCtx?.ip
+              ? await memoryContextService.getRelevantContexts(userCtx.ip, 100)
+              : await memoryContextService.getAllContexts?.(100) ?? [];
             console.log('🧠 Memory contexts:', memoryContexts.length, 'items');
 
-            // Load learning patterns from interaction_patterns table
-            const learningPatterns = await learningPatternsService.getHighConfidencePatterns(0.7);
+            // Load learning patterns with lower threshold to include more patterns
+            const learningPatterns = await learningPatternsService.getHighConfidencePatterns(0.0);
             console.log('📊 Learning patterns:', learningPatterns.length, 'patterns');
 
-            // Load knowledge entities from knowledge_entities table
-            const miningEntities = await knowledgeEntityService.getEntitiesByType('mining_concept');
-            const daoEntities = await knowledgeEntityService.getEntitiesByType('dao_concept');
-            console.log('🏷️ Knowledge entities:', miningEntities.length + daoEntities.length, 'entities');
+            // Load all knowledge entities instead of only two hard-coded types
+            const allEntities = await knowledgeEntityService.getAllEntities?.() ?? [];
+            console.log('🏷️ Knowledge entities:', allEntities.length, 'entities');
+
+            // Optional: if your downstream logic expects separate arrays
+            const miningEntities = allEntities.filter((e: any) => e.type === 'mining_concept');
+            const daoEntities = allEntities.filter((e: any) => e.type === 'dao_concept');
+          } catch (error) {
+            console.log('Conversation persistence error:', error);
           }
         } catch (error) {
           console.log('Conversation persistence error:', error);
@@ -947,6 +1414,75 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
     };
     fetchOrgContext();
   }, [profile?.selected_organization_id]);
+
+  useEffect(() => {
+    const raw = localStorage.getItem(buildContextTodoStorageKey(profile?.id));
+    if (!raw) {
+      setContextTodosByOrg({});
+      return;
+    }
+    try {
+      const parsed = JSON.parse(raw) as ContextTodoStore;
+      setContextTodosByOrg(parsed || {});
+    } catch {
+      setContextTodosByOrg({});
+    }
+  }, [profile?.id]);
+
+  useEffect(() => {
+    const raw = localStorage.getItem(buildPriorityChecklistStorageKey(profile?.id));
+    if (!raw) {
+      setPriorityChecklistByScope({});
+      return;
+    }
+    try {
+      const parsed = JSON.parse(raw) as PriorityChecklistStore;
+      setPriorityChecklistByScope(parsed || {});
+    } catch {
+      setPriorityChecklistByScope({});
+    }
+  }, [profile?.id]);
+
+  useEffect(() => {
+    if (!organizationContext?.name) return;
+    upsertContextTodo(`Review priorities for ${organizationContext.name}`);
+    upsertContextTodo(`Capture follow-ups linked to ${organizationContext.name}`);
+  }, [organizationContext?.name, upsertContextTodo]);
+
+  useEffect(() => {
+    if (messages.length === 0) return;
+    const latestUserMessage = [...messages].reverse().find((msg) => msg.sender === 'user');
+    if (!latestUserMessage) return;
+    const concise = normalizeStickyText(latestUserMessage.content)?.slice(0, 80);
+    if (!concise) return;
+    upsertContextTodo(`Address: ${concise}`);
+  }, [messages, upsertContextTodo]);
+
+  useEffect(() => {
+    if (!latestAssistantMessage?.content) return;
+
+    const candidates = extractPriorityChecklistCandidates(latestAssistantMessage.content);
+    if (candidates.length === 0) return;
+
+    setPriorityChecklistByScope((prev) => {
+      const current = prev[activeContextScopeId] || [];
+      const updated = reconcilePriorityChecklist(
+        current,
+        candidates,
+        latestAssistantMessage.content,
+        fullAutonomyEnabled,
+      );
+      const next = { ...prev, [activeContextScopeId]: updated };
+      persistPriorityChecklist(next);
+      return next;
+    });
+  }, [
+    latestAssistantMessage?.id,
+    latestAssistantMessage?.content,
+    activeContextScopeId,
+    fullAutonomyEnabled,
+    persistPriorityChecklist,
+  ]);
 
   // Set up realtime subscriptions for live updates
   useEffect(() => {
@@ -1092,6 +1628,15 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   }, []);
 
   useEffect(() => {
+    fullAutonomyTurnCountRef.current = 0;
+    lastAutoAdvancePromptRef.current = '';
+    shouldInjectResumePromptRef.current = false;
+    if (!fullAutonomyEnabled) {
+      clearAutoAdvanceTimer();
+    }
+  }, [fullAutonomyEnabled, clearAutoAdvanceTimer]);
+
+  useEffect(() => {
     if (isProcessing) {
       clearPendingNoteTimeouts();
 
@@ -1142,7 +1687,8 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       isFounder: userContext?.isFounder,
       conversationSummary: cachedSummary?.summary || (conversationSummaries.length > 0 ? conversationSummaries[conversationSummaries.length - 1].summaryText : undefined),
       totalMessageCount: cachedSummary?.messageCount || totalMessageCount,
-      miningStats
+      miningStats,
+      language
     });
 
     const greeting: UnifiedMessage = {
@@ -1174,11 +1720,10 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       const fullContext = await conversationPersistence.getFullConversationContext();
 
       const response = await UnifiedElizaService.generateResponse(prompt, {
-        miningStats,
         userContext,
         inputMode: 'text',
-        shouldSpeak: false,
-        enableBrowsing: false,
+        shouldSpeak: true,
+        enableBrowsing: true,
         conversationContext: fullContext,
         councilMode: false
       }, language);
@@ -1215,7 +1760,9 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       // Fallback: show a simple message
       setMessages(prev => [...prev, {
         id: `workflow-fallback-${workflow.id}`,
-        content: `✅ Background task "${workflow.name}" completed. Check the Task Visualizer for details.`,
+        content: language === 'es'
+          ? `✅ La tarea en segundo plano "${workflow.name}" se completó. Revisa el Visualizador de Tareas para ver los detalles.`
+          : `✅ Background task "${workflow.name}" completed. Check the Task Visualizer for details.`,
         sender: 'assistant',
         timestamp: new Date()
       }]);
@@ -1223,7 +1770,9 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   };
 
   const handleClearConversation = async () => {
-    if (!confirm('Are you sure you want to clear the entire conversation history? This cannot be undone.')) {
+    if (!confirm(language === 'es'
+      ? '¿Seguro que quieres borrar todo el historial de conversación? Esta acción no se puede deshacer.'
+      : 'Are you sure you want to clear the entire conversation history? This cannot be undone.')) {
       return;
     }
 
@@ -1242,7 +1791,9 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       if (userContext) {
         const greeting: UnifiedMessage = {
           id: 'fresh-greeting',
-          content: "Hello! I'm Eliza, your XMRT assistant. How can I help you today?",
+          content: language === 'es'
+            ? "¡Hola! Soy Eliza, tu asistente de XMRT. ¿Cómo puedo ayudarte hoy?"
+            : "Hello! I'm Eliza, your XMRT assistant. How can I help you today?",
           sender: 'assistant',
           timestamp: new Date()
         };
@@ -1473,11 +2024,13 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
         }, (error) => {
           setIsRecording(false);
 
-          let userMsg = `🎤 Voice input error: ${error}`;
+          let userMsg = t('chat.error.microphone') + `: ${error}`;
           if (error.includes('not supported')) {
-            userMsg = `❌ Voice input is not supported in this browser. Please use Chrome, Edge, or Safari.`;
+            userMsg = language === 'es' 
+              ? `❌ La entrada de voz no es compatible con este navegador. Por favor, usa Chrome, Edge o Safari.`
+              : `❌ Voice input is not supported in this browser. Please use Chrome, Edge, or Safari.`;
           } else if (error.includes('not-allowed') || error.includes('permission')) {
-            userMsg = `🎤 Microphone access denied. Please allow microphone permissions in your browser settings.`;
+            userMsg = t('chat.permissions.needed');
           }
 
           const errorMessage: UnifiedMessage = {
@@ -1494,9 +2047,11 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
           console.error("Failed to start voice:", result.error);
           setIsRecording(false);
 
-          let initMsg = `❌ Could not start voice input: ${result.error}`;
+          let initMsg = (language === 'es' ? `❌ No se pudo iniciar la entrada de voz: ` : `❌ Could not start voice input: `) + result.error;
           if (result.error?.includes('not supported')) {
-            initMsg = `❌ Voice input is not supported in this browser. Please use Chrome, Edge, or Safari.`;
+            initMsg = language === 'es'
+              ? `❌ La entrada de voz no es compatible con este navegador. Por favor, usa Chrome, Edge o Safari.`
+              : `❌ Voice input is not supported in this browser. Please use Chrome, Edge, or Safari.`;
           }
 
           const errorMessage: UnifiedMessage = {
@@ -1668,7 +2223,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       console.error('Failed to process voice input:', error);
       const errorMessage: UnifiedMessage = {
         id: `error-${Date.now()}`,
-        content: 'I apologize, but I\'m having trouble processing your voice input right now.',
+        content: language === 'es' ? 'Lo siento, pero tengo problemas para procesar su entrada de voz en este momento.' : 'I apologize, but I\'m having trouble processing your voice input right now.',
         sender: 'assistant',
         timestamp: new Date()
       };
@@ -1683,7 +2238,15 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
     const rawInput = quickMessage ?? textInput;
     const trimmedInput = rawInput.trim();
     if (!trimmedInput || isProcessing) return;
+    clearAutoAdvanceTimer();
     const messageText = formatUserMessageForDisplayAndParsing(trimmedInput);
+    const shouldInjectResumePrompt = fullAutonomyEnabled && shouldInjectResumePromptRef.current;
+    const injectedMessageText = shouldInjectResumePrompt
+      ? `${messageText}\n\n${FULL_AUTONOMY_RESUME_PROMPT}`
+      : messageText;
+    if (shouldInjectResumePrompt) {
+      shouldInjectResumePromptRef.current = false;
+    }
 
 
     // Mark that user has engaged with the chat
@@ -1828,11 +2391,11 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
     }
 
     try {
-      console.log('💬 Starting message processing:', messageText);
+      console.log('💬 Starting message processing:', injectedMessageText);
       console.log('🔧 Context:', { miningStats: !!miningStats, userContext: !!userContext });
 
       // Check if user is teaching pronunciation
-      const learnedSpeech = speechLearningService.parseInstruction(messageText);
+      const learnedSpeech = speechLearningService.parseInstruction(injectedMessageText);
       if (learnedSpeech) {
         const confirmMessage: UnifiedMessage = {
           id: `eliza-${Date.now()}`,
@@ -1851,7 +2414,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       const fullContext = await conversationPersistence.getFullConversationContext();
 
       // Process response using Gemini AI Gateway or Council
-      const response = await UnifiedElizaService.generateResponse(messageText, {
+      const response = await UnifiedElizaService.generateResponse(injectedMessageText, {
         miningStats,
         userContext,
         organizationContext,
@@ -1884,6 +2447,9 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
 
         setMessages(prev => [...prev, elizaMessage]);
         setLastElizaMessage(deliberation.synthesis);
+        if (fullAutonomyEnabled && isDefaultBackupResponse(deliberation.synthesis || '')) {
+          shouldInjectResumePromptRef.current = true;
+        }
 
         // Store council response
         try {
@@ -1898,31 +2464,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
           console.log('Conversation persistence error:', error);
         }
 
-        // 🚀 AUTO-ADVANCE: parse next steps from synthesis and re-submit automatically
-        // This lets the lead executive drive the meeting without user having to say "proceed"
-        if (councilMode && !autoAdvancePaused) {
-          const nextStep = extractNextCouncilStep(deliberation.synthesis);
-          if (nextStep) {
-            pendingAutoAdvanceText.current = nextStep;
-            let remaining = 10;
-            setAutoAdvanceCountdown(remaining);
-
-            if (autoAdvanceTimerRef.current) clearInterval(autoAdvanceTimerRef.current);
-            autoAdvanceTimerRef.current = setInterval(() => {
-              remaining -= 1;
-              setAutoAdvanceCountdown(remaining);
-              if (remaining <= 0) {
-                clearInterval(autoAdvanceTimerRef.current!);
-                autoAdvanceTimerRef.current = null;
-                setAutoAdvanceCountdown(null);
-                const text = pendingAutoAdvanceText.current;
-                pendingAutoAdvanceText.current = '';
-                // Use ref to avoid stale closure — always gets the latest handler
-                if (text) handleSendMessageRef.current?.(text);
-              }
-            }, 1000);
-          }
-        }
+        scheduleFullAutonomyAdvance(elizaMessage);
         // Speak council synthesis with TTS (even if partial responses) - auto-initialize if needed
         if (voiceEnabled) {
           // Ensure TTS is initialized
@@ -1982,8 +2524,9 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       // Check if this is a workflow initiation message
       const isWorkflowInitiation = responseText.includes('🎬') && responseText.includes('background');
 
-      // Remove tool_use tags from chat display
-      let cleanResponse = responseText.replace(/<tool_use>[\s\S]*?<\/tool_use>/g, '').trim();
+      // Remove raw/pseudo tool markup from chat display and only show real tool call telemetry
+      const sanitizedToolMarkup = sanitizeRawToolMarkup(responseText);
+      let cleanResponse = sanitizedToolMarkup.cleanText;
 
       // 🖼️ Extract base64 images from response to prevent UI freeze
       let generatedImages: string[] = [];
@@ -2018,11 +2561,6 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
         cleanResponse = cleanResponse.replace(videoUrlRegex, '').trim();
       }
 
-      // If it's a workflow initiation, show a brief acknowledgment instead
-      const displayContent = isWorkflowInitiation
-        ? '🔄 Processing your request in the background. I\'ll share the results shortly...'
-        : cleanResponse;
-
       // Extract reasoning from response if available
       let reasoning: ReasoningStep[] = [];
       try {
@@ -2039,6 +2577,21 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       const toolCalls = (window as any).__lastElizaToolCalls || [];
       const executiveTitle = (window as any).__lastElizaExecutiveTitle || '';
 
+      if (sanitizedToolMarkup.removedRawToolMarkup && toolCalls.length > 0) {
+        const executedToolsSummary = toolCalls
+          .map((tool: { function_name?: string; status?: string }) =>
+            tool?.function_name
+              ? `- ${tool.function_name}${tool.status ? ` (${tool.status})` : ''}`
+              : null
+          )
+          .filter(Boolean)
+          .join('\n');
+
+        if (executedToolsSummary) {
+          cleanResponse = `${cleanResponse}\n\n✅ **Executed tools**\n${executedToolsSummary}`.trim();
+        }
+      }
+
       if (toolCalls.length > 0) {
         toolCalls.forEach((tool: { function_name?: string }) => {
           if (tool.function_name) {
@@ -2046,6 +2599,11 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
           }
         });
       }
+
+      // If it's a workflow initiation, show a brief acknowledgment instead
+      const displayContent = isWorkflowInitiation
+        ? (language === 'es' ? '🔄 Procesando su solicitud en segundo plano. Compartiré los resultados en breve...' : '🔄 Processing your request in the background. I\'ll share the results shortly...')
+        : cleanResponse;
 
       const elizaMessage: UnifiedMessage = {
         id: `eliza-${Date.now()}`,
@@ -2065,6 +2623,10 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
 
       setMessages(prev => [...prev, elizaMessage]);
       setLastElizaMessage(displayContent);
+      if (fullAutonomyEnabled && isDefaultBackupResponse(displayContent || '')) {
+        shouldInjectResumePromptRef.current = true;
+      }
+      scheduleFullAutonomyAdvance(elizaMessage);
 
       // Store Eliza's response with full data integration
       try {
@@ -2147,7 +2709,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       } else {
         // Parse and diagnose the error
         const diagnosis = await IntelligentErrorHandler.diagnoseError(error, {
-          userInput: messageText,
+          userInput: injectedMessageText,
           attemptedExecutive: (window as any).__lastElizaExecutive
         });
 
@@ -2169,7 +2731,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
           description: errorContent.substring(0, 200),
           activity_type: 'error_diagnostics',
           status: 'completed',
-          metadata: { userInput: messageText } as any,
+          metadata: { userInput: injectedMessageText } as any,
           mentioned_to_user: true
         });
       } catch (logError) {
@@ -2223,7 +2785,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
     // Add a success message to chat
     const successMessage: UnifiedMessage = {
       id: `success-${Date.now()}`,
-      content: 'Great! Your API key has been validated and saved. Full AI capabilities have been restored. How can I help you?',
+      content: language === 'es' ? '¡Genial! Su clave API ha sido validada y guardada. Se han restaurado todas las capacidades de IA. ¿Cómo puedo ayudarle?' : 'Great! Your API key has been validated and saved. Full AI capabilities have been restored. How can I help you?',
       sender: 'assistant',
       timestamp: new Date()
     };
@@ -2234,14 +2796,31 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   return (
     <div className="relative overflow-visible">
       <ProcessingStickyNotes notes={processingNotes} />
-      <Card className={`bg-card border-border/60 flex flex-col h-[500px] sm:h-[600px] ${className}`}>
+      
+      {/* Responsive container for floating papers */}
+      <div className="fixed right-2 top-[22rem] z-40 flex w-[130px] flex-col gap-4 sm:static sm:block sm:w-auto">
+        <FocusAreasPaper
+          items={activePriorityChecklist.length > 0 ? activePriorityChecklist : focusAreaBullets.map((bullet) => ({
+            id: `focus-${activeContextScopeId}-${bullet.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 32)}`,
+            text: bullet,
+            completed: false,
+            updatedAt: 0,
+          }))}
+          onToggle={togglePriorityChecklistItem}
+        />
+        <ContextTodoPaper
+          todos={activeContextTodos}
+          onToggle={toggleContextTodo}
+        />
+      </div>
+      <Card className={`flex h-[calc(100vh-6rem)] min-h-[640px] flex-col overflow-hidden border-border/60 bg-card shadow-sm ${className}`}>
       {/* Voice Intelligence Toggle */}
       {/* Voice Intelligence Toggle Removed */}
 
       {/* Clean Header */}
-      <div className="px-4 py-3 border-b border-border/60">
-        <div className="flex items-center justify-between gap-2 sm:gap-4">
-          <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
+      <div className="border-b border-border/60 bg-gradient-to-b from-muted/30 to-card px-3 py-3 sm:px-4">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+          <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
             {/* Back button when in executive/council mode */}
             {onBack && (
               <Button
@@ -2273,31 +2852,55 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
                 <>
                   <h3 className="font-medium text-foreground text-sm sm:text-base truncate flex items-center gap-2">
                     <Users className="h-4 w-4 text-primary" />
-                    Executive Council
+                    {language === 'es' ? 'Consejo Ejecutivo' : 'Executive Council'}
                   </h3>
-                  <p className="text-[11px] text-muted-foreground truncate">All 4 executives deliberating</p>
+                  <p className="text-[11px] text-muted-foreground truncate">{language === 'es' ? 'Los 5 ejecutivos deliberando' : 'All 5 executives deliberating'}</p>
                 </>
               ) : (
                 <>
-                  <h3 className="font-medium text-foreground text-sm sm:text-base truncate">Suite Assistant</h3>
-                  <p className="text-[11px] text-muted-foreground truncate">Enterprise AI</p>
+                  <h3 className="font-medium text-foreground text-sm sm:text-base truncate">{language === 'es' ? 'Asistente Suite' : 'Suite Assistant'}</h3>
+                  <p className="text-[11px] text-muted-foreground truncate">{language === 'es' ? 'IA Empresarial' : 'Enterprise AI'}</p>
                 </>
               )}
             </div>
           </div>
 
-          {/* Unified Input Mode */}
-          <div className="flex bg-muted/30 rounded-lg p-1 gap-1">
-            <Button
-              variant="secondary"
-              size="sm"
-              className="h-6 px-2 text-[10px] sm:text-xs pointer-events-none"
-            >
-              Unified
-            </Button>
+          {/* Unified Badge / Live Camera (multimodal) */}
+          <div className="order-3 flex w-full items-start gap-2 sm:order-none sm:w-auto">
+            {inputMode === 'multimodal' ? (
+              <>
+                <CurrentContextPanel
+                  organizationName={activeOrganizationName}
+                  focusLine={currentContextFocusLine}
+                  modeLabel={currentContextModeLabel}
+                />
+                <LiveCameraProcessor
+                  className="w-full sm:w-[220px] rounded-lg border border-border/50 bg-card/80 p-2"
+                  isEnabled={liveVideoActive}
+                  onEmotionDetected={(emotion, confidence) => {
+                    handleEmotionUpdate([{ name: emotion, score: confidence }], 'facial');
+                  }}
+                  onVisualContextUpdate={(context) => {
+                    const summarized = normalizeStickyText(context)?.slice(0, 90) || '';
+                    setVisualContextSummary(summarized);
+                    console.log("Visual context:", context);
+                  }}
+                />
+              </>
+            ) : (
+              <div className="flex bg-muted/30 rounded-lg p-1 gap-1">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  className="h-6 px-2 text-[10px] sm:text-xs pointer-events-none"
+                >
+                  {language === 'es' ? 'Unificado' : 'Unified'}
+                </Button>
+              </div>
+            )}
           </div>
 
-          <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-1 sm:gap-2">
             {/* Council Mode Toggle with Tooltip */}
             <TooltipProvider>
               <Tooltip>
@@ -2306,20 +2909,48 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
                     onClick={() => setCouncilMode(!councilMode)}
                     variant={councilMode ? 'default' : 'outline'}
                     size="sm"
-                    className="text-xs h-7 px-1.5 sm:px-2 flex-shrink-0"
+                    className={`h-8 px-3 sm:h-9 sm:px-4 gap-2 flex-shrink-0 font-medium ${councilMode ? '' : 'text-muted-foreground'}`}
                   >
-                    <Users className="h-3 w-3 sm:mr-1" />
-                    <span className="hidden sm:inline">{councilMode ? 'Council' : 'Eliza'}</span>
+                    <Users className="h-4 w-4" />
+                    <span className="text-xs sm:text-sm">{councilMode ? (language === 'es' ? 'Consejo' : 'Council') : 'Eliza'}</span>
+                    <span className="sr-only">{councilMode ? (language === 'es' ? 'Modo consejo activado' : 'Council mode enabled') : (language === 'es' ? 'Modo Eliza activado' : 'Eliza mode enabled')}</span>
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom" className="max-w-xs">
                   <p className="font-medium text-sm mb-1">
-                    {councilMode ? 'Council Mode Active' : 'Eliza Mode Active'}
+                    {councilMode ? (language === 'es' ? 'Modo Consejo Activo' : 'Council Mode Active') : (language === 'es' ? 'Modo Eliza Activo' : 'Eliza Mode Active')}
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {councilMode
-                      ? 'Get perspectives from all 4 AI executives (CTO, CSO, CIO, CAO) before a unified response.'
-                      : 'Chat with Eliza directly. Toggle to consult all executives.'}
+                      ? (language === 'es' ? 'Obtenga perspectivas de los 5 ejecutivos de IA (CSO, CTO, CIO, CAO, COO) antes de una respuesta unificada.' : 'Get perspectives from all 5 AI executives (CSO, CTO, CIO, CAO, COO) before a unified response.')
+                      : (language === 'es' ? 'Chatea con Eliza directamente. Cambia para consultar a todos los ejecutivos.' : 'Chat with Eliza directly. Toggle to consult all executives.')}
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    onClick={() => setFullAutonomyEnabled((prev) => !prev)}
+                    variant={fullAutonomyEnabled ? 'default' : 'outline'}
+                    size="sm"
+                    className={`h-8 px-3 sm:h-9 sm:px-4 gap-2 flex-shrink-0 font-medium ${fullAutonomyEnabled ? '' : 'text-muted-foreground'}`}
+                  >
+                    <Bot className="h-4 w-4" />
+                    <span className="text-xs sm:text-sm">{language === 'es' ? 'Autonomía' : 'Autonomy'}</span>
+                    <span className="sr-only">{fullAutonomyEnabled ? (language === 'es' ? 'Desactivar autonomía total' : 'Disable full autonomy') : (language === 'es' ? 'Activar autonomía total' : 'Enable full autonomy')}</span>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="max-w-xs">
+                  <p className="font-medium text-sm mb-1">
+                    {fullAutonomyEnabled ? (language === 'es' ? 'Autonomía Total Activa' : 'Full Autonomy Active') : (language === 'es' ? 'Autonomía Total Desactivada' : 'Full Autonomy Off')}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {language === 'es' 
+                      ? 'Después de cada respuesta del asistente, tienes 60 segundos para responder manualmente. Si estás inactivo, se selecciona automáticamente el mejor prompt rápido.'
+                      : 'After each assistant response, you get 60 seconds to reply manually. If idle, the best quick-prompt is auto-selected.'}
                   </p>
                 </TooltipContent>
               </Tooltip>
@@ -2332,60 +2963,191 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
             {realtimeConnected && (
               <Badge variant="outline" className="text-[10px] hidden sm:flex items-center gap-1 bg-suite-success/10 text-suite-success border-suite-success/30">
                 <Wifi className="h-3 w-3" />
-                <span>Live</span>
+                <span>{language === 'es' ? 'En vivo' : 'Live'}</span>
               </Badge>
             )}
 
-            {/* Clear Conversation Button */}
-            {totalMessageCount > 0 && (
-              <Button
-                onClick={handleClearConversation}
-                variant="ghost"
-                size="sm"
-                className="hidden sm:flex h-7 w-7 sm:h-8 sm:w-8 p-0 text-muted-foreground hover:text-destructive"
-                title="Clear conversation history"
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            )}
+
 
             {/* Voice Toggle */}
             <Button
               onClick={toggleVoiceSynthesis}
-              variant="ghost"
+              variant={voiceEnabled ? 'default' : 'outline'}
               size="sm"
-              className={`h-7 w-7 sm:h-8 sm:w-8 p-0 flex-shrink-0 ${voiceEnabled
-                ? 'text-primary'
+              className={`h-8 px-3 sm:h-9 sm:px-4 gap-2 flex-shrink-0 font-medium ${voiceEnabled
+                ? ''
                 : 'text-muted-foreground'
                 }`}
-              title={`${voiceEnabled ? 'Disable' : 'Enable'} voice`}
+              title={`${voiceEnabled ? (language === 'es' ? 'Desactivar' : 'Disable') : (language === 'es' ? 'Activar' : 'Enable')} ${language === 'es' ? 'voz' : 'voice'}`}
             >
               {voiceEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
+              <span className="text-xs sm:text-sm">{voiceEnabled ? (language === 'es' ? 'Voz On' : 'Voice On') : (language === 'es' ? 'Voz Off' : 'Voice Off')}</span>
             </Button>
           </div>
         </div>
       </div>
 
-      {/* Clean Messages Area */}
-      <div className="flex-1 overflow-hidden">
-        <ScrollArea className="h-full">
-          <div className="space-y-4 p-4 xl:pr-40">
-            {/* Live Camera for Multimodal Mode */}
-            {inputMode === 'multimodal' && (
-              <div className="mb-4">
-                <LiveCameraProcessor
-                  isEnabled={liveVideoActive}
-                  onEmotionDetected={(emotion, confidence) => {
-                    handleEmotionUpdate([{ name: emotion, score: confidence }], 'facial');
-                  }}
-                  onVisualContextUpdate={(context) => {
-                    // Optionally store this context
-                    console.log("Visual context:", context);
-                  }}
-                />
+      {/* Text Input Area (moved to hero/top section) */}
+      <div className="border-b border-border/60 bg-card/80">
+        <div className="space-y-3 p-3 sm:p-4">
+          {/* Attachment Preview */}
+          <AttachmentPreview
+            attachments={attachments}
+            onRemove={removeAttachment}
+            onClear={clearAttachments}
+          />
+
+          <div className="rounded-2xl border border-primary/30 bg-gradient-to-r from-primary/5 via-background to-background p-2 shadow-[0_0_0_1px_rgba(99,102,241,0.08),0_8px_24px_rgba(15,23,42,0.08)] focus-within:border-primary/60 focus-within:shadow-[0_0_0_2px_rgba(99,102,241,0.25),0_10px_28px_rgba(15,23,42,0.12)]">
+            <div className="flex flex-wrap items-end gap-2 sm:flex-nowrap sm:gap-3">
+            {/* File Attachment Button */}
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileSelect}
+              accept="image/*,audio/*,video/*,.pdf,.doc,.docx,.txt,.md,.csv,.json,.yaml,.yml,.js,.ts,.jsx,.tsx,.py,.java,.cpp,.c,.h,.go,.rs,.rb,.php,.sol,.html,.css,.xml,.toml,.ini,.sh,.bat,.ps1"
+              multiple
+              className="hidden"
+            />
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isProcessing || attachments.length >= 5}
+              className="min-h-[44px] min-w-[44px] rounded-xl border border-border/60 hover:bg-muted/50"
+              title="Attach files (max 5)"
+              aria-label="Attach files"
+            >
+              <Paperclip className="h-4 w-4" />
+            </Button>
+
+            {/* Interim Transcript Feedback */}
+            {interimTranscript && (
+              <div className="absolute bottom-full left-0 right-0 p-2 bg-background/80 backdrop-blur-sm text-sm text-muted-foreground animate-pulse border-t border-border">
+                {language === 'es' ? 'Escuchando' : 'Listening'}: "{interimTranscript}..."
               </div>
             )}
 
+            {/* Microphone Button */}
+            <Button
+              variant={isRecording ? "destructive" : "ghost"}
+              size="sm"
+              onClick={toggleRecording}
+              disabled={isProcessing}
+              className={`min-h-[44px] min-w-[44px] rounded-xl border border-border/60 ${isRecording ? 'animate-pulse' : 'hover:bg-muted/50'}`}
+              title={isRecording ? (language === 'es' ? 'Detener escucha' : 'Stop Listening') : (language === 'es' ? 'Iniciar escucha' : 'Start Listening')}
+              aria-label={isRecording ? (language === 'es' ? 'Detener escucha' : 'Stop listening') : (language === 'es' ? 'Iniciar escucha' : 'Start listening')}
+            >
+              {isRecording ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+            </Button>
+
+            <Textarea
+              value={textInput}
+              onChange={(e) => {
+                setTextInput(e.target.value);
+                if (e.target.value.trim().length > 0) {
+                  clearAutoAdvanceTimer();
+                }
+                // If user starts typing while assistant is speaking, interrupt
+                if (isSpeaking && e.target.value.length > 0) {
+                  enhancedTTS.stop();
+                  setIsSpeaking(false);
+                }
+              }}
+              onKeyDown={handleKeyPress}
+              placeholder={
+                needsAPIKey
+                  ? (language === 'es' ? "Configura la clave API para continuar..." : "Configure API key to continue...")
+                  : attachments.length > 0
+                    ? (language === 'es' ? `${attachments.length} archivo${attachments.length > 1 ? 's' : ''} adjunto${attachments.length > 1 ? 's' : ''}` : `${attachments.length} file${attachments.length > 1 ? 's' : ''} attached`)
+                    : (language === 'es' ? "Pregunta cualquier cosa..." : "Ask anything...")
+              }
+              className="min-h-[52px] max-h-48 flex-1 resize-y rounded-xl border-primary/40 bg-background px-4 py-3 text-sm shadow-inner focus-visible:ring-2 focus-visible:ring-primary/40"
+              disabled={isProcessing}
+            />
+            <Button
+              onClick={() => handleSendMessage()}
+              disabled={(!textInput.trim() && attachments.length === 0) || isProcessing}
+              size="sm"
+              className="min-h-[44px] min-w-[44px] rounded-xl px-4"
+              aria-label="Send message"
+            >
+              <Send className="h-4 w-4" />
+            </Button>
+            </div>
+          </div>
+
+          {/* Quick Response Buttons */}
+          <QuickResponseButtons
+            onQuickResponse={(message) => handleSendMessage(message)}
+            disabled={isProcessing}
+            lastMessageRole={messages.length === 0 ? null : messages[messages.length - 1].sender === 'user' ? 'user' : 'assistant'}
+            hasUserEngaged={hasUserEngaged}
+            hasPastConversations={conversationSummaries.length > 0 || totalMessageCount > 0}
+            lastMessageContent={messages.length > 0 ? messages[messages.length - 1].content : undefined}
+            lastExecutive={messages.length > 0 ? (messages[messages.length - 1] as any).executive : undefined}
+            turnCount={messages.length}
+            councilMode={councilMode}
+            fullAutonomyEnabled={fullAutonomyEnabled}
+          />
+        </div>
+      </div>
+
+      {/* Top chat status bars for inverted chat layout */}
+      {(fullAutonomyEnabled && autoAdvanceCountdown !== null) || isProcessing ? (
+        <div className="px-4 pb-2 space-y-2">
+          {fullAutonomyEnabled && autoAdvanceCountdown !== null && (
+            <div className="animate-fade-in">
+              <div className="bg-primary/10 border border-primary/30 rounded-xl p-3">
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <div className="flex items-center gap-2 text-xs text-primary font-medium">
+                    <span>🤖</span>
+                    <span>{language === 'es' ? `La Autonomía Total seleccionará una acción rápida en ${autoAdvanceCountdown}s…` : `Full Autonomy auto-selects a quick action in ${autoAdvanceCountdown}s…`}</span>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-6 px-2 text-xs"
+                    onClick={clearAutoAdvanceTimer}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+                <div className="w-full bg-primary/20 rounded-full h-1">
+                  <div
+                    className="bg-primary h-1 rounded-full transition-all duration-1000"
+                    style={{ width: `${(1 - autoAdvanceCountdown / FULL_AUTONOMY_AUTO_ADVANCE_SECONDS) * 100}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {isProcessing && (
+            <div className="flex justify-start animate-fade-in">
+              <div className="bg-muted/50 text-foreground p-3 rounded-xl rounded-bl-sm border border-border/40">
+                <div className="flex items-center gap-3">
+                  <div className="flex space-x-1">
+                    <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce"></div>
+                    <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                    <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                  </div>
+                  <div>
+                    <span className="text-xs text-muted-foreground">Processing...</span>
+                    <p className="mt-1 hidden text-[11px] text-muted-foreground/80 xl:block">
+                      Check the sticky notes on the right for Eliza&apos;s progress.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      ) : null}
+
+      {/* Clean Messages Area */}
+      <div className="flex-1 overflow-hidden">
+        <ScrollArea ref={scrollAreaRef} className="h-full">
+          <div className="space-y-4 p-4 xl:pr-40">
             {/* Office Clerk Loading Progress */}
             {officeClerkProgress && officeClerkProgress.status !== 'idle' && officeClerkProgress.status !== 'ready' && (
               <div className="bg-muted/50 border border-primary/30 rounded-lg p-4 space-y-3 animate-fade-in">
@@ -2421,21 +3183,6 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
               </div>
             )}
 
-            {/* Load Previous Conversation Button */}
-            {hasMoreMessages && totalMessageCount > 0 && (
-              <div className="flex justify-center">
-                <Button
-                  onClick={loadMoreMessages}
-                  disabled={loadingMoreMessages}
-                  variant="outline"
-                  size="sm"
-                  className="text-xs"
-                >
-                  {loadingMoreMessages ? 'Loading...' : `View Previous Conversation (${totalMessageCount} messages)`}
-                </Button>
-              </div>
-            )}
-
             {/* Conversation Summary Context (only show if user hasn't loaded messages) */}
             {conversationSummaries.length > 0 && !messages.some(m => m.id !== 'greeting') && (
               <div className="bg-muted/30 border border-border/30 rounded-lg p-3 mb-2">
@@ -2446,77 +3193,41 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
               </div>
             )}
 
-            {messages.map((message) => (
-              <ChatMessage key={message.id} message={message} />
+            {[...messages].reverse().map((message, index) => (
+              <ChatMessage 
+                key={message.id} 
+                message={message} 
+                isLatest={index === 0}
+              />
             ))}
 
-            {/* 🚀 Auto-Advance Banner — shown during council countdown */}
-            {councilMode && autoAdvanceCountdown !== null && (
-              <div className="flex justify-center animate-fade-in">
-                <div className="bg-primary/10 border border-primary/30 rounded-xl p-3 max-w-[90%] w-full">
-                  <div className="flex items-center justify-between gap-3 mb-2">
-                    <div className="flex items-center gap-2 text-xs text-primary font-medium">
-                      <span>👑</span>
-                      <span>Lead Executive advancing in {autoAdvanceCountdown}s…</span>
-                    </div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-6 px-2 text-xs"
-                      onClick={() => {
-                        if (autoAdvanceTimerRef.current) {
-                          clearInterval(autoAdvanceTimerRef.current);
-                          autoAdvanceTimerRef.current = null;
-                        }
-                        setAutoAdvanceCountdown(null);
-                        setAutoAdvancePaused(true);
-                      }}
-                    >
-                      ⏸ Pause
-                    </Button>
-                  </div>
-                  <div className="w-full bg-primary/20 rounded-full h-1">
-                    <div
-                      className="bg-primary h-1 rounded-full transition-all duration-1000"
-                      style={{ width: `${(1 - autoAdvanceCountdown / 10) * 100}%` }}
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {councilMode && autoAdvancePaused && !isProcessing && (
-              <div className="flex justify-center">
+            {/* Load Previous Conversation & Clear History Buttons */}
+            {totalMessageCount > 0 && (
+              <div className="flex flex-col items-center gap-2 pt-2">
+                {hasMoreMessages && (
+                  <Button
+                    onClick={loadMoreMessages}
+                    disabled={loadingMoreMessages}
+                    variant="outline"
+                    size="sm"
+                    className="text-xs"
+                  >
+                    {loadingMoreMessages ? 'Loading...' : `View Older Conversation (${totalMessageCount} messages)`}
+                  </Button>
+                )}
                 <Button
+                  onClick={handleClearConversation}
+                  variant="ghost"
                   size="sm"
-                  variant="outline"
-                  className="text-xs gap-1 border-primary/30 text-primary"
-                  onClick={() => setAutoAdvancePaused(false)}
+                  className="text-xs text-muted-foreground hover:text-destructive flex items-center gap-1.5"
+                  title={language === 'es' ? 'Borrar historial de conversación' : 'Clear conversation history'}
                 >
-                  ▶ Resume Auto-Advance
+                  <Trash2 className="h-3.5 w-3.5" />
+                  <span>{language === 'es' ? 'Borrar historial' : 'Clear history'}</span>
                 </Button>
               </div>
             )}
 
-            {isProcessing && (
-              <div className="flex justify-start animate-fade-in">
-                <div className="bg-muted/50 text-foreground p-3 rounded-xl rounded-bl-sm border border-border/40">
-                  <div className="flex items-center gap-3">
-                    <div className="flex space-x-1">
-                      <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce"></div>
-                      <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                      <div className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                    </div>
-                    <div>
-                      <span className="text-xs text-muted-foreground">Processing...</span>
-                      <p className="mt-1 hidden text-[11px] text-muted-foreground/80 xl:block">
-                        Check the sticky notes on the right for Eliza's progress.
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
             <div ref={messagesEndRef} />
           </div>
         </ScrollArea>
@@ -2534,104 +3245,6 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
         )}
       </div>
 
-      {/* Text Input Area */}
-      <div className="border-t border-border/60 bg-card/50">
-        <div className="p-4">
-          {/* Attachment Preview */}
-          <AttachmentPreview
-            attachments={attachments}
-            onRemove={removeAttachment}
-            onClear={clearAttachments}
-          />
-
-          <div className="flex gap-3 items-center">
-
-
-
-
-            {/* File Attachment Button */}
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={handleFileSelect}
-              accept="image/*,audio/*,video/*,.pdf,.doc,.docx,.txt,.md,.csv,.json,.yaml,.yml,.js,.ts,.jsx,.tsx,.py,.java,.cpp,.c,.h,.go,.rs,.rb,.php,.sol,.html,.css,.xml,.toml,.ini,.sh,.bat,.ps1"
-              multiple
-              className="hidden"
-            />
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={isProcessing || attachments.length >= 5}
-              className="rounded-full min-h-[48px] min-w-[48px] hover:bg-muted/50"
-              title="Attach files (max 5)"
-            >
-              <Paperclip className="h-4 w-4" />
-            </Button>
-
-            {/* Interim Transcript Feedback */}
-            {interimTranscript && (
-              <div className="absolute bottom-full left-0 right-0 p-2 bg-background/80 backdrop-blur-sm text-sm text-muted-foreground animate-pulse border-t border-border">
-                Listening: "{interimTranscript}..."
-              </div>
-            )}
-
-            {/* Microphone Button */}
-            <Button
-              variant={isRecording ? "destructive" : "ghost"}
-              size="sm"
-              onClick={toggleRecording}
-              disabled={isProcessing}
-              className={`rounded-full min-h-[48px] min-w-[48px] ${isRecording ? 'animate-pulse' : 'hover:bg-muted/50'}`}
-              title={isRecording ? "Stop Listening" : "Start Listening"}
-            >
-              {isRecording ? <MicOff className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
-            </Button>
-
-            <Textarea
-              value={textInput}
-              onChange={(e) => {
-                setTextInput(e.target.value);
-                // If user starts typing while assistant is speaking, interrupt
-                if (isSpeaking && e.target.value.length > 0) {
-                  enhancedTTS.stop();
-                  setIsSpeaking(false);
-                }
-              }}
-              onKeyDown={handleKeyPress}
-              placeholder={
-                needsAPIKey
-                  ? "Configure API key to continue..."
-                  : attachments.length > 0
-                    ? `${attachments.length} file${attachments.length > 1 ? 's' : ''} attached`
-                    : "Ask anything..."
-              }
-              className="flex-1 rounded-lg border-border/60 bg-background min-h-[44px] max-h-48 text-sm px-4 py-3 resize-y"
-              disabled={isProcessing}
-            />
-            <Button
-              onClick={() => handleSendMessage()}
-              disabled={(!textInput.trim() && attachments.length === 0) || isProcessing}
-              size="sm"
-              className="rounded-lg min-h-[44px] min-w-[44px]"
-            >
-              <Send className="h-4 w-4" />
-            </Button>
-          </div>
-
-          {/* Quick Response Buttons */}
-          <QuickResponseButtons
-            onQuickResponse={(message) => handleSendMessage(message)}
-            disabled={isProcessing}
-            lastMessageRole={messages.length === 0 ? null : messages[messages.length - 1].sender === 'user' ? 'user' : 'assistant'}
-            hasUserEngaged={hasUserEngaged}
-            hasPastConversations={conversationSummaries.length > 0 || totalMessageCount > 0}
-            lastMessageContent={messages.length > 0 ? messages[messages.length - 1].content : undefined}
-            lastExecutive={messages.length > 0 ? (messages[messages.length - 1] as any).executive : undefined}
-            turnCount={messages.length}
-          />
-        </div>
-      </div>
     </Card>
     </div>
   );

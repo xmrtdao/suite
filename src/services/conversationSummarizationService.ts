@@ -36,7 +36,7 @@ export class ConversationSummarizationService {
     timestamp: Date;
   }>): Promise<string> {
     try {
-      const model = this.genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
+      const model = this.genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
       
       // Format messages for summarization
       const conversationText = messages.map(msg => 

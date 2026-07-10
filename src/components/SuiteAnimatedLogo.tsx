@@ -164,7 +164,7 @@ export function SuiteAnimatedLogo({
           "font-display font-bold tracking-tight bg-gradient-to-r from-foreground via-foreground to-foreground/70 bg-clip-text text-transparent",
           config.text
         )}>
-          SUPACLAW
+          SUITE
         </span>
       )}
     </div>

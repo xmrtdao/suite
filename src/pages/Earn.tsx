@@ -6,24 +6,23 @@ import { IdeaSubmissionForm } from "@/components/IdeaSubmissionForm";
 import { IdeaDashboard } from "@/components/IdeaDashboard";
 import { ContributorDashboard } from "@/components/ContributorDashboard";
 import { TreasuryStats } from "@/components/TreasuryStats";
-import { ReferralDashboard } from "@/components/ReferralDashboard";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
+import { ReferralDashboard } from "@/components/ReferralDashboard";
 import { useWallet } from "@/hooks/useWallet";
 
 const Earn = () => {
   const { wallet } = useWallet();
-
   return (
     <>
       <SEOHead
         title="Earn XMRT Tokens | Suite"
-        description="Earn XMRT tokens through code contributions, mining, device charging, idea submissions, or referrals. Multiple pathways to participate in the Suite ecosystem."
+        description="Earn XMRT tokens through code contributions, mining, device charging, or idea submissions. Multiple pathways to participate in the Suite ecosystem."
         image="/og-image-contributors.svg"
         url="/earn"
-        keywords="XMRT tokens, crypto rewards, GitHub contributions, mining, proof of participation, community treasury, referrals"
+        keywords="XMRT tokens, crypto rewards, GitHub contributions, mining, proof of participation, community treasury"
         twitterLabel1="💰 Earn"
-        twitterData1="5 Ways"
+        twitterData1="4 Ways"
         twitterLabel2="⚡ Rewards"
         twitterData2="Real-time"
       />
@@ -34,7 +33,7 @@ const Earn = () => {
             Earn & Contribute
           </h1>
           <p className="text-muted-foreground max-w-2xl mx-auto">
-            Multiple pathways to earn XMRT tokens: contribute code, mine crypto, charge your device, refer miners, or submit ideas
+            Multiple pathways to earn XMRT tokens: contribute code, mine crypto, charge your device, or submit ideas
           </p>
         </div>
 
@@ -48,6 +47,10 @@ const Earn = () => {
               <DollarSign className="w-4 h-4" />
               <span className="hidden sm:inline">Treasury</span>
             </TabsTrigger>
+            <TabsTrigger value="referrals" className="gap-2">
+              <Share2 className="w-4 h-4" />
+              <span className="hidden sm:inline">Referrals</span>
+            </TabsTrigger>
             <TabsTrigger value="ideas" className="gap-2">
               <Lightbulb className="w-4 h-4" />
               <span className="hidden sm:inline">Ideas</span>
@@ -55,10 +58,6 @@ const Earn = () => {
             <TabsTrigger value="community" className="gap-2">
               <Users className="w-4 h-4" />
               <span className="hidden sm:inline">Community</span>
-            </TabsTrigger>
-            <TabsTrigger value="referrals" className="gap-2">
-              <Share2 className="w-4 h-4" />
-              <span className="hidden sm:inline">Referrals</span>
             </TabsTrigger>
           </TabsList>
 
@@ -104,6 +103,27 @@ const Earn = () => {
             </div>
           </TabsContent>
 
+          {/* Referrals Tab */}
+          <TabsContent value="referrals">
+            {wallet?.address ? (
+              <ReferralDashboard walletAddress={wallet.address} />
+            ) : (
+              <Card className="border-border bg-card">
+                <CardContent className="flex flex-col items-center justify-center py-12">
+                  <Share2 className="w-12 h-12 text-muted-foreground mb-4" />
+                  <h3 className="text-lg font-medium mb-2">Connect Your Wallet</h3>
+                  <p className="text-muted-foreground text-center max-w-md mb-4">
+                    Connect your wallet to generate a referral code and start
+                    earning 20% commission on referred miners
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    Use the wallet connection button in the navigation bar
+                  </p>
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
+
           {/* Ideas Tab */}
           <TabsContent value="ideas">
             <IdeaSubmissionForm />
@@ -112,26 +132,6 @@ const Earn = () => {
           {/* Community Tab */}
           <TabsContent value="community">
             <IdeaDashboard />
-          </TabsContent>
-
-          {/* Referrals Tab */}
-          <TabsContent value="referrals">
-            <div className="space-y-4">
-              {wallet.isConnected && wallet.address ? (
-                <ReferralDashboard walletAddress={wallet.address} />
-              ) : (
-                <Card className="border-border">
-                  <CardContent className="flex flex-col items-center justify-center py-12 text-center">
-                    <Share2 className="h-12 w-12 text-muted-foreground mb-4 opacity-40" />
-                    <h3 className="text-lg font-semibold mb-2">Connect Your Wallet</h3>
-                    <p className="text-sm text-muted-foreground max-w-md">
-                      Connect your wallet to get a referral code and start earning 20% commission
-                      on every miner you refer.
-                    </p>
-                  </CardContent>
-                </Card>
-              )}
-            </div>
           </TabsContent>
         </Tabs>
       </div>

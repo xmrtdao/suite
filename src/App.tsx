@@ -19,9 +19,8 @@ import MiningDashboard from "./pages/MiningDashboard";
 import Profile from "./pages/Profile";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
 import TermsOfService from "./pages/TermsOfService";
-import ExecutiveDashboard from "./pages/ExecutiveDashboard";
-import AuthCallback from "./pages/AuthCallback";
 import InboxPage from "./pages/Inbox";
+import AuthCallback from "./pages/AuthCallback";
 
 const queryClient = new QueryClient();
 
@@ -40,7 +39,7 @@ const App = () => (
               Skip to main content
             </a>
 
-            <BrowserRouter basename="/suite">
+            <BrowserRouter>
               <Routes>
                 {/* Public routes */}
                 <Route path="/" element={<Landing />} />
@@ -59,7 +58,6 @@ const App = () => (
                   <Route path="/credentials" element={<Credentials />} />
                   <Route path="/profile" element={<Profile />} />
                   <Route path="/admin" element={<Admin />} />
-                  <Route path="/executives" element={<ExecutiveDashboard />} />
                   <Route path="/inbox" element={<InboxPage />} />
                   {/* Legacy redirects */}
                   <Route path="/treasury" element={<Earn />} />

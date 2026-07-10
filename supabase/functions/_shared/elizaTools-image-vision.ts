@@ -3,6 +3,122 @@
  * Appends to existing ELIZA_TOOLS array
  */
 
+// ====================================================================
+// 🎨 MUAPI MEDIA GENERATION (PRIMARY)
+// ====================================================================
+const MUAPI_MEDIA_TOOLS = [
+  {
+    type: 'function',
+    function: {
+      name: 'muapi_generate_media',
+      description: '🎨 PRIMARY MEDIA GENERATOR — Generate images and videos via Supabase edge functions (muapi-media-generator / superduper-content-media) backed by Muapi AI. Fast ($0.03-$0.07 images, $0.60-$1.50 videos), reliable, returns permanent CDN URLs. Use this FIRST for any image/video generation.',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['generate_image', 'generate_video', 'image_to_image'],
+            description: 'Type: generate_image (default), generate_video, image_to_image'
+          },
+          prompt: {
+            type: 'string',
+            description: 'Detailed description of the image or video. Be specific about subjects, setting, style, colors, motion.'
+          },
+          style: {
+            type: 'string',
+            description: 'Optional: realistic, cinematic, anime, abstract, minimal, futuristic, retro, photorealistic, artistic, logo, infographic'
+          },
+          aspect_ratio: {
+            type: 'string',
+            enum: ['1:1', '16:9', '9:16', '4:3', '3:4'],
+            description: 'Image aspect ratio (default: 1:1). 16:9=widescreen, 9:16=vertical'
+          },
+          duration_seconds: {
+            type: 'number',
+            enum: [5, 6, 7, 8],
+            description: 'Video duration 5-8s (default: 5). Max 8s per clip.'
+          }
+        },
+        required: ['action', 'prompt']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'muapi_list_models',
+      description: '📋 LIST AVAILABLE MEDIA MODELS — Get full catalog of Muapi image/video models with pricing and capabilities.',
+      parameters: {
+        type: 'object',
+        properties: {
+          type: {
+            type: 'string',
+            enum: ['image', 'video', 'all'],
+            description: 'Filter: image, video, or all (default: all)'
+          }
+        }
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'muapi_estimate_cost',
+      description: '💰 ESTIMATE GENERATION COST — Get pricing before spending credits.',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: {
+            type: 'string',
+            enum: ['generate_image', 'generate_video', 'image_to_image', 'generate_slideshow'],
+            description: 'Generation action type'
+          },
+          model: {
+            type: 'string',
+            description: 'Optional: specific model name'
+          },
+          count: {
+            type: 'number',
+            description: 'Number of items (default: 1)'
+          }
+        },
+        required: ['action']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'muapi_generate_slideshow',
+      description: '🎬 GENERATE IMAGE SLIDESHOW — Create video slideshow from multiple generated images with transitions. For explainer videos, product showcases, storytelling.',
+      parameters: {
+        type: 'object',
+        properties: {
+          scenes: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Array of scene descriptions (3-10 recommended)'
+          },
+          style: {
+            type: 'string',
+            description: 'Optional: cinematic, clean, minimal, futuristic, retro, documentary'
+          },
+          transition: {
+            type: 'string',
+            enum: ['fade', 'slide', 'zoom', 'dissolve'],
+            description: 'Transition style (default: fade)'
+          },
+          duration_per_scene: {
+            type: 'number',
+            description: 'Seconds per scene 3-10 (default: 4)'
+          }
+        },
+        required: ['scenes']
+      }
+    }
+  }
+];
+
 // NEW IMAGE GENERATION AND VISION TOOLS
 export const ELIZA_IMAGE_VISION_TOOLS = [
   {
@@ -183,8 +299,9 @@ export const ELIZA_IMAGE_VISION_TOOLS = [
   }
 ];
 
-// Export combined tools array
+// Export combined tools array (includes Muapi primary tools + Vertex fallback tools)
 export const ELIZA_TOOLS_WITH_VISION = [
   ...ELIZA_TOOLS,
+  ...MUAPI_MEDIA_TOOLS,
   ...ELIZA_IMAGE_VISION_TOOLS
 ];

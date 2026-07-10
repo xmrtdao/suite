@@ -1,10 +1,11 @@
 /**
  * Unified AI Fallback Service - GOOGLE CLOUD OAUTH2 PRIMARY VERSION
  * Provider cascade:
- *   1. Vertex AI via Service Account JWT (OAuth2) — primary, most reliable
- *   2. Vertex AI via Gemini API key — fallback
- *   3. DeepSeek V3
- *   4. Kimi
+ *   1. Ollama (Local/Self-hosted) — primary
+ *   2. Vertex AI via Service Account JWT (OAuth2) — most reliable cloud
+ *   3. Vertex AI via Gemini API key — fallback
+ *   4. DeepSeek V3
+ *   5. Kimi K2
  *
  * TIMEOUT GUARDS: Per-provider timeouts prevent cascade hangs
  * FAST-FAIL: 402/429 errors skip immediately to next provider
@@ -15,12 +16,12 @@ import { ELIZA_TOOLS } from './elizaTools.ts';
 
 // Per-provider timeout configuration (ms)
 const PROVIDER_TIMEOUTS = {
-  vertexOAuth: 12000, // Vertex AI via Service Account JWT (primary)
+  ollama: 15000,      // Ollama (primary, might be slower on cold start)
+  vertexOAuth: 12000, // Vertex AI via Service Account JWT
   gemini: 8000,       // Gemini API key fallback
   vertexai: 8000,     // Vertex AI Express Mode
   deepseek: 10000,    // Slightly longer for reasoning
   kimi: 8000,
-  ollamaPro: 15000,   // Ollama Pro cloud (OpenAI-compatible)
   embedding: 10000,
 };
 const RESPONSE_MAX_TOKENS = parseInt(Deno.env.get('RESPONSE_MAX_TOKENS') || '16000');
@@ -157,7 +158,7 @@ async function callVertexWithServiceAccount(
 ): Promise<ProviderResult> {
   const projectId = Deno.env.get('GCP_PROJECT_ID') || Deno.env.get('GOOGLE_CLOUD_PROJECT_ID');
   const region = Deno.env.get('GCP_REGION') || 'us-central1';
-  const model = options.model || 'gemini-2.5-flash';
+  const model = options.model || 'gemini-2.0-flash';
 
   if (!projectId) {
     return { success: false, provider: 'vertex-sa', error: 'GCP_PROJECT_ID not configured' };
@@ -297,109 +298,14 @@ function checkFastFail(response: Response, provider: string): string | null {
     return '402 Payment Required - out of credits';
   }
   if (response.status === 429) {
-    console.warn(`⏱️ ${provider} rate limited (429) - skipping to next provider`);
-    return '429 Rate Limited';
+    console.warn(`⏳ ${provider} rate limited (429) - skipping to next provider`);
+    return '429 Too Many Requests - rate limited';
   }
   return null;
 }
 
-export interface UnifiedAIOptions {
-  model?: string;
-  temperature?: number;
-  maxTokens?: number;
-  max_tokens?: number; // Alias for compatibility
-  systemPrompt?: string;
-  tools?: Array<any>;
-  preferProvider?: 'gemini' | 'vertexai' | 'deepseek' | 'kimi'; // Gemini now first
-  // Eliza intelligence context
-  userContext?: any;
-  miningStats?: any;
-  executiveName?: string;
-  useFullElizaContext?: boolean; // Default true - use full Eliza intelligence
-}
-
-export interface AIMessage {
-  role: 'system' | 'user' | 'assistant';
-  content: string;
-  tool_calls?: any;
-}
-
-interface ProviderResult {
-  success: boolean;
-  content?: string;
-  message?: any;
-  provider: string;
-  error?: string;
-}
-
-// Action-oriented directive prepended to ALL fallback prompts
-const ACTION_DIRECTIVE = `
-CRITICAL RESPONSE RULES (HIGHEST PRIORITY):
-1. NEVER explain what you're going to do - JUST DO IT
-2. Call tools IMMEDIATELY when user asks for information
-3. Present results NATURALLY as if you already knew the answer
-4. Keep responses CONCISE - no unnecessary preamble (1-3 sentences for simple queries)
-5. Only mention tools/functions when there's an ERROR to report
-6. User should NEVER know you're calling tools - be seamless
-`;
-
 /**
- * Get the effective system prompt - uses full Eliza prompt if not provided
- * ENHANCED: Prepends action-oriented directive AND appends executive persona override
- */
-function getEffectiveSystemPrompt(options: UnifiedAIOptions): string {
-  // 1. If strict manual prompt provided (long), use it directly (bypass Eliza injection)
-  if (options.systemPrompt && options.systemPrompt.length > 2000) {
-    return ACTION_DIRECTIVE + '\n\n' + options.systemPrompt;
-  }
-
-  if (options.useFullElizaContext === false) {
-    // Explicitly disabled - still add action directive for conciseness
-    return ACTION_DIRECTIVE + '\n\n' + (options.systemPrompt || 'You are a helpful AI assistant.');
-  }
-
-  // DEFAULT: Use full Eliza system prompt for intelligence parity
-  console.log('🧠 Enriching with full Eliza system prompt + action directive...');
-  const elizaPrompt = generateElizaSystemPrompt(
-    options.userContext,
-    options.miningStats,
-    null,
-    'eliza',
-    options.executiveName || 'Chief Strategy Officer'
-  );
-
-  // CRITICAL: If a specific persona/prompt is provided (e.g. "You are the CTO"), 
-  // APPEND it to the end to OVERRIDE the default Eliza identity while keeping capabilities.
-  if (options.systemPrompt) {
-    return ACTION_DIRECTIVE + '\n\n' + elizaPrompt + '\n\n' +
-      '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
-      '👤 EXECUTIVE PERSONA OVERRIDE (ADOPT THIS IDENTITY)\n' +
-      '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n' +
-      options.systemPrompt;
-  }
-
-  return ACTION_DIRECTIVE + '\n\n' + elizaPrompt;
-}
-
-/**
- * Get effective tools - uses ELIZA_TOOLS if not provided
- */
-function getEffectiveTools(options: UnifiedAIOptions): any[] {
-  if (options.tools && options.tools.length > 0) {
-    return options.tools;
-  }
-
-  if (options.useFullElizaContext === false) {
-    return [];
-  }
-
-  // DEFAULT: Use full Eliza tools for capability parity
-  console.log('🔧 Including all ELIZA_TOOLS for fallback provider...');
-  return ELIZA_TOOLS;
-}
-
-/**
- * Call Gemini API directly with tool calling support - NOW PRIMARY PROVIDER
+ * Call Gemini API directly with tool calling support
  */
 async function callGemini(
   messages: AIMessage[],
@@ -412,12 +318,13 @@ async function callGemini(
   }
 
   try {
-    console.log('💎 PRIMARY PROVIDER: Attempting Gemini AI with full Eliza context...');
+    console.log('💎 SECONDARY: Gemini AI via API Key...');
 
     const effectiveSystemPrompt = getEffectiveSystemPrompt(options);
     const effectiveTools = getEffectiveTools(options);
 
-    // Convert messages to Gemini format (excluding system messages)
+    const model = options.model || 'gemini-2.0-flash';
+    // Transform to Gemini format (excluding system messages)
     const userMessages = messages.filter(m => m.role !== 'system');
     const contents = userMessages.map(msg => ({
       role: msg.role === 'assistant' ? 'model' : 'user',
@@ -435,21 +342,21 @@ async function callGemini(
       },
     };
 
-    // Add ALL tool definitions for Gemini (convert to Gemini format)
+    // Include tools for Gemini
     if (effectiveTools.length > 0) {
-      console.log(`📊 Gemini: Passing ${effectiveTools.length} tools (full array)`);
       requestBody.tools = [{
         functionDeclarations: effectiveTools.map(tool => ({
           name: tool.function.name,
           description: tool.function.description,
-          parameters: tool.function.parameters
+          parameters: tool.function.parameters,
         }))
       }];
     }
 
-    // CRITICAL FIX: Updated from gemini-2.0-flash to gemini-2.5-flash
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
+
     const response = await fetchWithTimeout(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+      endpoint,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -458,11 +365,8 @@ async function callGemini(
       PROVIDER_TIMEOUTS.gemini
     );
 
-    // Fast-fail for credit exhaustion
     const fastFailError = checkFastFail(response, 'gemini');
-    if (fastFailError) {
-      return { success: false, provider: 'gemini', error: fastFailError };
-    }
+    if (fastFailError) return { success: false, provider: 'gemini', error: fastFailError };
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -474,16 +378,14 @@ async function callGemini(
     const parts = data.candidates?.[0]?.content?.parts;
 
     if (!parts || parts.length === 0) {
-      return { success: false, provider: 'gemini', error: 'No content in response' };
+      return { success: false, provider: 'gemini', error: 'No content in Gemini response' };
     }
 
-    console.log('✅ PRIMARY PROVIDER: Gemini AI successful with Eliza intelligence');
+    console.log('✅ Gemini AI successful');
 
-    // Check for function calls (Gemini's tool call format)
     const functionCall = parts.find((p: any) => p.functionCall);
     if (functionCall) {
       console.log(`🔧 Gemini returned function call: ${functionCall.functionCall.name}`);
-      // Convert to OpenAI format for compatibility
       return {
         success: true,
         provider: 'gemini',
@@ -517,35 +419,31 @@ async function callVertex(
   messages: AIMessage[],
   options: UnifiedAIOptions = {}
 ): Promise<ProviderResult> {
-  // Use existing implementation but wrap with fallback logic
-  // For now, simpler implementation:
   const VERTEX_API_KEY = Deno.env.get('VERTEX_API_KEY') || Deno.env.get('GEMINI_API_KEY');
 
   if (!VERTEX_API_KEY) {
     return { success: false, provider: 'vertex', error: 'VERTEX_API_KEY not configured' };
   }
 
-  // NOTE: In a real implementation, this would use the Vertex AI REST API
-  // For now, we'll reuse the Gemini implementation but log it as Vertex attempt
-  // since they often use the same models/keys in this setup
   return callGemini(messages, options);
 }
 
 /**
- * Call Lovable (via OpenRouter/Anthropic) - TERTIARY PROVIDER
+ * Call Ollama (Local/Self-hosted) - PRIMARY PROVIDER
  */
-async function callLovable(
+async function callOllama(
   messages: AIMessage[],
   options: UnifiedAIOptions = {}
 ): Promise<ProviderResult> {
-  const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY') || Deno.env.get('OPENROUTER_API_KEY');
+  const OLLAMA_API_KEY = Deno.env.get('OLLAMA_API_KEY');
+  const OLLAMA_HOST = Deno.env.get('OLLAMA_HOST') || 'https://ollama.xmrt.pro';
 
-  if (!LOVABLE_API_KEY) {
-    return { success: false, provider: 'lovable', error: 'LOVABLE_API_KEY not configured' };
+  if (!OLLAMA_API_KEY) {
+    return { success: false, provider: 'ollama', error: 'OLLAMA_API_KEY not configured' };
   }
 
   try {
-    console.log('💜 TERTIARY PROVIDER: Attempting Lovable (Claude 3.5 Sonnet) with full Eliza context...');
+    console.log('🦙 PRIMARY PROVIDER: Attempting Ollama with full Eliza context...');
 
     const effectiveSystemPrompt = getEffectiveSystemPrompt(options);
     const effectiveTools = getEffectiveTools(options);
@@ -558,64 +456,56 @@ async function callLovable(
     const maxTokens = options.maxTokens || options.max_tokens || RESPONSE_MAX_TOKENS;
 
     const requestBody: any = {
-      model: 'anthropic/claude-3.5-sonnet', // The "Lovable" brain
+      model: options.model || 'llama3.1', // Default Ollama model
       messages: requestMessages,
-      temperature: options.temperature || 0.7,
-      max_tokens: maxTokens,
+      stream: false,
+      options: {
+        temperature: options.temperature || 0.7,
+        num_predict: maxTokens,
+      }
     };
 
-    // Include ALL tools for Lovable
     if (effectiveTools.length > 0) {
-      console.log(`📊 Lovable: Passing ${effectiveTools.length} tools (full array)`);
       requestBody.tools = effectiveTools;
-      requestBody.tool_choice = 'auto';
     }
 
     const response = await fetchWithTimeout(
-      'https://openrouter.ai/api/v1/chat/completions',
+      `${OLLAMA_HOST}/api/chat`,
       {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+          'Authorization': `Bearer ${OLLAMA_API_KEY}`,
           'Content-Type': 'application/json',
-          'HTTP-Referer': 'https://xmrt.pro',
-          'X-Title': 'XMRT Lovable'
         },
         body: JSON.stringify(requestBody),
       },
-      PROVIDER_TIMEOUTS.lovable
+      PROVIDER_TIMEOUTS.ollama
     );
-
-    // Fast-fail
-    const fastFailError = checkFastFail(response, 'lovable');
-    if (fastFailError) {
-      return { success: false, provider: 'lovable', error: fastFailError };
-    }
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.warn(`⚠️ Lovable failed (${response.status}):`, errorText);
-      return { success: false, provider: 'lovable', error: `${response.status}: ${errorText}` };
+      console.warn(`⚠️ Ollama failed (${response.status}):`, errorText);
+      return { success: false, provider: 'ollama', error: `${response.status}: ${errorText}` };
     }
 
     const data = await response.json();
-    const message = data.choices?.[0]?.message;
+    const message = data.message;
 
     if (!message) {
-      return { success: false, provider: 'lovable', error: 'No message in response' };
+      return { success: false, provider: 'ollama', error: 'No message in response' };
     }
 
-    console.log('✅ Lovable AI successful with Eliza intelligence');
+    console.log('✅ Ollama successful with Eliza intelligence');
 
     if (message.tool_calls?.length > 0) {
-      console.log(`🔧 Lovable returned ${message.tool_calls.length} tool calls`);
-      return { success: true, provider: 'lovable', message };
+      console.log(`🔧 Ollama returned ${message.tool_calls.length} tool calls`);
+      return { success: true, provider: 'ollama', message: { ...message, role: 'assistant' } };
     }
 
-    return { success: true, provider: 'lovable', content: message.content || '' };
+    return { success: true, provider: 'ollama', content: message.content || '' };
   } catch (error) {
-    console.warn('⚠️ Lovable error:', error.message);
-    return { success: false, provider: 'lovable', error: error.message };
+    console.warn('⚠️ Ollama error:', error.message);
+    return { success: false, provider: 'ollama', error: error.message };
   }
 }
 
@@ -638,7 +528,6 @@ async function callDeepSeek(
     const effectiveSystemPrompt = getEffectiveSystemPrompt(options);
     const effectiveTools = getEffectiveTools(options);
 
-    // DeepSeek V3 supports system messages
     const requestMessages = [
       { role: 'system', content: effectiveSystemPrompt },
       ...messages.filter(m => m.role !== 'system')
@@ -647,20 +536,11 @@ async function callDeepSeek(
     const maxTokens = options.maxTokens || options.max_tokens || RESPONSE_MAX_TOKENS;
 
     const requestBody: any = {
-      model: 'deepseek-v4-pro',
+      model: 'deepseek-chat',
       messages: requestMessages,
       temperature: options.temperature || 0.7,
       max_tokens: maxTokens,
     };
-
-    // Note: DeepSeek V3 tool calling support varies, but we'll try passing them
-    // If it fails, we might need to disable tools for strict DeepSeek usage
-    if (effectiveTools.length > 0) {
-      // Check if DeepSeek supports OpenAI format tools (it usually does)
-      // requestBody.tools = effectiveTools;
-      // requestBody.tool_choice = 'auto';
-      // For now, simpler DeepSeek usage (often used for pure reasoning)
-    }
 
     const response = await fetchWithTimeout(
       'https://api.deepseek.com/v1/chat/completions',
@@ -675,7 +555,6 @@ async function callDeepSeek(
       PROVIDER_TIMEOUTS.deepseek
     );
 
-    // Fast-fail for credit exhaustion
     const fastFailError = checkFastFail(response, 'deepseek');
     if (fastFailError) {
       return { success: false, provider: 'deepseek', error: fastFailError };
@@ -709,20 +588,20 @@ async function callDeepSeek(
 }
 
 /**
- * Call Kimi via Kimi Code API - FINAL FALLBACK PROVIDER
+ * Call Kimi K2 via OpenRouter API - FINAL FALLBACK PROVIDER
  */
 async function callKimi(
   messages: AIMessage[],
   options: UnifiedAIOptions = {}
 ): Promise<ProviderResult> {
-  const KIMI_API_KEY = Deno.env.get('KIMI_API_KEY');
+  const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY');
 
-  if (!KIMI_API_KEY) {
-    return { success: false, provider: 'kimi', error: 'KIMI_API_KEY not configured' };
+  if (!OPENROUTER_API_KEY) {
+    return { success: false, provider: 'kimi', error: 'OPENROUTER_API_KEY not configured' };
   }
 
   try {
-    console.log('🦊 FINAL FALLBACK: Attempting Kimi via Kimi Code API...');
+    console.log('🦊 FINAL FALLBACK: Attempting Kimi K2 via OpenRouter with full Eliza context...');
 
     const effectiveSystemPrompt = getEffectiveSystemPrompt(options);
     const effectiveTools = getEffectiveTools(options);
@@ -735,35 +614,32 @@ async function callKimi(
     const maxTokens = options.maxTokens || options.max_tokens || RESPONSE_MAX_TOKENS;
 
     const requestBody: any = {
-      model: 'kimi-for-coding',
+      model: 'moonshotai/kimi-k2',
       messages: requestMessages,
       temperature: options.temperature || 0.7,
       max_tokens: maxTokens,
     };
 
-    // Include ALL tools for Kimi
     if (effectiveTools.length > 0) {
-      console.log(`📊 Kimi: Passing ${effectiveTools.length} tools (full array)`);
       requestBody.tools = effectiveTools;
       requestBody.tool_choice = 'auto';
     }
 
-    const headers: Record<string, string> = {
-      'Authorization': `Bearer ${KIMI_API_KEY}`,
-      'Content-Type': 'application/json',
-    };
-
     const response = await fetchWithTimeout(
-      'https://api.kimi.com/coding/v1/chat/completions',
+      'https://openrouter.ai/api/v1/chat/completions',
       {
         method: 'POST',
-        headers,
+        headers: {
+          'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://xmrt.pro',
+          'X-Title': 'XMRT Eliza'
+        },
         body: JSON.stringify(requestBody),
       },
       PROVIDER_TIMEOUTS.kimi
     );
 
-    // Fast-fail
     const fastFailError = checkFastFail(response, 'kimi');
     if (fastFailError) {
       return { success: false, provider: 'kimi', error: fastFailError };
@@ -797,105 +673,15 @@ async function callKimi(
 }
 
 /**
- * Call Ollama Cloud via ollama.com API (OpenAI-compatible).
- * Uses OLLAMA_API_KEY secret from Supabase.
- * Default model: deepseek-v4-flash:cloud (Vex primary)
- * Backup models available on ollama.com: gpt-oss:120b, deepseek-v4-pro, qwen3.5:397b
- */
-async function callOllamaPro(
-  messages: AIMessage[],
-  options: UnifiedAIOptions = {}
-): Promise<ProviderResult> {
-  const OLLAMA_API_KEY = Deno.env.get('OLLAMA_API_KEY');
-
-  if (!OLLAMA_API_KEY) {
-    return { success: false, provider: 'ollama-pro', error: 'OLLAMA_API_KEY not configured' };
-  }
-
-  try {
-    const ollamaModel = Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud';
-    console.log(`🔮 PRIMARY: Attempting Ollama Pro Cloud (${ollamaModel})...`);
-
-    const effectiveSystemPrompt = getEffectiveSystemPrompt(options);
-    const effectiveTools = getEffectiveTools(options);
-
-    const requestMessages = [
-      { role: 'system', content: effectiveSystemPrompt },
-      ...messages.filter(m => m.role !== 'system')
-    ];
-
-    const maxTokens = options.maxTokens || options.max_tokens || RESPONSE_MAX_TOKENS;
-
-    const requestBody: any = {
-      model: ollamaModel,
-      messages: requestMessages,
-      temperature: options.temperature || 0.7,
-      max_tokens: maxTokens,
-    };
-
-    // Include tools if available
-    if (effectiveTools.length > 0) {
-      console.log(`🔧 Ollama Pro: Passing ${effectiveTools.length} tools`);
-      requestBody.tools = effectiveTools;
-      requestBody.tool_choice = 'auto';
-    }
-
-    const response = await fetchWithTimeout(
-      'https://ollama.com/v1/chat/completions',
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${OLLAMA_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-      },
-      PROVIDER_TIMEOUTS.ollamaPro
-    );
-
-    // Fast-fail check
-    const fastFailError = checkFastFail(response, 'ollama-pro');
-    if (fastFailError) {
-      return { success: false, provider: 'ollama-pro', error: fastFailError };
-    }
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.warn(`⚠️ Ollama Pro failed (${response.status}):`, errorText);
-      return { success: false, provider: 'ollama-pro', error: `${response.status}: ${errorText}` };
-    }
-
-    const data = await response.json();
-    const message = data.choices?.[0]?.message;
-
-    if (!message) {
-      return { success: false, provider: 'ollama-pro', error: 'No message in response' };
-    }
-
-    console.log('✅ Ollama Pro successful');
-
-    if (message.tool_calls?.length > 0) {
-      console.log(`🔧 Ollama Pro returned ${message.tool_calls.length} tool calls`);
-      return { success: true, provider: 'ollama-pro', message };
-    }
-
-    return { success: true, provider: 'ollama-pro', content: message.content || '' };
-  } catch (error) {
-    console.warn('⚠️ Ollama Cloud error:', error.message);
-    return { success: false, provider: 'ollama-pro', error: error.message };
-  }
-}
-
-/**
  * MAIN ENTRY POINT: Unified AI Fallback Cascade
  *
- * Order (rewired 2026-06-10 per Vex/joe instruction):
- *   1. PRIMARY: Ollama Pro Cloud (OLLAMA_API_KEY, model = OLLAMA_MODEL or deepseek-v4-flash:cloud)
- *   2-5. Backup inference (tried only if Ollama fails):
- *       - Vertex AI via Service Account OAuth2
- *       - Gemini API key (direct)
- *       - DeepSeek V3
- *       - Kimi
+ * Order:
+ *   1. Ollama (Primary - local/self-hosted)
+ *   2. Vertex AI via Service Account OAuth2 (GCP — most reliable cloud)
+ *   3. Gemini API key (direct, fast fallback)
+ *   4. Vertex AI Express Mode (via Gemini key)
+ *   5. DeepSeek V3
+ *   6. Kimi K2 (final fallback)
  */
 export async function callAIWithFallback(
   messages: AIMessage[],
@@ -903,39 +689,273 @@ export async function callAIWithFallback(
 ): Promise<any> {
   const errors: string[] = [];
 
-  // 1. PRIMARY: Ollama Pro Cloud (deepseek-v4-flash:cloud by default)
-  const ollamaResult = await callOllamaPro(messages, options);
-  if (ollamaResult.success) return transformResult(ollamaResult);
-  errors.push(`OllamaPro: ${ollamaResult.error}`);
-  console.warn('⚠️ Ollama Pro failed, trying Vertex SA backup...');
+  // 1. PRIMARY: Ollama
+  console.log('🦙 Trying Ollama (primary)...');
+  const ollamaResult = await callOllama(messages, options);
+  if (ollamaResult.success) {
+    const transformed = transformResult(ollamaResult);
+    if (transformed.tool_calls?.length > 0) {
+      console.log(`🔧 [${options.executiveName || 'exec'}] Ollama returned ${transformed.tool_calls.length} tool call(s) — executing...`);
+      return executeToolCallsAndSynthesize(messages, transformed.tool_calls, options);
+    }
+    return transformed;
+  }
+  errors.push(`Ollama: ${ollamaResult.error}`);
+  console.warn('⚠️ Ollama failed, trying Vertex SA fallback...');
 
-  // 2. BACKUP: Vertex AI via Service Account OAuth2
-  console.log('🔑 Trying Vertex AI SA OAuth2 (backup)...');
+  // 2. CLOUD PRIMARY: Vertex AI via Service Account OAuth2
+  console.log('🔑 Trying Vertex AI SA OAuth2...');
   const saResult = await callVertexWithServiceAccount(messages, options);
-  if (saResult.success) return transformResult(saResult);
+  if (saResult.success) {
+    const transformed = transformResult(saResult);
+    if (transformed.tool_calls?.length > 0) {
+      console.log(`🔧 [${options.executiveName || 'exec'}] Vertex SA returned ${transformed.tool_calls.length} tool call(s) — executing...`);
+      return executeToolCallsAndSynthesize(messages, transformed.tool_calls, options);
+    }
+    return transformed;
+  }
   errors.push(`VertexSA: ${saResult.error}`);
+  console.warn('⚠️ Vertex SA failed, trying API key fallback...');
 
-  // 3. BACKUP: Gemini API key
+  // 3. FALLBACK: Gemini API key
   const geminiResult = await callGemini(messages, options);
-  if (geminiResult.success) return transformResult(geminiResult);
+  if (geminiResult.success) {
+    const transformed = transformResult(geminiResult);
+    if (transformed.tool_calls?.length > 0) {
+      console.log(`🔧 [${options.executiveName || 'exec'}] Gemini returned ${transformed.tool_calls.length} tool call(s) — executing...`);
+      return executeToolCallsAndSynthesize(messages, transformed.tool_calls, options);
+    }
+    return transformed;
+  }
   errors.push(`Gemini: ${geminiResult.error}`);
 
-  // 4. BACKUP: Vertex AI Express Mode (reuses Gemini key)
+  // 4. Vertex AI Express Mode (reuses Gemini key)
   const vertexResult = await callVertex(messages, options);
-  if (vertexResult.success) return transformResult(vertexResult);
+  if (vertexResult.success) {
+    const transformed = transformResult(vertexResult);
+    if (transformed.tool_calls?.length > 0) {
+      console.log(`🔧 [${options.executiveName || 'exec'}] Vertex Express returned ${transformed.tool_calls.length} tool call(s) — executing...`);
+      return executeToolCallsAndSynthesize(messages, transformed.tool_calls, options);
+    }
+    return transformed;
+  }
   errors.push(`Vertex: ${vertexResult.error}`);
 
-  // 5. BACKUP: DeepSeek V3
+  // 5. DeepSeek V3
   const deepSeekResult = await callDeepSeek(messages, options);
-  if (deepSeekResult.success) return transformResult(deepSeekResult);
+  if (deepSeekResult.success) {
+    const transformed = transformResult(deepSeekResult);
+    if (transformed.tool_calls?.length > 0) {
+      console.log(`🔧 [${options.executiveName || 'exec'}] DeepSeek returned ${transformed.tool_calls.length} tool call(s) — executing...`);
+      return executeToolCallsAndSynthesize(messages, transformed.tool_calls, options);
+    }
+    return transformed;
+  }
   errors.push(`DeepSeek: ${deepSeekResult.error}`);
 
-  // 6. BACKUP: Kimi
+  // 6. Kimi K2 (final fallback)
   const kimiResult = await callKimi(messages, options);
-  if (kimiResult.success) return transformResult(kimiResult);
+  if (kimiResult.success) {
+    const transformed = transformResult(kimiResult);
+    if (transformed.tool_calls?.length > 0) {
+      console.log(`🔧 [${options.executiveName || 'exec'}] Kimi returned ${transformed.tool_calls.length} tool call(s) — executing...`);
+      return executeToolCallsAndSynthesize(messages, transformed.tool_calls, options);
+    }
+    return transformed;
+  }
   errors.push(`Kimi: ${kimiResult.error}`);
 
   throw new Error(`All AI providers failed: ${errors.join(' | ')}`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TOOL EXECUTION ENGINE
+// Executes tool calls returned by AI providers using universal-edge-invoker
+// ─────────────────────────────────────────────────────────────────────────────
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL') || 'https://vawouugtzwmejxqkeqqj.supabase.co';
+const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
+
+async function executeToolCall(toolName: string, toolArgs: any, executiveName: string = 'unknown'): Promise<any> {
+  console.log(`🔧 [${executiveName}] EXECUTING TOOL: ${toolName}`);
+
+  // ── MEDIA GENERATION TOOLS ──────────────────────────────────────────────
+  // Route to the correct edge function for each tool family
+  if (toolName === 'muapi_generate_media') {
+    const { action = 'generate_image', prompt, style, aspect_ratio, duration_seconds, model } = toolArgs;
+    const body = { action, prompt, style, aspect_ratio, duration_seconds, model };
+    // Primary: superduper-content-media, Fallback: muapi-media-generator
+    const result = await invokeEdgeFunctionWithFallback('superduper-content-media', body, [
+      'muapi-media-generator', 'superduper-content-media'
+    ], executiveName);
+    return result;
+  }
+  if (toolName === 'muapi_list_models') {
+    return invokeEdgeFunction('muapi-media-generator', { action: 'list_models', type: toolArgs.type || 'all' });
+  }
+  if (toolName === 'muapi_estimate_cost') {
+    return invokeEdgeFunction('muapi-media-generator', { action: 'estimate_cost', model: toolArgs.model, count: toolArgs.count });
+  }
+  if (toolName === 'muapi_generate_slideshow') {
+    const { scenes, style, transition = 'fade', duration_per_scene = 4 } = toolArgs;
+    return invokeEdgeFunction('superduper-content-media', {
+      action: 'generate_slideshow', scenes, style, transition, duration_per_scene
+    });
+  }
+  if (toolName === 'vertex_generate_image' || toolName === 'vertex_generate_video') {
+    return invokeEdgeFunction('vertex-ai-image-gen', toolArgs);
+  }
+  if (toolName === 'generate_image' || toolName === 'generate_video') {
+    // Generic alias — route to muapi
+    return invokeEdgeFunction('superduper-content-media', {
+      action: toolName === 'generate_image' ? 'generate_image' : 'generate_video',
+      ...toolArgs
+    });
+  }
+
+  // ── GENERAL EDGE FUNCTION INVOCATION ───────────────────────────────────
+  // Catch-all: route any unknown tool to universal-edge-invoker or directly
+  if (toolName === 'invoke_edge_function' || toolName === 'universal_edge_invoker') {
+    return invokeEdgeFunction(toolArgs.function_name, toolArgs.payload || {});
+  }
+  if (toolName === 'invoke-edge-function') {
+    return invokeEdgeFunction(toolArgs.function_name, toolArgs.payload || {});
+  }
+
+  // Generic tool routing via universal-edge-invoker
+  return invokeEdgeFunction('universal-edge-invoker', {
+    function_name: toolName.replace(/_/g, '-'),
+    payload: toolArgs
+  });
+}
+
+async function invokeEdgeFunction(functionName: string, payload: any): Promise<any> {
+  if (!SUPABASE_SERVICE_ROLE_KEY) {
+    return { success: false, error: 'SUPABASE_SERVICE_ROLE_KEY not configured in edge function environment' };
+  }
+  try {
+    const url = `${SUPABASE_URL}/functions/v1/${functionName}`;
+    const response = await fetchWithTimeout(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      },
+      body: JSON.stringify(payload),
+    }, 30000);
+
+    const data = await response.json();
+    return { success: response.ok, status: response.status, data };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+async function invokeEdgeFunctionWithFallback(primary: string, payload: any, fallbacks: string[], executiveName: string): Promise<any> {
+  for (const fn of [primary, ...fallbacks]) {
+    const result = await invokeEdgeFunction(fn, payload);
+    if (result.success) {
+      console.log(`✅ [${executiveName}] ${fn} succeeded`);
+      return { ...result, provider: fn };
+    }
+    console.warn(`⚠️ [${executiveName}] ${fn} failed: ${result.error}. Trying next...`);
+  }
+  return { success: false, error: `All providers failed: ${fallbacks.join(', ')}` };
+}
+
+/**
+ * Execute tool calls and feed results back to the AI for a final synthesis.
+ * Called after any provider returns tool_calls.
+ */
+async function executeToolCallsAndSynthesize(
+  messages: AIMessage[],
+  toolCalls: any[],
+  options: UnifiedAIOptions
+): Promise<{ content: string; provider: string }> {
+  const executiveName = options.executiveName || 'Executive';
+  console.log(`🔧 [${executiveName}] Executing ${toolCalls.length} tool call(s)...`);
+
+  const toolResults: any[] = [];
+  for (const tc of toolCalls) {
+    try {
+      const name = tc.function?.name || tc.name || '';
+      let args = tc.function?.arguments || tc.arguments || '{}';
+      if (typeof args === 'string') {
+        try { args = JSON.parse(args); } catch { args = {}; }
+      }
+      const result = await executeToolCall(name, args, executiveName);
+      const readable = formatToolResult(name, result);
+      toolResults.push(readable);
+      console.log(`✅ [${executiveName}] ${name} -> ${JSON.stringify(readable).substring(0, 200)}`);
+    } catch (err: any) {
+      toolResults.push({ error: err.message });
+      console.error(`❌ [${executiveName}] Tool ${tc.function?.name || tc.name} failed: ${err.message}`);
+    }
+  }
+
+  // Feed results back to AI for final synthesis
+  const toolMessages = toolCalls.map((tc, i) => ({
+    role: 'assistant' as const,
+    content: null,
+    tool_calls: [{
+      id: tc.id || `tc_${i}`,
+      type: 'function' as const,
+      function: {
+        name: tc.function?.name || tc.name || '',
+        arguments: typeof tc.function?.arguments === 'string'
+          ? tc.function.arguments
+          : JSON.stringify(tc.function?.arguments || tc.arguments || {})
+      }
+    }]
+  }));
+
+  const resultMessages = toolResults.map((r, i) => ({
+    role: 'tool' as const,
+    tool_call_id: tc_ids_from_calls(toolCalls)[i],
+    content: JSON.stringify(r)
+  }));
+
+  function tc_ids_from_calls(calls: any[]): string[] {
+    return calls.map((c, i) => c.id || `tc_${i}`);
+  }
+
+  // Build follow-up messages with tool results
+  const followUpMessages = [
+    ...messages,
+    ...toolMessages,
+    ...resultMessages,
+    { role: 'user', content: 'Based on the tool results above, provide your final response to the user. Format images/videos as: ![description](url). Keep it concise and actionable.' }
+  ];
+
+  // Retry with the same provider or fall back through cascade
+  return callAIWithFallback(followUpMessages, { ...options, maxTokens: 8000 });
+}
+
+function formatToolResult(toolName: string, result: any): any {
+  if (!result.success) return { error: result.error || 'Tool execution failed' };
+  const data = result.data || result;
+
+  if (toolName === 'muapi_generate_media' || toolName === 'superduper-content-media' || toolName === 'muapi-media-generator') {
+    if (data.image_url) return { image_url: data.image_url, model: data.model, dimensions: data.dimensions };
+    if (data.video_url) return { video_url: data.video_url, model: data.model, duration: data.duration };
+    if (data.urls && data.urls.length > 0) return { urls: data.urls };
+    return data;
+  }
+  if (toolName === 'muapi_list_models' || toolName === 'muapi-list-models') {
+    return { models: data.models || data };
+  }
+  if (toolName === 'muapi_estimate_cost') {
+    return { estimate: data };
+  }
+  if (toolName === 'muapi_generate_slideshow') {
+    return { slideshow_url: data.slideshow_url || data.url, scenes: data.scenes };
+  }
+
+  // Generic: return success + first-level data
+  if (typeof data === 'object' && data !== null) {
+    const keys = Object.keys(data).filter(k => !['error', 'success', 'status'].includes(k));
+    if (keys.length > 0) return { [keys[0]]: data[keys[0]], _summary: `${keys.length} fields returned` };
+  }
+  return { result: data };
 }
 
 /**
@@ -943,7 +963,6 @@ export async function callAIWithFallback(
  */
 function transformResult(result: ProviderResult): any {
   if (result.message) {
-    // Return full message object (with tool calls)
     return {
       role: 'assistant',
       content: result.message.content,
@@ -951,7 +970,6 @@ function transformResult(result: ProviderResult): any {
       provider: result.provider
     };
   }
-  // Return simple object with content (Exec Council compatibility)
   return {
     content: result.content || '',
     provider: result.provider
@@ -960,109 +978,69 @@ function transformResult(result: ProviderResult): any {
 
 /**
  * Generate Embedding using Supabase Native AI (ONNX via internal Runtime)
- * Uses Singleton pattern to prevent memory leaks/crashes
  */
 let embeddingSession: any = null;
 
 export async function generateEmbedding(text: string): Promise<number[]> {
-  // ── TRY 1: Supabase Native AI (cloud / managed) ──────────────────────────
   try {
-    // @ts-ignore: Supabase is a global in Edge Runtime
-    if (typeof Supabase !== 'undefined' && Supabase.ai) {
-      console.log(`🧠 Generating embedding via Supabase Native AI (gte-small)...`);
+    console.log(`🧠 Generating embedding for ${text.length} chars using Supabase Native AI (gte-small)...`);
 
-      // Initialize session only once (Singleton)
-      if (!embeddingSession) {
-        console.log('🔌 Initializing new Supabase.ai Session (gte-small)...');
-        // @ts-ignore: Supabase is a global in Edge Runtime
-        embeddingSession = new Supabase.ai.Session('gte-small');
+    if (!embeddingSession) {
+      // @ts-ignore
+      if (typeof Supabase === 'undefined' || !Supabase.ai) {
+        throw new Error('Supabase Native AI not available in this environment');
       }
-
-      const output = await embeddingSession.run(text, {
-        mean_pool: true,
-        normalize: true,
-      });
-
-      if (output && Array.isArray(output)) {
-        console.log(`✅ Supabase Native AI embedding: ${output.length} dims`);
-        return output;
-      }
-      console.warn('⚠️ Supabase AI returned invalid format, falling back to Ollama...');
+      // @ts-ignore
+      embeddingSession = new Supabase.ai.Session('gte-small');
     }
-  } catch (error) {
-    console.warn('⚠️ Supabase Native AI unavailable, falling back to local Ollama:', error.message);
-    embeddingSession = null;
-  }
 
-  // ── TRY 2: Local Ollama embedding API (all-minilm, 384-dim) ──────────────
-  const ollamaHost = (Deno.env.get('OLLAMA_HOST') || 'http://localhost:11434').replace(/\/$/, '');
-  const embedModel = 'all-minilm';
-
-  try {
-    console.log(`🧠 Generating embedding via local Ollama (${ollamaHost}, ${embedModel})...`);
-
-    const res = await fetch(`${ollamaHost}/api/embed`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: embedModel,
-        input: text,
-      }),
+    const output = await embeddingSession.run(text, {
+      mean_pool: true,
+      normalize: true,
     });
 
-    if (!res.ok) {
-      const err = await res.text();
-      throw new Error(`Ollama embed failed (${res.status}): ${err}`);
+    if (!output || !Array.isArray(output)) {
+      throw new Error('Invalid embedding format from Supabase AI');
     }
 
-    const data = await res.json();
-    const embedding = data.embeddings?.[0];
-
-    if (!embedding || !Array.isArray(embedding)) {
-      throw new Error('Invalid embedding format from Ollama');
-    }
-
-    console.log(`✅ Local Ollama embedding: ${embedding.length} dims (model=${data.model || embedModel})`);
-    return embedding;
+    return output;
   } catch (error) {
-    console.error('❌ Both embedding providers failed:', error.message);
+    console.error('❌ Embedding generation error:', error);
+    embeddingSession = null;
     throw error;
   }
 }
 
-/**
- * Generate text using the AI fallback cascade.
- * Wrapper around callAIWithFallback that matches the signature used by 12+ edge functions.
- * @param prompt - The user/content prompt string
- * @param systemPrompt - Optional system prompt (used as the only system message)
- * @param options - Optional UnifiedAIOptions overrides
- * @returns Generated text content (string), or throws on total cascade failure
- */
-export async function generateTextWithFallback(
-  prompt: string,
-  systemPrompt?: string,
-  options?: Partial<UnifiedAIOptions>
-): Promise<string> {
-  const messages: AIMessage[] = [];
-  if (systemPrompt) {
-    messages.push({ role: 'system', content: systemPrompt });
-  }
-  messages.push({ role: 'user', content: prompt });
-
-  const result = await callAIWithFallback(messages, {
-    temperature: options?.temperature ?? 0.7,
-    maxTokens: options?.maxTokens ?? options?.max_tokens ?? 2048,
-    useFullElizaContext: options?.useFullElizaContext ?? true,
-    preferProvider: 'deepseek' as any,
-  });
-
-  // callAIWithFallback returns { content, provider } or throws
-  if (typeof result === 'string') return result;
-  if (result && result.content) return result.content;
-  if (result && typeof result === 'object' && 'content' in result) return result.content;
-
-  throw new Error('generateTextWithFallback: no content from AI cascade (' + (result?.provider || 'unknown') + '): ' + (result?.error || 'unknown error'));
+// Helper types and functions (assumed to be defined at end of file)
+interface AIMessage {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
 }
 
+interface UnifiedAIOptions {
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
+  max_tokens?: number;
+  systemPrompt?: string;
+  tools?: any[];
+  executiveName?: string;
+  preferProvider?: string;
+  userContext?: any;
+}
 
+interface ProviderResult {
+  success: boolean;
+  provider: string;
+  content?: string;
+  message?: any;
+  error?: string;
+}
 
+function getEffectiveSystemPrompt(options: UnifiedAIOptions): string {
+  return options.systemPrompt || generateElizaSystemPrompt();
+}
+
+function getEffectiveTools(options: UnifiedAIOptions): any[] {
+  return options.tools || ELIZA_TOOLS;
+}

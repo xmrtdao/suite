@@ -8,6 +8,7 @@ interface QuickGreetingContext {
   conversationSummary?: string;
   totalMessageCount?: number;
   miningStats?: any;
+  language?: 'en' | 'es';
 }
 
 export class QuickGreetingService {
@@ -38,26 +39,45 @@ export class QuickGreetingService {
     ]
   };
 
+  private greetingTemplatesEs = {
+    returnUser: [
+      "¡Bienvenido de nuevo! Recuerdo que hablamos sobre {summary}. ¿Cómo quieres continuar nuestra conversación o explorar algo nuevo?",
+      "¡Qué bueno verte de nuevo! La última vez hablamos de {summary}. ¿En qué te gustaría trabajar hoy?",
+      "¡Hola otra vez! Recuerdo nuestra conversación sobre {summary}. ¿Cómo puedo ayudarte ahora?",
+    ],
+    newFounder: [
+      "¡Bienvenido de nuevo, fundador! ¿Cómo puedo ayudarte con Suite hoy?",
+      "¡Hola, fundador! ¿Listo para seguir construyendo el futuro de la IA empresarial?",
+      "¡Bienvenido! ¿Qué aspectos de Suite trabajamos hoy?",
+    ],
+    newUser: [
+      "¡Hola! Soy tu asistente de IA de Suite. ¿Cómo puedo ayudarte a empezar?",
+      "¡Bienvenido a Suite! Estoy aquí para ayudarte con automatización inteligente y flujos de trabajo con IA.",
+      "¡Hola! Soy Suite AI y estoy listo para ayudarte. ¿Qué te gustaría lograr?",
+    ]
+  };
+
   /**
    * Generate instant greeting without API calls
    */
   public generateQuickGreeting(context: QuickGreetingContext = {}): string {
-    const { isFounder, conversationSummary, totalMessageCount } = context;
+    const { isFounder, conversationSummary, totalMessageCount, language = 'en' } = context;
+    const templates = language === 'es' ? this.greetingTemplatesEs : this.greetingTemplates;
 
     // Return user with conversation history
     if (conversationSummary && totalMessageCount && totalMessageCount > 0) {
-      const template = this.getRandomTemplate(this.greetingTemplates.returnUser);
+      const template = this.getRandomTemplate(templates.returnUser);
       const shortSummary = this.truncateSummary(conversationSummary, 100);
       return template.replace('{summary}', shortSummary);
     }
 
     // New founder
     if (isFounder) {
-      return this.getRandomTemplate(this.greetingTemplates.newFounder);
+      return this.getRandomTemplate(templates.newFounder);
     }
 
     // New user
-    return this.getRandomTemplate(this.greetingTemplates.newUser);
+    return this.getRandomTemplate(templates.newUser);
   }
 
   /**

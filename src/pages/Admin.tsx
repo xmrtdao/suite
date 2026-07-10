@@ -1,8 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { supabase } from '@/integrations/supabase/client';
-import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -12,9 +11,34 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, Shield, Users, Settings, Crown, UserCog, Key, Cloud, Plug } from 'lucide-react';
 import { CredentialsManager } from '@/components/admin/CredentialsManager';
+
 // GoogleCloudConnect removed - now part of unified login flow
 
 type AppRole = 'user' | 'contributor' | 'moderator' | 'admin' | 'superadmin';
+type TierAssignmentStatus = 'active' | 'pending' | 'canceled' | 'past_due' | 'trialing' | null;
+
+interface TierCatalogItem {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  pricing_model: 'flat' | 'metered' | 'one_time' | 'custom';
+  amount_cents: number | null;
+  currency: string | null;
+  interval: 'day' | 'week' | 'month' | 'year' | null;
+  features: unknown;
+}
+
+interface UserTierView {
+  assignmentId: string | null;
+  status: TierAssignmentStatus;
+  startsAt: string | null;
+  endsAt: string | null;
+  source: string | null;
+  tier: TierCatalogItem | null;
+  isLegacyFallback: boolean;
+  legacyMembershipTier: string | null;
+}
 
 interface UserWithRoles {
   id: string;
@@ -26,6 +50,7 @@ interface UserWithRoles {
   created_at: string;
   last_login_at: string | null;
   roles: AppRole[];
+  tierView: UserTierView;
 }
 
 const ROLE_COLORS: Record<AppRole, string> = {
@@ -44,14 +69,55 @@ const ROLE_LABELS: Record<AppRole, string> = {
   superadmin: 'Super Admin',
 };
 
+const TIER_STATUS_COLORS: Record<Exclude<TierAssignmentStatus, null>, 'default' | 'secondary' | 'destructive' | 'outline'> = {
+  active: 'default',
+  pending: 'secondary',
+  canceled: 'outline',
+  past_due: 'destructive',
+  trialing: 'secondary',
+};
+
+const formatDate = (value: string | null): string => {
+  if (!value) return '—';
+  return new Date(value).toLocaleDateString();
+};
+
+const getCurrentAssignmentByUser = (assignments: any[]): Map<string, any> => {
+  const nowIso = new Date().toISOString();
+  const map = new Map<string, any>();
+
+  const valid = assignments
+    .filter((assignment) => {
+      const hasUser = Boolean(assignment?.user_id);
+      const hasValidStatus = ['active', 'pending', 'past_due', 'trialing'].includes(assignment?.status);
+      const hasNotEnded = !assignment?.ends_at || assignment.ends_at > nowIso;
+      return hasUser && hasValidStatus && hasNotEnded;
+    })
+    .sort((a, b) => {
+      const aStart = a?.starts_at ? Date.parse(a.starts_at) : 0;
+      const bStart = b?.starts_at ? Date.parse(b.starts_at) : 0;
+      return bStart - aStart;
+    });
+
+  for (const assignment of valid) {
+    if (!map.has(assignment.user_id)) {
+      map.set(assignment.user_id, assignment);
+    }
+  }
+
+  return map;
+};
+
 export default function Admin() {
   const navigate = useNavigate();
   const { user, isAdmin, isSuperadmin, isLoading: authLoading } = useAuth();
   const { toast } = useToast();
-  
+
   const [users, setUsers] = useState<UserWithRoles[]>([]);
+  const [tierCatalog, setTierCatalog] = useState<TierCatalogItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
+  const [updatingTierUserId, setUpdatingTierUserId] = useState<string | null>(null);
 
   // Redirect if not admin
   useEffect(() => {
@@ -60,41 +126,129 @@ export default function Admin() {
     }
   }, [authLoading, isAdmin, navigate]);
 
-  // Fetch all users with their roles
+  // Fetch all users with roles + tier assignments
   useEffect(() => {
     const fetchUsers = async () => {
       if (!isAdmin) return;
 
       try {
-        // Fetch profiles
-        const { data: profiles, error: profilesError } = await supabase
-          .from('profiles')
-          .select('*')
-          .order('created_at', { ascending: false });
+        const rawSupabase = supabase as any;
 
-        if (profilesError) throw profilesError;
+        const [profilesResult, rolesResult, tiersResult] = await Promise.all([
+          rawSupabase
+            .from('profiles')
+            .select('id, email, full_name, display_name, avatar_url, is_active, created_at, last_login_at, membership_tier')
+            .order('created_at', { ascending: false }),
+          rawSupabase.from('user_roles').select('user_id, role'),
+          rawSupabase
+            .from('user_tiers')
+            .select('id, slug, name, description, pricing_model, amount_cents, currency, interval, features')
+            .eq('is_active', true)
+            .order('amount_cents', { ascending: true, nullsFirst: true }),
+        ]);
 
-        // Fetch all roles
-        const { data: allRoles, error: rolesError } = await supabase
-          .from('user_roles')
-          .select('user_id, role');
+        if (profilesResult.error) throw profilesResult.error;
+        if (rolesResult.error) throw rolesResult.error;
+        if (tiersResult.error) throw tiersResult.error;
 
-        if (rolesError) throw rolesError;
+        const { data: assignmentsWithSource, error: assignmentWithSourceError } = await rawSupabase
+          .from('user_tier_assignments')
+          .select(`
+            id,
+            user_id,
+            status,
+            starts_at,
+            ends_at,
+            source,
+            user_tiers:tier_id (
+              id,
+              slug,
+              name,
+              description,
+              pricing_model,
+              amount_cents,
+              currency,
+              interval,
+              features
+            )
+          `)
+          .in('status', ['active', 'pending', 'past_due', 'trialing'])
+          .or(`ends_at.is.null,ends_at.gt.${new Date().toISOString()}`);
 
-        // Combine profiles with roles
-        const usersWithRoles: UserWithRoles[] = (profiles || []).map((profile) => ({
-          id: profile.id,
-          email: profile.email,
-          full_name: profile.full_name,
-          display_name: profile.display_name,
-          avatar_url: profile.avatar_url,
-          is_active: profile.is_active,
-          created_at: profile.created_at,
-          last_login_at: profile.last_login_at,
-          roles: (allRoles || [])
-            .filter((r) => r.user_id === profile.id)
-            .map((r) => r.role as AppRole),
-        }));
+        let assignmentRecords = assignmentsWithSource || [];
+
+        if (assignmentWithSourceError) {
+          const { data: assignmentsFallback, error: assignmentFallbackError } = await rawSupabase
+            .from('user_tier_assignments')
+            .select(`
+              id,
+              user_id,
+              status,
+              starts_at,
+              ends_at,
+              user_tiers:tier_id (
+                id,
+                slug,
+                name,
+                description,
+                pricing_model,
+                amount_cents,
+                currency,
+                interval,
+                features
+              )
+            `)
+            .in('status', ['active', 'pending', 'past_due', 'trialing'])
+            .or(`ends_at.is.null,ends_at.gt.${new Date().toISOString()}`);
+
+          if (assignmentFallbackError) throw assignmentFallbackError;
+          assignmentRecords = assignmentsFallback || [];
+        }
+
+        const currentAssignments = getCurrentAssignmentByUser(assignmentRecords);
+
+        setTierCatalog(tiersResult.data || []);
+
+        const usersWithRoles: UserWithRoles[] = (profilesResult.data || []).map((profile: any) => {
+          const assignment = currentAssignments.get(profile.id);
+          const assignmentTier = assignment?.user_tiers || null;
+          const tierView: UserTierView = assignment
+            ? {
+                assignmentId: assignment.id ?? null,
+                status: assignment.status ?? null,
+                startsAt: assignment.starts_at ?? null,
+                endsAt: assignment.ends_at ?? null,
+                source: assignment.source ?? null,
+                tier: assignmentTier,
+                isLegacyFallback: false,
+                legacyMembershipTier: null,
+              }
+            : {
+                assignmentId: null,
+                status: null,
+                startsAt: null,
+                endsAt: null,
+                source: null,
+                tier: null,
+                isLegacyFallback: Boolean(profile.membership_tier),
+                legacyMembershipTier: profile.membership_tier ?? null,
+              };
+
+          return {
+            id: profile.id,
+            email: profile.email,
+            full_name: profile.full_name,
+            display_name: profile.display_name,
+            avatar_url: profile.avatar_url,
+            is_active: Boolean(profile.is_active),
+            created_at: profile.created_at,
+            last_login_at: profile.last_login_at,
+            roles: (rolesResult.data || [])
+              .filter((role: any) => role.user_id === profile.id)
+              .map((role: any) => role.role as AppRole),
+            tierView,
+          };
+        });
 
         setUsers(usersWithRoles);
       } catch (error) {
@@ -145,7 +299,7 @@ export default function Admin() {
 
       // Add the new role (and user role if not 'user')
       const rolesToInsert = [{ user_id: userId, role: 'user' as AppRole, granted_by: user?.id }];
-      
+
       if (newRole !== 'user') {
         rolesToInsert.push({ user_id: userId, role: newRole, granted_by: user?.id });
       }
@@ -181,6 +335,173 @@ export default function Admin() {
     }
   };
 
+  const handleTierChange = async (targetUserId: string, selectedTierId: string) => {
+    if (!isAdmin) {
+      toast({
+        title: 'Permission denied',
+        description: 'Only admins can modify billing tiers',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const targetUser = users.find((candidate) => candidate.id === targetUserId);
+    if (!targetUser) {
+      return;
+    }
+
+    const currentTierId = targetUser.tierView.tier?.id || null;
+    if (currentTierId === selectedTierId) {
+      return;
+    }
+
+    setUpdatingTierUserId(targetUserId);
+
+    try {
+      const rawSupabase = supabase as any;
+      const nowIso = new Date().toISOString();
+      let canceledExisting = false;
+
+      if (targetUser.tierView.assignmentId) {
+        const { error: cancelError } = await rawSupabase
+          .from('user_tier_assignments')
+          .update({ status: 'canceled', ends_at: nowIso })
+          .eq('id', targetUser.tierView.assignmentId);
+
+        if (cancelError) {
+          const errorMessage = `${cancelError.message || ''} ${cancelError.details || ''}`.toLowerCase();
+          const likelyStatusMismatch =
+            errorMessage.includes('cancelled') ||
+            errorMessage.includes('invalid input value for enum') ||
+            errorMessage.includes('check constraint');
+
+          if (!likelyStatusMismatch) {
+            throw cancelError;
+          }
+
+          const { error: cancelFallbackError } = await rawSupabase
+            .from('user_tier_assignments')
+            .update({ status: 'cancelled', ends_at: nowIso })
+            .eq('id', targetUser.tierView.assignmentId);
+
+          if (cancelFallbackError) throw cancelFallbackError;
+        }
+
+        canceledExisting = true;
+      }
+
+      let { data: insertedAssignment, error: insertError } = await rawSupabase
+        .from('user_tier_assignments')
+        .insert({
+          user_id: targetUserId,
+          tier_id: selectedTierId,
+          status: 'active',
+          starts_at: nowIso,
+          ends_at: null,
+          source: 'admin_panel',
+        })
+        .select(`
+          id,
+          user_id,
+          status,
+          starts_at,
+          ends_at,
+          source,
+          user_tiers:tier_id (
+            id,
+            slug,
+            name,
+            description,
+            pricing_model,
+            amount_cents,
+            currency,
+            interval,
+            features
+          )
+        `)
+        .single();
+
+      if (insertError) {
+        const maybeMissingSourceColumn = `${insertError.message || ''} ${insertError.details || ''}`
+          .toLowerCase()
+          .includes('source');
+
+        if (!maybeMissingSourceColumn) throw insertError;
+
+        const fallbackInsert = await rawSupabase
+          .from('user_tier_assignments')
+          .insert({
+            user_id: targetUserId,
+            tier_id: selectedTierId,
+            status: 'active',
+            starts_at: nowIso,
+            ends_at: null,
+          })
+          .select(`
+            id,
+            user_id,
+            status,
+            starts_at,
+            ends_at,
+            user_tiers:tier_id (
+              id,
+              slug,
+              name,
+              description,
+              pricing_model,
+              amount_cents,
+              currency,
+              interval,
+              features
+            )
+          `)
+          .single();
+
+        insertedAssignment = fallbackInsert.data;
+        insertError = fallbackInsert.error;
+      }
+
+      if (insertError) throw insertError;
+
+      setUsers((prev) =>
+        prev.map((candidate) =>
+          candidate.id === targetUserId
+            ? {
+                ...candidate,
+                tierView: {
+                  assignmentId: insertedAssignment?.id ?? null,
+                  status: insertedAssignment?.status ?? 'active',
+                  startsAt: insertedAssignment?.starts_at ?? nowIso,
+                  endsAt: insertedAssignment?.ends_at ?? null,
+                  source: insertedAssignment?.source ?? 'admin_panel',
+                  tier: insertedAssignment?.user_tiers ?? tierCatalog.find((tier) => tier.id === selectedTierId) ?? null,
+                  isLegacyFallback: false,
+                  legacyMembershipTier: null,
+                },
+              }
+            : candidate
+        )
+      );
+
+      const selectedTier = tierCatalog.find((tier) => tier.id === selectedTierId);
+      toast({
+        title: 'Tier updated',
+        description: `${selectedTier?.name || 'Selected tier'} assignment updated${canceledExisting ? ' and previous tier closed' : ''}`,
+      });
+    } catch (error) {
+      console.error('Error updating tier:', error);
+      const errorMessage =
+        typeof error === 'object' && error && 'message' in error ? String((error as { message?: string }).message || '') : '';
+      toast({
+        title: 'Error',
+        description: errorMessage ? `Failed to update billing tier assignment: ${errorMessage}` : 'Failed to update billing tier assignment',
+        variant: 'destructive',
+      });
+    } finally {
+      setUpdatingTierUserId(null);
+    }
+  };
+
   const getHighestRole = (roles: AppRole[]): AppRole => {
     const hierarchy: AppRole[] = ['superadmin', 'admin', 'moderator', 'contributor', 'user'];
     for (const role of hierarchy) {
@@ -201,6 +522,16 @@ export default function Admin() {
     return email.slice(0, 2).toUpperCase();
   };
 
+  const stats = useMemo(
+    () => ({
+      total: users.length,
+      superadmins: users.filter((u) => u.roles.includes('superadmin')).length,
+      admins: users.filter((u) => u.roles.includes('admin')).length,
+      active: users.filter((u) => u.is_active).length,
+    }),
+    [users]
+  );
+
   if (authLoading || isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -212,13 +543,6 @@ export default function Admin() {
   if (!isAdmin) {
     return null;
   }
-
-  const stats = {
-    total: users.length,
-    superadmins: users.filter((u) => u.roles.includes('superadmin')).length,
-    admins: users.filter((u) => u.roles.includes('admin')).length,
-    active: users.filter((u) => u.is_active).length,
-  };
 
   return (
     <main id="main-content" className="container mx-auto px-4 py-8 max-w-7xl">
@@ -318,7 +642,7 @@ export default function Admin() {
             <CardHeader>
               <CardTitle>User Management</CardTitle>
               <CardDescription>
-                View and manage user accounts and their roles
+                Roles are permission controls; tiers are billing/entitlements from assignment records.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -328,15 +652,20 @@ export default function Admin() {
                     <TableHead>User</TableHead>
                     <TableHead>Email</TableHead>
                     <TableHead>Role</TableHead>
+                    <TableHead>Tier</TableHead>
+                    <TableHead>Tier Status</TableHead>
+                    <TableHead>Tier Dates</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Joined</TableHead>
-                    {isSuperadmin && <TableHead>Actions</TableHead>}
+                    {isSuperadmin && <TableHead>Role Action</TableHead>}
+                    {isAdmin && <TableHead>Tier Action</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {users.map((userItem) => {
                     const highestRole = getHighestRole(userItem.roles);
                     const isCurrentUser = userItem.id === user?.id;
+                    const tierStatus = userItem.tierView.status;
 
                     return (
                       <TableRow key={userItem.id}>
@@ -358,13 +687,34 @@ export default function Admin() {
                             </div>
                           </div>
                         </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {userItem.email}
-                        </TableCell>
+                        <TableCell className="text-muted-foreground">{userItem.email}</TableCell>
                         <TableCell>
                           <Badge className={`${ROLE_COLORS[highestRole]} text-white`}>
                             {ROLE_LABELS[highestRole]}
                           </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-col gap-1">
+                            <span className="font-medium">
+                              {userItem.tierView.tier?.name || (userItem.tierView.isLegacyFallback ? `legacy:${userItem.tierView.legacyMembershipTier}` : 'No assignment')}
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                              {userItem.tierView.tier?.slug || userItem.tierView.source || '—'}
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          {tierStatus ? (
+                            <Badge variant={TIER_STATUS_COLORS[tierStatus]}>{tierStatus}</Badge>
+                          ) : userItem.tierView.isLegacyFallback ? (
+                            <Badge variant="outline">legacy fallback</Badge>
+                          ) : (
+                            <Badge variant="outline">none</Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          <div>Start: {formatDate(userItem.tierView.startsAt)}</div>
+                          <div>End: {formatDate(userItem.tierView.endsAt)}</div>
                         </TableCell>
                         <TableCell>
                           <Badge variant={userItem.is_active ? 'default' : 'secondary'}>
@@ -383,7 +733,7 @@ export default function Admin() {
                               }
                               disabled={updatingUserId === userItem.id || isCurrentUser}
                             >
-                              <SelectTrigger className="w-32">
+                              <SelectTrigger className="w-36">
                                 {updatingUserId === userItem.id ? (
                                   <Loader2 className="h-4 w-4 animate-spin" />
                                 ) : (
@@ -396,6 +746,39 @@ export default function Admin() {
                                 <SelectItem value="moderator">Moderator</SelectItem>
                                 <SelectItem value="admin">Admin</SelectItem>
                                 <SelectItem value="superadmin">Super Admin</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                        )}
+                        {isAdmin && (
+                          <TableCell>
+                            <Select
+                              value={userItem.tierView.tier?.id || '__none__'}
+                              onValueChange={(value) => {
+                                if (value !== '__none__') {
+                                  handleTierChange(userItem.id, value);
+                                }
+                              }}
+                              disabled={updatingTierUserId === userItem.id || tierCatalog.length === 0}
+                            >
+                              <SelectTrigger className="w-44">
+                                {updatingTierUserId === userItem.id ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <SelectValue placeholder="Select tier" />
+                                )}
+                              </SelectTrigger>
+                              <SelectContent>
+                                {userItem.tierView.tier?.id ? null : (
+                                  <SelectItem value="__none__" disabled>
+                                    Select tier
+                                  </SelectItem>
+                                )}
+                                {tierCatalog.map((tier) => (
+                                  <SelectItem key={tier.id} value={tier.id}>
+                                    {tier.name}
+                                  </SelectItem>
+                                ))}
                               </SelectContent>
                             </Select>
                           </TableCell>

@@ -3,8 +3,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.58.0';
 
 serve(async (req) => {
   const supabaseUrl = Deno.env.get('SUPABASE_URL');
-  // Use SERVICE_ROLE_KEY to bypass RLS — the retriever needs full read access
-  const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || Deno.env.get('SUPABASE_ANON_KEY');
+  const supabaseKey = Deno.env.get('SUPABASE_ANON_KEY'); // Or SERVICE_ROLE_KEY if needed for RLS bypass
 
   if (!supabaseUrl || !supabaseKey) {
     return new Response(JSON.stringify({ error: 'Supabase URL or Key not set' }), {
@@ -25,15 +24,13 @@ serve(async (req) => {
       });
     }
 
-    // knowledge_entities resolves to app.knowledge_entities (local-sb schema priority)
-    // Columns: id, name (text), entity (jsonb), metadata (jsonb)
-    // Search name for the query; also search entity->>'name' when the local
-    // REST proxy supports jsonb operators (falls back to name-only on basic proxy)
+    // Example: Simple search based on description or name
+    // In a real scenario, this would involve vector search if enabled
     const { data, error } = await supabase
       .from('knowledge_entities')
       .select('*')
-      .ilike('name', `%${query}%`)
-      .limit(10);
+      .ilike('description', `%${query}%`) // Case-insensitive search
+      .limit(10); // Limit to top 10 relevant results
 
     if (error) {
       console.error('Error retrieving knowledge:', error);

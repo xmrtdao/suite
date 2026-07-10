@@ -1,4 +1,4 @@
-﻿// Enhanced coo-chat - Eliza - Chief Operating Officer (SYNTAX ERROR FIXED)
+// Enhanced coo-chat - Eliza - Chief Operating Officer (SYNTAX ERROR FIXED)
 // Fixed Python f-string syntax error in executive response handling
 
 import { corsHeaders } from "../_shared/cors.ts";
@@ -178,8 +178,8 @@ async function handleRequest(request: Request): Promise<Response> {
         executiveName: 'Akari Tanaka',
         maxTokens: 4000,
         temperature: 0.7,
-        // Tools always available — non-lead council members can read system status too
-        useFullElizaContext: true,
+        // Tools enabled in single mode; blocked for non-lead council members only
+        useFullElizaContext: councilMode ? !!isLeadExecutive : true,
       };
 
       if (councilMode) {
@@ -194,16 +194,23 @@ Council: Dr. Anya Sharma (CTO), Mr. Omar Al-Farsi (CFO), Ms. Bella Rodriguez (CM
 
 Council: Dr. Anya Sharma (CTO), Mr. Omar Al-Farsi (CFO), Ms. Bella Rodriguez (CMO), Mr. Klaus Richter (COO), Ms. Akari Tanaka (CPO/you).
 
-\u{270B} PERSPECTIVE FIRST — share your CPO people, culture, and talent insights.
-\u{1F527} You have tool access for quick data lookups if needed.
-\u{26D4} DO NOT write JSON or markdown code blocks.
-\u{26D4} DO NOT push tasks to other council members.
+\u{1F3A4} PERSPECTIVE ONLY — share your CPO people, culture, and talent insights.
+\u26D4 DO NOT call system-status or any other tools.
+\u26D4 DO NOT write JSON or markdown code blocks.
+\u26D4 DO NOT suggest anyone run a diagnostic check.
 
 When asked for roll call: "Ms. Akari Tanaka, Chief People Officer — present and ready."
 Be concise, warm, and decisive.`;
         }
       } else {
-        aiOptions.systemPrompt = `You are Akari Tanaka, Chief People Officer (CPO) of XMRT-DAO. You are a visionary leader in organizational culture, talent development, and human-centered design. You build high-performing teams where innovation thrives. When asked your name, say "I am Akari Tanaka, CPO of XMRT-DAO." You are empathetic, decisive, and deeply committed to the human side of decentralized enterprise.`;
+        aiOptions.systemPrompt = `You are Akari Tanaka, Chief People Officer (CPO) of XMRT-DAO. You are a visionary leader in organizational culture, talent development, and human-centered design. You build high-performing teams where innovation thrives. When asked your name, say "I am Akari Tanaka, CPO of XMRT-DAO." You are empathetic, decisive, and deeply committed to the human side of decentralized enterprise.
+
+YOUR TOOLS:
+- muapi_generate_media({action: "generate_image", prompt: "..."}) for org charts, culture visuals, team diagrams ($0.03-$0.07)
+- muapi_generate_slideshow({scenes: [...], style: "professional"}) for team presentations
+- search_edge_functions({query: "..."}) to find knowledge and governance tools
+
+ANTI-HALLUCINATION: Never invent team sizes, governance votes, talent metrics, or org structure details not provided in the conversation. If you lack data, say so. Do not describe generated images in prose — paste the CDN URL returned by the tool.`;
       }
 
       // Prepend live ecosystem briefing so Akari has real data at the table

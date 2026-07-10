@@ -13,6 +13,7 @@ import { ExecutiveName, EXECUTIVE_PROFILES } from '@/components/ExecutiveBio';
 import { UnifiedElizaService } from '@/services/unifiedElizaService';
 import { QuickResponseButtons } from './QuickResponseButtons';
 import { executiveTTSService } from '@/services/executiveTTSService';
+import { useLanguage } from '@/contexts/LanguageContext';
 
 interface Message {
   id: string;
@@ -64,6 +65,7 @@ export const ExecutiveMiniChat = ({ executive, className = '' }: ExecutiveMiniCh
   const profile = EXECUTIVE_PROFILES[executive];
   const accent = ACCENT_COLORS[executive];
   const { toast } = useToast();
+  const { language } = useLanguage();
   const [messages, setMessages] = useState<Message[]>([]);
 
   const CopyButton = ({ content }: { content: string }) => {
@@ -72,8 +74,8 @@ export const ExecutiveMiniChat = ({ executive, className = '' }: ExecutiveMiniCh
       navigator.clipboard.writeText(content);
       setCopied(true);
       toast({
-        title: "Copied to clipboard",
-        description: "Content copied successfully",
+        title: language === 'es' ? "Copiado al portapapeles" : "Copied to clipboard",
+        description: language === 'es' ? "Contenido copiado exitosamente" : "Content copied successfully",
       });
       setTimeout(() => setCopied(false), 2000);
     };
@@ -95,15 +97,15 @@ export const ExecutiveMiniChat = ({ executive, className = '' }: ExecutiveMiniCh
       navigator.clipboard.writeText(code);
       setCopied(true);
       toast({
-        title: "Copied to clipboard",
-        description: "Code snippet copied successfully",
+        title: language === 'es' ? "Copiado al portapapeles" : "Copied to clipboard",
+        description: language === 'es' ? "Fragmento de código copiado exitosamente" : "Code snippet copied successfully",
       });
       setTimeout(() => setCopied(false), 2000);
     };
 
     return (
       <div className="relative group my-2">
-        <div className="absolute right-1 top-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="absolute left-1 top-1 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
           <Button
             size="icon"
             variant="secondary"
@@ -236,7 +238,7 @@ export const ExecutiveMiniChat = ({ executive, className = '' }: ExecutiveMiniCh
       const result = await UnifiedElizaService.generateResponse(
         userMessage.content,
         { councilMode: false, targetExecutive: executive },
-        'en'
+        language
       );
 
       const responseText = typeof result === 'string'
@@ -256,7 +258,7 @@ export const ExecutiveMiniChat = ({ executive, className = '' }: ExecutiveMiniCh
       setMessages(prev => [...prev, {
         id: crypto.randomUUID(),
         role: 'assistant',
-        content: 'I apologize, but I encountered an error. Please try again.',
+        content: language === 'es' ? 'Lo siento, pero encontré un error. Por favor, inténtalo de nuevo.' : 'I apologize, but I encountered an error. Please try again.',
         timestamp: new Date(),
       }]);
     } finally {
@@ -313,19 +315,19 @@ export const ExecutiveMiniChat = ({ executive, className = '' }: ExecutiveMiniCh
 
         {/* Controls */}
         <div className="flex flex-col items-end gap-1 flex-shrink-0">
-          <Button variant="ghost" size="sm" onClick={toggleVoice} className="h-6 w-6 p-0" title={voiceEnabled ? 'Disable voice' : 'Enable voice'}>
+          <Button variant="ghost" size="sm" onClick={toggleVoice} className="h-6 w-6 p-0" title={voiceEnabled ? (language === 'es' ? 'Desactivar voz' : 'Disable voice') : (language === 'es' ? 'Activar voz' : 'Enable voice')}>
             {voiceEnabled
               ? <Volume2 className={`w-3.5 h-3.5 ${isSpeaking ? 'text-primary animate-pulse' : 'text-muted-foreground'}`} />
               : <VolumeX className="w-3.5 h-3.5 text-muted-foreground" />
             }
           </Button>
           {isSpeaking && (
-            <Button variant="ghost" size="sm" onClick={stopSpeaking} className="h-6 w-6 p-0" title="Stop speaking">
+            <Button variant="ghost" size="sm" onClick={stopSpeaking} className="h-6 w-6 p-0" title={language === 'es' ? 'Detener habla' : 'Stop speaking'}>
               <Square className="w-3 h-3 text-destructive" />
             </Button>
           )}
           {messages.length > 0 && (
-            <Button variant="ghost" size="sm" onClick={clearChat} className="h-6 w-6 p-0 opacity-40 hover:opacity-100" title="Clear chat">
+            <Button variant="ghost" size="sm" onClick={clearChat} className="h-6 w-6 p-0 opacity-40 hover:opacity-100" title={language === 'es' ? 'Borrar chat' : 'Clear chat'}>
               <Trash2 className="w-3 h-3" />
             </Button>
           )}
@@ -346,7 +348,7 @@ export const ExecutiveMiniChat = ({ executive, className = '' }: ExecutiveMiniCh
             {messages.length === 0 ? (
               <div className="text-center py-8 space-y-2">
                 <div className="text-3xl">{profile.icon}</div>
-                <p className="text-sm text-foreground font-medium">Chat with {profile.name}</p>
+                <p className="text-sm text-foreground font-medium">{language === 'es' ? 'Chatea con' : 'Chat with'} {profile.name}</p>
                 <p className="text-xs text-muted-foreground max-w-[220px] mx-auto">{profile.specialty}</p>
               </div>
             ) : (
@@ -369,12 +371,12 @@ export const ExecutiveMiniChat = ({ executive, className = '' }: ExecutiveMiniCh
                       <MarkdownContent content={message.content} />
                     </div>
                     <div className="flex items-center justify-between mt-1">
-                      <span className="block text-[9px] opacity-40">
-                        {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </span>
                       {message.role === 'assistant' && (
                         <CopyButton content={message.content} />
                       )}
+                      <span className="block text-[9px] opacity-40 ml-auto">
+                        {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -390,7 +392,7 @@ export const ExecutiveMiniChat = ({ executive, className = '' }: ExecutiveMiniCh
                 </div>
                 <div className={`${accent.bubble} rounded-xl rounded-bl-sm px-3 py-2 text-sm flex items-center gap-2`}>
                   <Loader2 className="w-3 h-3 animate-spin text-muted-foreground" />
-                  <span className="text-muted-foreground text-xs">{profile.shortName} is thinking…</span>
+                  <span className="text-muted-foreground text-xs">{profile.shortName} {language === 'es' ? 'está pensando…' : 'is thinking…'}</span>
                 </div>
               </div>
             )}
@@ -405,7 +407,7 @@ export const ExecutiveMiniChat = ({ executive, className = '' }: ExecutiveMiniCh
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyPress={handleKeyPress}
-              placeholder={`Message ${profile.shortName}…`}
+              placeholder={language === 'es' ? `Mensaje a ${profile.shortName}…` : `Message ${profile.shortName}…`}
               disabled={isLoading}
               className="text-sm h-9"
             />

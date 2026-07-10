@@ -56,7 +56,7 @@ export const ExecutiveCouncilChat: React.FC<ExecutiveCouncilChatProps> = ({ deli
 
     return (
       <div className="relative group my-4">
-        <div className="absolute right-2 top-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="absolute left-2 top-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
           <Button
             size="icon"
             variant="secondary"
@@ -193,7 +193,7 @@ export const ExecutiveCouncilChat: React.FC<ExecutiveCouncilChatProps> = ({ deli
               <div className="text-sm leading-relaxed text-foreground">
                 <MarkdownContent content={perspective.perspective} />
               </div>
-              <div className="mt-2 flex justify-end">
+              <div className="mt-2 flex justify-start">
                 <CopyButton content={perspective.perspective} />
               </div>
               
@@ -229,7 +229,7 @@ export const ExecutiveCouncilChat: React.FC<ExecutiveCouncilChatProps> = ({ deli
         </div>
         <div className="text-sm leading-relaxed text-foreground pl-10 group">
           <MarkdownContent content={synthesis} />
-          <div className="mt-2 flex justify-end">
+          <div className="mt-2 flex justify-start">
             <CopyButton content={synthesis} />
           </div>
         </div>

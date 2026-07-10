@@ -121,10 +121,13 @@ class ConsolidatedTTSService {
       await this.initialize();
     }
 
+    const speechText = this.sanitizeTextForSpeech(text);
+    if (!speechText) return;
+
     // Try current provider first
     try {
       if (this.currentProvider) {
-        await this.currentProvider.speak(text, options);
+        await this.currentProvider.speak(speechText, options);
         return;
       }
     } catch (error) {
@@ -137,7 +140,7 @@ class ConsolidatedTTSService {
       
       try {
         if (provider.isAvailable()) {
-          await provider.speak(text, options);
+          await provider.speak(speechText, options);
           this.currentProvider = provider; // Switch to working provider
           console.log(`✅ Switched to ${provider.name} TTS`);
           return;
@@ -177,4 +180,3 @@ class ConsolidatedTTSService {
 }
 
 export const consolidatedTTS = new ConsolidatedTTSService();
-

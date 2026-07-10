@@ -210,7 +210,7 @@ const INTENT_MAPPINGS: Array<{
     { patterns: ['lead', 'qualify lead'], functionName: 'qualify-lead', args: {}, category: 'Leads' },
     { patterns: ['service interest', 'identify service'], functionName: 'identify-service-interest', args: {}, category: 'Leads' },
     { patterns: ['n8n', 'workflow generator'], functionName: 'n8n-workflow-generator', args: {}, category: 'Automation' },
-    { patterns: ['gemini agent', 'create agent'], functionName: 'eliza-github', args: {}, category: 'AI' },
+    { patterns: ['gemini agent', 'create agent'], functionName: 'gemini-agent-creator', args: {}, category: 'AI' },
     { patterns: ['schema', 'schema manager'], functionName: 'schema-manager', args: {}, category: 'Database' },
     { patterns: ['code lesson', 'execution lesson'], functionName: 'get-code-execution-lessons', args: {}, category: 'Learning' },
     { patterns: ['feedback', 'my feedback'], functionName: 'get-my-feedback', args: {}, category: 'Feedback' },

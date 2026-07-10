@@ -234,7 +234,7 @@ Morning check-in for ${today}.
         action: 'create_discussion',
         executive: 'eliza',
         data: {
-          repositoryId: 'R_kgDOSSxKTQ',
+          repositoryId: 'R_kgDONfvCEw',
           categoryId: 'DIC_kwDONfvCE84Cl9qy',
           title: `🌅 Morning Check-in - ${today}`,
           body: discussionBody

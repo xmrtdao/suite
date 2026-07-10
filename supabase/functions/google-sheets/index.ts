@@ -134,21 +134,6 @@ serve(async (req) => {
         result = await getSpreadsheetInfo(accessToken, body.spreadsheet_id);
         break;
 
-      case 'status':
-        result = {
-          service: 'google-sheets',
-          status: 'available',
-          configured: true,
-          actions: [
-            { name: 'create_spreadsheet', params: ['title', 'sheet_name?'], description: 'Create new spreadsheet' },
-            { name: 'read_sheet', params: ['spreadsheet_id', 'range'], description: 'Read data from sheet range' },
-            { name: 'write_sheet', params: ['spreadsheet_id', 'range', 'values'], description: 'Write data to sheet range' },
-            { name: 'append_sheet', params: ['spreadsheet_id', 'range', 'values'], description: 'Append rows to sheet' },
-            { name: 'get_spreadsheet_info', params: ['spreadsheet_id'], description: 'Get spreadsheet metadata' }
-          ]
-        };
-        break;
-
       case 'list_actions':
         result = {
           service: 'google-sheets',

@@ -8,7 +8,7 @@
 import { createClient } from '@supabase/supabase-js'
 
 // Supabase Configuration
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'http://127.0.0.1:54321'
+const supabaseUrl = 'https://vawouugtzwmejxqkeqqj.supabase.co'
 const supabaseKey = 'sb_publishable_yIaroctFhoYStx0f9XajBg_zhpuVulw'
 
 // Create Supabase client

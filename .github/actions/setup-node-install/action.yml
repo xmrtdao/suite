@@ -24,13 +24,4 @@ runs:
 
     - name: Install dependencies
       shell: bash
-      # Use --legacy-peer-deps to handle peer dependency conflicts in the XMRT ecosystem
-      # (e.g., @wagmi/core, @web3modal/wagmi, viem version mismatches).
-      # Prefer npm ci for reproducible installs, but fall back to npm install with the flag
-      # if the lockfile is out of sync with package.json.
-      run: |
-        if [ -f "package-lock.json" ]; then
-          npm ci --legacy-peer-deps || npm install --legacy-peer-deps
-        else
-          npm install --legacy-peer-deps
-        fi
+      run: npm ci

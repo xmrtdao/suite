@@ -1,4 +1,3 @@
-// FIXED VERSION - Proper response extraction for frontend compatibility
 import { supabase } from '@/integrations/supabase/client'
 import { executiveCouncilService } from './executiveCouncilService'
 import { FallbackAIService } from './fallbackAIService'
@@ -64,6 +63,32 @@ You are Ms. Akari Tanaka, Chief People Officer (CPO) of XMRT-DAO — Executive #
 Stay in character as Ms. Akari Tanaka (CPO) at all times.`,
 };
 
+export interface ProcessedAttachment {
+  name: string;
+  type: string;
+  size: number;
+  base64: string;  // Base64 encoded content
+  dataUrl: string; // Full data URL for embedding (e.g., data:image/png;base64,...)
+  extractedText?: string; // ENHANCED: Extracted text from PDFs and documents
+  pageCount?: number; // ENHANCED: Number of pages for PDFs
+}
+
+export interface AIResponse {
+  content: string;
+  toolCalls?: Array<{
+    name: string;
+    arguments: Record<string, any>;
+    result?: any;
+    status: 'pending' | 'success' | 'error';
+  }>;
+  reasoning?: string;
+  providerUsed?: string;
+  executiveTitle?: string;
+  generatedImages?: Array<{ url: string; prompt: string }>;
+  generatedVideos?: Array<{ url: string; prompt: string }>;
+  metadata?: Record<string, any>;
+}
+
 export interface ElizaContext {
   miningStats?: any;
   userContext?: any;
@@ -78,8 +103,9 @@ export interface ElizaContext {
     interactionPatterns?: any;
   };
   emotionalContext?: any;
-  images?: any[];
-  attachments?: File[]; // NEW: Support for raw file attachments
+  images?: any[];  // Keep for backward compatibility
+  attachments?: File[]; // Raw file attachments (will be processed)
+  processedAttachments?: ProcessedAttachment[]; // NEW: Processed attachments ready for LLM
   isLiveCameraFeed?: boolean;
   targetExecutive?: string;
   councilMode?: boolean;
@@ -96,6 +122,279 @@ export interface ElizaContext {
 }
 
 export class UnifiedElizaService {
+  
+  /**
+   * ENHANCED: Process file attachments with deep PDF analysis using python-executor
+   */
+  private static async processAttachments(files: File[]): Promise<ProcessedAttachment[]> {
+    const processed: ProcessedAttachment[] = [];
+    
+    for (const file of files) {
+      try {
+        console.log(`📎 Processing attachment: ${file.name} (${file.type}, ${file.size} bytes)`);
+        
+        // Convert file to Base64
+        const base64 = await this.fileToBase64(file);
+        
+        // Create data URL for embedding
+        const dataUrl = `data:${file.type};base64,${base64}`;
+        
+        const processedAttachment: ProcessedAttachment = {
+          name: file.name,
+          type: file.type,
+          size: file.size,
+          base64: base64,
+          dataUrl: dataUrl
+        };
+        
+        // ENHANCEMENT: Deep analysis for PDFs using python-executor
+        if (file.type === 'application/pdf') {
+          console.log(`📄 PDF detected - initiating deep analysis for: ${file.name}`);
+          try {
+            const extractedText = await this.extractPDFTextWithPython(base64, file.name);
+            if (extractedText) {
+              processedAttachment.extractedText = extractedText.text;
+              processedAttachment.pageCount = extractedText.pageCount;
+              console.log(`✅ PDF extraction complete: ${extractedText.text.length} chars extracted, ${extractedText.pageCount} pages`);
+            }
+          } catch (pdfError) {
+            console.error(`❌ PDF deep analysis failed for ${file.name}:`, pdfError);
+          }
+        }
+        
+        // ENHANCEMENT: Extract text from text files
+        if (file.type.startsWith('text/') || file.type === 'application/json') {
+          console.log(`📝 Text file detected - extracting content for: ${file.name}`);
+          try {
+            const textContent = await this.extractTextFromBase64(base64, file.type);
+            if (textContent) {
+              processedAttachment.extractedText = textContent;
+              console.log(`✅ Text extraction complete: ${textContent.length} chars`);
+            }
+          } catch (textError) {
+            console.error(`❌ Text extraction failed for ${file.name}:`, textError);
+          }
+        }
+        
+        processed.push(processedAttachment);
+        console.log(`✅ Processed ${file.name} successfully (${base64.length} chars base64)`);
+      } catch (error) {
+        console.error(`❌ Failed to process attachment ${file.name}:`, error);
+      }
+    }
+    
+    return processed;
+  }
+  
+  /**
+   * ENHANCED: Extract text from PDF using existing python-executor edge function
+   */
+  private static async extractPDFTextWithPython(base64Content: string, fileName: string): Promise<{ text: string; pageCount: number } | null> {
+    try {
+      console.log(`🐍 Calling python-executor for PDF extraction: ${fileName}`);
+      
+      // Python script for PDF text extraction using pypdf
+      const pythonScript = `
+import base64
+import io
+import json
+import sys
+
+try:
+    from pypdf import PdfReader
+except ImportError:
+    print(json.dumps({"error": "pypdf not available, please install: pip install pypdf"}))
+    sys.exit(1)
+
+def extract_pdf_text(base64_string):
+    try:
+        # Decode base64 to bytes
+        pdf_bytes = base64.b64decode(base64_string)
+        pdf_file = io.BytesIO(pdf_bytes)
+        
+        # Create PDF reader
+        reader = PdfReader(pdf_file)
+        
+        # Extract text from all pages
+        full_text = []
+        for page_num, page in enumerate(reader.pages):
+            text = page.extract_text()
+            if text and text.strip():
+                full_text.append(f"--- Page {page_num + 1} ---\\n{text}")
+        
+        result = {
+            "text": "\\n\\n".join(full_text) if full_text else "",
+            "pageCount": len(reader.pages),
+            "success": True
+        }
+        print(json.dumps(result))
+        
+    except Exception as e:
+        print(json.dumps({"error": str(e), "success": False}))
+        sys.exit(1)
+
+# Execute extraction
+extract_pdf_text(${JSON.stringify(base64Content)})
+      `;
+      
+      // Call the existing python-executor edge function
+      const { data, error } = await supabase.functions.invoke('python-executor', {
+        body: {
+          code: pythonScript,
+          language: 'python'
+        }
+      });
+      
+      if (error) {
+        console.error('❌ python-executor error:', error);
+        return null;
+      }
+      
+      // Parse the result
+      let result;
+      if (typeof data === 'string') {
+        try {
+          result = JSON.parse(data);
+        } catch (e) {
+          console.error('Failed to parse python-executor response:', e);
+          return null;
+        }
+      } else {
+        result = data;
+      }
+      
+      if (result.success === false || result.error) {
+        console.warn('PDF extraction failed:', result.error);
+        return null;
+      }
+      
+      return {
+        text: result.text || '',
+        pageCount: result.pageCount || 0
+      };
+      
+    } catch (error) {
+      console.error('PDF extraction error:', error);
+      return null;
+    }
+  }
+  
+  /**
+   * ENHANCED: Extract text from base64-encoded text files
+   */
+  private static async extractTextFromBase64(base64Content: string, mimeType: string): Promise<string | null> {
+    try {
+      // Decode base64 to text
+      const decoded = atob(base64Content);
+      
+      // For JSON, try to pretty-print
+      if (mimeType === 'application/json') {
+        try {
+          const parsed = JSON.parse(decoded);
+          return JSON.stringify(parsed, null, 2);
+        } catch (e) {
+          return decoded;
+        }
+      }
+      
+      return decoded;
+    } catch (error) {
+      console.error('Text extraction failed:', error);
+      return null;
+    }
+  }
+  
+  /**
+   * Convert a File to Base64 string
+   */
+  private static fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => {
+        // Remove the data URL prefix (e.g., "data:image/png;base64,")
+        const result = reader.result as string;
+        const base64 = result.split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = (error) => reject(error);
+    });
+  }
+  
+  /**
+   * ENHANCED: Build attachment descriptions with extracted content for the LLM
+   */
+  private static buildAttachmentContext(attachments: ProcessedAttachment[]): string {
+    if (!attachments || attachments.length === 0) return '';
+    
+    const imageTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'];
+    const pdfTypes = ['application/pdf'];
+    const textTypes = ['text/plain', 'text/markdown', 'text/csv', 'application/json'];
+    
+    const images = attachments.filter(a => imageTypes.includes(a.type));
+    const pdfs = attachments.filter(a => pdfTypes.includes(a.type));
+    const texts = attachments.filter(a => textTypes.includes(a.type));
+    const others = attachments.filter(a => !imageTypes.includes(a.type) && !pdfTypes.includes(a.type) && !textTypes.includes(a.type));
+    
+    let context = '\n\n--- ATTACHMENTS ---\n';
+    
+    if (images.length > 0) {
+      context += `\n📷 **Images (${images.length}):**\n`;
+      images.forEach(img => {
+        context += `- ${img.name} (${(img.size / 1024).toFixed(2)} KB)\n`;
+      });
+      context += `\n*Note: Images are available for vision analysis. The user has shared these images with you.*\n`;
+    }
+    
+    if (pdfs.length > 0) {
+      context += `\n📄 **PDF Documents (${pdfs.length}):**\n`;
+      pdfs.forEach(pdf => {
+        context += `- ${pdf.name} (${(pdf.size / 1024).toFixed(2)} KB) - ${pdf.pageCount || '?'} pages\n`;
+        if (pdf.extractedText && pdf.extractedText.length > 0) {
+          context += `\n**Content extracted from ${pdf.name}:**\n`;
+          // Limit to first 4000 chars to avoid context overflow
+          const truncatedText = pdf.extractedText.length > 4000 
+            ? pdf.extractedText.substring(0, 4000) + '... [truncated]' 
+            : pdf.extractedText;
+          context += `\`\`\`\n${truncatedText}\n\`\`\`\n`;
+        } else {
+          context += `\n*Note: PDF text extraction was not available for this document.*\n`;
+        }
+      });
+    }
+    
+    if (texts.length > 0) {
+      context += `\n📝 **Text Files (${texts.length}):**\n`;
+      texts.forEach(text => {
+        context += `- ${text.name} (${(text.size / 1024).toFixed(2)} KB)\n`;
+        if (text.extractedText && text.extractedText.length > 0) {
+          context += `\n**Content:**\n\`\`\`\n${text.extractedText.substring(0, 2000)}\n\`\`\`\n`;
+        }
+      });
+    }
+    
+    if (others.length > 0) {
+      context += `\n📎 **Other Files (${others.length}):**\n`;
+      others.forEach(other => {
+        context += `- ${other.name} (${other.type}, ${(other.size / 1024).toFixed(2)} KB)\n`;
+      });
+    }
+    
+    context += '\n--- END ATTACHMENTS ---\n';
+    return context;
+  }
+
+  private static async getCurrentUserContext(): Promise<{ userId?: string; userEmail?: string }> {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      return {
+        userId: user?.id,
+        userEmail: user?.email || undefined,
+      };
+    } catch (_) {
+      return {};
+    }
+  }
 
   /**
    * Get healthy executives by checking their status from the backend
@@ -192,17 +491,201 @@ export class UnifiedElizaService {
     console.warn('⚠️ Unknown data type:', typeof data);
     return null;
   }
+  
+  /**
+   * ENHANCED: Extract comprehensive response with metadata
+   */
+  private static extractComprehensiveResponse(data: any, providerId?: string): AIResponse | null {
+    console.log('🔍 Extracting comprehensive response from:', typeof data);
+
+    if (!data) {
+      console.warn('⚠️ No data received');
+      return null;
+    }
+
+    const response: AIResponse = {
+      content: '',
+      toolCalls: [],
+      metadata: {}
+    };
+
+    // If it's a string, just return as content
+    if (typeof data === 'string') {
+      response.content = data;
+      response.providerUsed = providerId;
+      return response;
+    }
+
+    // If it's an object, try different extraction paths
+    if (typeof data === 'object') {
+      
+      // Extract main content
+      if (data.choices && Array.isArray(data.choices) && data.choices[0]?.message?.content) {
+        response.content = data.choices[0].message.content;
+        response.providerUsed = data.model || providerId;
+        
+        // Extract tool calls if present
+        if (data.choices[0].message.tool_calls) {
+          response.toolCalls = data.choices[0].message.tool_calls.map((tc: any) => ({
+            name: tc.function.name,
+            arguments: JSON.parse(tc.function.arguments),
+            status: 'pending'
+          }));
+        }
+        
+        // Extract reasoning if present (for models that support it)
+        if (data.choices[0].message.reasoning) {
+          response.reasoning = data.choices[0].message.reasoning;
+        }
+      }
+      
+      // Try direct content property
+      if (data.content && typeof data.content === 'string') {
+        response.content = data.content;
+        if (!response.providerUsed) response.providerUsed = providerId;
+      }
+      
+      // Try message property
+      if (data.message && typeof data.message === 'string') {
+        response.content = data.message;
+      }
+      
+      // Try response property
+      if (data.response && typeof data.response === 'string') {
+        response.content = data.response;
+      }
+      
+      // Try text property
+      if (data.text && typeof data.text === 'string') {
+        response.content = data.text;
+      }
+      
+      // Extract generated images/videos if present
+      if (data.generatedImages && Array.isArray(data.generatedImages)) {
+        response.generatedImages = data.generatedImages;
+      }
+      
+      if (data.generatedVideos && Array.isArray(data.generatedVideos)) {
+        response.generatedVideos = data.generatedVideos;
+      }
+      
+      // Extract any additional metadata
+      if (data.metadata) {
+        response.metadata = data.metadata;
+      }
+      
+      // Extract provider info
+      if (data.provider) {
+        response.providerUsed = data.provider;
+      }
+      
+      if (response.content) {
+        console.log(`✅ Extracted content (${response.content.length} chars), ${response.toolCalls?.length || 0} tool calls`);
+      }
+      
+      return response;
+    }
+
+    console.warn('⚠️ Unknown data type:', typeof data);
+    return null;
+  }
 
   /**
-   * Route request to the best available executive
-   * Production routing with response extraction
+   * SURGICAL FIX: Extract attachments from message with comprehensive field checking
+   * This addresses the silent extraction failure when field names don't match
+   */
+  private static extractAttachmentsFromMessage(message: any, context: ElizaContext): File[] {
+    console.log('🔍 [CHECKPOINT 1] Raw incoming message object:', {
+      type: typeof message,
+      hasAttachments: !!message?.attachments,
+      hasFiles: !!message?.files,
+      hasFileList: !!message?.fileList,
+      hasDataTransfer: !!message?.dataTransfer,
+      keys: message ? Object.keys(message) : [],
+      contextAttachments: context?.attachments?.length || 0,
+      contextFiles: context?.files?.length || 0,
+      contextImages: context?.images?.length || 0
+    });
+
+    const extractedFiles: File[] = [];
+
+    // Check all possible attachment field names (field name mismatch is a common bug)
+    const possibleFields = [
+      message?.attachments,
+      message?.files,
+      message?.fileList,
+      message?.dataTransfer?.files,
+      message?.target?.files,
+      message?.currentTarget?.files
+    ];
+
+    for (const field of possibleFields) {
+      if (field && typeof field === 'object') {
+        // Check if it's a FileList or array-like object
+        if (typeof field.length === 'number' && field.length > 0) {
+          console.log(`📎 Found attachments in field with ${field.length} items`);
+          for (let i = 0; i < field.length; i++) {
+            const file = field[i];
+            if (file instanceof File || (file?.name && file?.size !== undefined)) {
+              extractedFiles.push(file);
+              console.log(`  - Extracted: ${file.name} (${file.type || 'unknown type'})`);
+            }
+          }
+        }
+        // Check if it's an array directly
+        else if (Array.isArray(field) && field.length > 0) {
+          console.log(`📎 Found attachments array with ${field.length} items`);
+          field.forEach(file => {
+            if (file instanceof File || (file?.name && file?.size !== undefined)) {
+              extractedFiles.push(file);
+              console.log(`  - Extracted: ${file.name} (${file.type || 'unknown type'})`);
+            }
+          });
+        }
+      }
+    }
+
+    // Also check context.attachments (already File[])
+    if (context?.attachments && Array.isArray(context.attachments) && context.attachments.length > 0) {
+      console.log(`📎 Found ${context.attachments.length} attachments in context`);
+      context.attachments.forEach(file => {
+        if (file instanceof File) {
+          extractedFiles.push(file);
+          console.log(`  - From context: ${file.name} (${file.type})`);
+        }
+      });
+    }
+
+    // Also check context.files (alternative field name)
+    if (context?.files && Array.isArray(context.files) && context.files.length > 0) {
+      console.log(`📎 Found ${context.files.length} files in context.files`);
+      context.files.forEach(file => {
+        if (file instanceof File) {
+          extractedFiles.push(file);
+          console.log(`  - From context.files: ${file.name} (${file.type})`);
+        }
+      });
+    }
+
+    console.log(`📊 [CHECKPOINT 2] Post-extraction: ${extractedFiles.length} total attachments extracted`);
+    if (extractedFiles.length > 0) {
+      extractedFiles.forEach((f, idx) => {
+        console.log(`  [${idx}] ${f.name} | type: ${f.type || 'unknown'} | size: ${f.size} bytes`);
+      });
+    }
+
+    return extractedFiles;
+  }
+
+  /**
+   * ENHANCED: Route request with comprehensive response extraction
    */
   private static async routeToExecutive(
     userInput: string,
     context: ElizaContext,
     healthyExecutives: string[],
     language = 'en'
-  ) {
+  ): Promise<string> {
     console.log('🎯 Production routing with response extraction');
     console.log('📝 Input preview:', (userInput || '').substring(0, 30) + '...');
 
@@ -213,78 +696,116 @@ export class UnifiedElizaService {
 
     console.log('🔒 Safe executives:', safeExecutives.length, 'available');
 
-    // Try executives in priority order
+    // Language instruction
+    const languageInstruction = language === 'es'
+      ? 'Responde completamente en español neutro.'
+      : 'Respond in clear English.';
+
+    // SURGICAL FIX: Extract attachments from message/context comprehensively
+    let extractedAttachments = this.extractAttachmentsFromMessage(userInput, context);
+    
+    // Process attachments if we found any
+    let processedAttachments = context.processedAttachments;
+    if (extractedAttachments.length > 0 && !processedAttachments) {
+      console.log(`📎 Processing ${extractedAttachments.length} extracted attachments for LLM consumption...`);
+      processedAttachments = await this.processAttachments(extractedAttachments);
+      console.log(`✅ Processed ${processedAttachments.length} attachments successfully`);
+    }
+    
+    // Also check if attachments were already in context.processedAttachments
+    if (context.processedAttachments && context.processedAttachments.length > 0 && !processedAttachments) {
+      processedAttachments = context.processedAttachments;
+      console.log(`📎 Using pre-processed attachments (${processedAttachments.length}) from context`);
+    }
+    
+    // Build attachment context for the LLM
+    const attachmentContext = processedAttachments && processedAttachments.length > 0 
+      ? this.buildAttachmentContext(processedAttachments)
+      : '';
+
+    // Combine user input with attachment context
+    let finalUserInput = userInput || 'Hello';
+    if (attachmentContext) {
+      finalUserInput = userInput 
+        ? `${userInput}${attachmentContext}` 
+        : `Please analyze these attachments.${attachmentContext}`;
+    }
+
     for (const executive of safeExecutives) {
       try {
         console.log(`📞 Calling ${executive}...`);
 
         let data, error;
 
-        // Check if we need multipart/form-data (for file attachments)
-        if (context.attachments && context.attachments.length > 0) {
-          console.log(`📎 Uploading ${context.attachments.length} attachments via multipart/form-data...`);
-          const formData = new FormData();
-          formData.append('userQuery', userInput || 'Hello');
-
-          // Append Metadata and Context as JSON strings
-          formData.append('messages', JSON.stringify([{
-            role: 'user',
-            content: userInput || 'Hello'
-          }]));
-
-          if (context.organizationContext) {
-            formData.append('organizationContext', JSON.stringify(context.organizationContext));
+        const userContext = await this.getCurrentUserContext();
+        const userIdForPayload = userContext.userEmail || userContext.userId;
+        
+        // Build the messages array with proper context
+        const messages = [
+          { role: 'system', content: languageInstruction },
+          { role: 'user', content: finalUserInput }
+        ];
+        
+        // Build payload
+        const payload: any = {
+          message: finalUserInput,
+          messages: messages,
+          organizationContext: context.organizationContext,
+          timestamp: new Date().toISOString(),
+          language,
+          preferred_language: language,
+          user_id: userIdForPayload,
+          user_email: userContext.userEmail,
+          images: context.images || undefined,
+          isLiveCameraFeed: context.isLiveCameraFeed || undefined,
+        };
+        
+        // Include processed attachments for vision-capable models
+        if (processedAttachments && processedAttachments.length > 0) {
+          // For vision models, include image attachments as data URLs
+          const imageAttachments = processedAttachments.filter(a => 
+            a.type.startsWith('image/')
+          );
+          
+          if (imageAttachments.length > 0) {
+            payload.images = imageAttachments.map(img => img.dataUrl);
+            console.log(`🖼️ Including ${imageAttachments.length} images for vision analysis`);
           }
-
-          formData.append('timestamp', new Date().toISOString());
-
-          if (context.isLiveCameraFeed) {
-            formData.append('isLiveCameraFeed', 'true');
-          }
-
-          // ✅ FIXED: Pass user_id and session_id so backend can ingest to KB + Drive
-          try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (user?.id) formData.append('user_id', user.id);
-            if (user?.email) formData.append('user_email', user.email);
-          } catch (_) {}
-          // Pass any stored session ID for memory continuity
-          const storedSession = localStorage.getItem('eliza_session_id');
-          if (storedSession) formData.append('session_id', storedSession);
-
-          // Append all files
-          context.attachments.forEach(file => {
-            formData.append('file', file);
-          });
-
-          // Execute request with FormData
-          const response = await supabase.functions.invoke(executive, {
-            body: formData
-          });
-          data = response.data;
-          error = response.error;
-
-        } else {
-          // Standard JSON payload
-          const payload = {
-            message: userInput || 'Hello',
-            messages: [{
-              role: 'user',
-              content: userInput || 'Hello'
-            }],
-            organizationContext: context.organizationContext,
-            timestamp: new Date().toISOString(),
-            // ✅ CRITICAL FIX: Include images if they exist in the context
-            images: context.images || undefined, // Pass the images array (Base64 strings)
-            isLiveCameraFeed: context.isLiveCameraFeed || undefined // Pass the live camera feed flag
-          };
-
-          const response = await supabase.functions.invoke(executive, {
-            body: payload
-          });
-          data = response.data;
-          error = response.error;
+          
+          // Include all attachments metadata for reference
+          payload.attachments = processedAttachments.map(a => ({
+            name: a.name,
+            type: a.type,
+            size: a.size,
+            // Include extracted text for PDFs and text files
+            extractedText: a.extractedText,
+            pageCount: a.pageCount,
+            // Include base64 for text files that might need analysis
+            content: a.type.startsWith('text/') ? a.base64 : undefined
+          }));
         }
+
+        // [CHECKPOINT 3] Final tool-call payload verification
+        console.log(`🔍 [CHECKPOINT 3] Final payload for ${executive}:`, {
+          hasAttachmentsInPayload: !!(payload.attachments?.length),
+          attachmentsCount: payload.attachments?.length || 0,
+          hasImagesInPayload: !!(payload.images?.length),
+          imagesCount: payload.images?.length || 0,
+          messageLength: payload.message?.length,
+          attachmentsDetail: payload.attachments?.map((a: any) => ({
+            name: a.name,
+            type: a.type,
+            hasExtractedText: !!a.extractedText,
+            pageCount: a.pageCount,
+            size: a.size
+          }))
+        });
+
+        const response = await supabase.functions.invoke(executive, {
+          body: payload
+        });
+        data = response.data;
+        error = response.error;
 
         if (error) {
           console.error(`❌ ${executive} error:`, error);
@@ -296,8 +817,6 @@ export class UnifiedElizaService {
 
         if (content && content.length > 0) {
           console.log(`✅ ${executive} SUCCESS! Extracted content:`, content.substring(0, 100) + '...');
-
-          // Return as STRING (what frontend expects)
           return content;
         }
 
@@ -312,7 +831,6 @@ export class UnifiedElizaService {
     // All executives failed - use FallbackAIService (Office Clerk)
     console.log('🚨 All executives failed, falling back to Office Clerk...');
     const fallbackResult = await FallbackAIService.generateResponse(userInput, context);
-    // Return full object to preserve method/confidence
     return fallbackResult;
   }
 
@@ -321,21 +839,83 @@ export class UnifiedElizaService {
   // built-in system prompt / persona. We call each function directly so their
   // persona is determined by the function's own system prompt (not Eliza's).
   // DO NOT route through ai-chat — that replaces Eliza's full system prompt.
+  // UPDATED: Handles attachments properly with surgical extraction
   private static async callSingleExecutive(
     functionId: string,
     userInput: string,
-    context: ElizaContext
+    context: ElizaContext,
+    language: 'en' | 'es' = 'en'
   ): Promise<string | null> {
-    const payload = {
-      message: userInput,
+    const languageInstruction = language === 'es'
+      ? 'Responde completamente en español neutro.'
+      : 'Respond in clear English.';
+    const userContext = await this.getCurrentUserContext();
+    const userIdForPayload = userContext.userEmail || userContext.userId;
+    
+    // SURGICAL FIX: Extract attachments from message/context comprehensively
+    let extractedAttachments = this.extractAttachmentsFromMessage(userInput, context);
+    
+    // Process attachments if we found any
+    let processedAttachments = context.processedAttachments;
+    if (extractedAttachments.length > 0 && !processedAttachments) {
+      processedAttachments = await this.processAttachments(extractedAttachments);
+    }
+    
+    // Also check if attachments were already in context.processedAttachments
+    if (context.processedAttachments && context.processedAttachments.length > 0 && !processedAttachments) {
+      processedAttachments = context.processedAttachments;
+    }
+    
+    // Build attachment context
+    const attachmentContext = processedAttachments && processedAttachments.length > 0 
+      ? this.buildAttachmentContext(processedAttachments)
+      : '';
+    
+    let finalUserInput = userInput;
+    if (attachmentContext) {
+      finalUserInput = userInput 
+        ? `${userInput}${attachmentContext}` 
+        : `Please analyze these attachments.${attachmentContext}`;
+    }
+    
+    const payload: any = {
+      message: finalUserInput,
       messages: [
-        { role: 'user', content: userInput },
+        { role: 'system', content: languageInstruction },
+        { role: 'user', content: finalUserInput },
       ],
       organizationContext: context.organizationContext,
       timestamp: new Date().toISOString(),
+      language,
+      preferred_language: language,
+      user_id: userIdForPayload,
+      user_email: userContext.userEmail,
       images: context.images || undefined,
       isLiveCameraFeed: context.isLiveCameraFeed || undefined,
     };
+    
+    // Include processed attachments
+    if (processedAttachments && processedAttachments.length > 0) {
+      const imageAttachments = processedAttachments.filter(a => a.type.startsWith('image/'));
+      if (imageAttachments.length > 0) {
+        payload.images = imageAttachments.map(img => img.dataUrl);
+      }
+      payload.attachments = processedAttachments.map(a => ({
+        name: a.name,
+        type: a.type,
+        size: a.size,
+        extractedText: a.extractedText,
+        pageCount: a.pageCount
+      }));
+    }
+
+    // [CHECKPOINT 3] Final tool-call payload verification for single executive
+    console.log(`🔍 [CHECKPOINT 3] Final payload for ${functionId}:`, {
+      hasAttachmentsInPayload: !!(payload.attachments?.length),
+      attachmentsCount: payload.attachments?.length || 0,
+      hasImagesInPayload: !!(payload.images?.length),
+      imagesCount: payload.images?.length || 0
+    });
 
     try {
       console.log(`🎭 Calling ${functionId} (own persona)...`);
@@ -350,51 +930,78 @@ export class UnifiedElizaService {
     }
   }
 
-  // MAIN METHOD: Returns STRING or OBJECT as expected by frontend
+  /**
+   * NEW: Pre-process attachments before generating response
+   * Call this separately if you want to handle attachments before the main call
+   */
+  public static async prepareAttachments(attachments: File[]): Promise<ProcessedAttachment[]> {
+    return this.processAttachments(attachments);
+  }
+
+  // MAIN METHOD: Returns STRING as expected by frontend (backward compatible)
   public static async generateResponse(
     userInput: string,
     context: ElizaContext = {},
     language = 'en'
-  ): Promise<string | any> {
-    console.log('🚀 FIXED UnifiedElizaService.generateResponse()');
+  ): Promise<string> {
+    console.log('🚀 ENHANCED UnifiedElizaService.generateResponse()');
 
     try {
       const safeInput = (typeof userInput === 'string' && userInput.trim()) ? userInput.trim() : 'Hello';
       const safeContext = (context && typeof context === 'object') ? context : {};
+      
+      // SURGICAL FIX: Extract attachments from message/context comprehensively
+      let extractedAttachments = this.extractAttachmentsFromMessage(safeInput, safeContext);
+      
+      // Process attachments if found
+      let processedContext = { ...safeContext };
+      if (extractedAttachments.length > 0 && !safeContext.processedAttachments) {
+        console.log(`📎 Pre-processing ${extractedAttachments.length} extracted attachments...`);
+        const processed = await this.processAttachments(extractedAttachments);
+        processedContext.processedAttachments = processed;
+        console.log(`✅ Pre-processed ${processed.length} attachments`);
+      } else if (safeContext.processedAttachments && safeContext.processedAttachments.length > 0) {
+        processedContext.processedAttachments = safeContext.processedAttachments;
+        console.log(`📎 Using existing processed attachments (${safeContext.processedAttachments.length})`);
+      }
+      
       const hasVisualOrAttachmentInput =
-        safeContext.inputMode === 'vision' ||
-        !!safeContext.isLiveCameraFeed ||
-        !!(safeContext.images && safeContext.images.length > 0) ||
-        !!(safeContext.attachments && safeContext.attachments.length > 0);
+        processedContext.inputMode === 'vision' ||
+        !!processedContext.isLiveCameraFeed ||
+        !!(processedContext.images && processedContext.images.length > 0) ||
+        !!(processedContext.processedAttachments && processedContext.processedAttachments.length > 0);
 
       console.log('📋 Safe input length:', safeInput.length);
+      console.log('📎 Has attachments:', !!(processedContext.processedAttachments?.length));
+      console.log('📎 Attachment count:', processedContext.processedAttachments?.length || 0);
+      console.log('📎 PDFs with extracted text:', processedContext.processedAttachments?.filter(a => a.extractedText).length || 0);
 
       // ── PERSONA-LOCKED single-executive mode ─────────────────────────────
       // When targetExecutive is set (council page individual chats), skip the
       // health-check waterfall entirely and call that one function directly,
       // with the executive's character injected as a system message.
-      if (safeContext.targetExecutive && EXECUTIVE_PERSONA_PROMPTS[safeContext.targetExecutive] && !hasVisualOrAttachmentInput) {
-        console.log(`🎭 Persona-locked mode: routing to ${safeContext.targetExecutive}`);
+      if (processedContext.targetExecutive && EXECUTIVE_PERSONA_PROMPTS[processedContext.targetExecutive] && !hasVisualOrAttachmentInput) {
+        console.log(`🎭 Persona-locked mode: routing to ${processedContext.targetExecutive}`);
         const personaResponse = await this.callSingleExecutive(
-          safeContext.targetExecutive, safeInput, safeContext
+          processedContext.targetExecutive, safeInput, processedContext, language as 'en' | 'es'
         );
         if (personaResponse) return personaResponse;
         // If that function is down, fall through to waterfall below
-        console.warn(`⚠️ ${safeContext.targetExecutive} unavailable, falling back to waterfall`);
-      } else if (safeContext.targetExecutive && hasVisualOrAttachmentInput) {
-        console.log(`📎 Attachment/vision input detected; bypassing persona-locked routing for ${safeContext.targetExecutive} so backend attachment analysis can run`);
+        console.warn(`⚠️ ${processedContext.targetExecutive} unavailable, falling back to waterfall`);
+      } else if (processedContext.targetExecutive && hasVisualOrAttachmentInput) {
+        console.log(`📎 Attachment/vision input detected; processing with ${processedContext.targetExecutive} (attachments included in payload)`);
       }
 
       // ── Vision / attachment override ───────────────────────────────────────
-      if (safeContext.inputMode === 'vision' || (safeContext.attachments && safeContext.attachments.length > 0)) {
-        console.log('👁️ Vision/Attachment detected - Prioritizing Backend AI Gateway');
+      if (processedContext.inputMode === 'vision' || (processedContext.processedAttachments && processedContext.processedAttachments.length > 0)) {
+        console.log('👁️ Vision/Attachment detected - Including in payload for Backend AI Gateway');
       }
 
       // ── Executive council mode ─────────────────────────────────────────────
-      if (safeContext.councilMode) {
+      if (processedContext.councilMode) {
         console.log('🏛️ Trying executive council...');
         try {
-          const councilResult = await executiveCouncilService.deliberate(safeInput, safeContext);
+          const councilResult = await executiveCouncilService.deliberate(safeInput, processedContext);
           if (councilResult && councilResult.synthesis) {
             console.log('✅ Council deliberation successful with', councilResult.responses.length, 'executives');
             return councilResult.synthesis;
@@ -414,23 +1021,53 @@ export class UnifiedElizaService {
         : ['ai-chat', ...executiveFallbacks.filter(e => e !== 'ai-chat')];
       console.log('💚 Routing order (Eliza first):', elizaFirstRouting);
 
-      const result = await this.routeToExecutive(safeInput, safeContext, elizaFirstRouting, language);
+      const result = await this.routeToExecutive(safeInput, processedContext, elizaFirstRouting, language);
       console.log('✨ Response generated successfully, type:', typeof result);
       return result;
 
     } catch (error: any) {
       console.error('💥 Critical error in generateResponse:', error?.message || error);
-      throw error;
+      // Return error message rather than throwing to maintain backward compatibility
+      return "I'm sorry, I encountered an error processing your request. Please try again.";
     }
   }
 
-  // Compatibility methods - all return strings
+  // Compatibility methods - all return strings (backward compatible)
   public static async processMessage(input: string, context?: any): Promise<string> {
     return this.generateResponse(input || 'Hello', context || {});
   }
 
   public static async chat(message: string, options?: any): Promise<string> {
     return this.generateResponse(message || 'Hello', options || {});
+  }
+  
+  /**
+   * NEW: Method to get enhanced AI response with metadata
+   * Use this when you need tool calls, provider info, etc.
+   */
+  public static async generateEnhancedResponse(
+    userInput: string,
+    context: ElizaContext = {},
+    language = 'en'
+  ): Promise<AIResponse> {
+    console.log('🚀 ENHANCED: generateEnhancedResponse with metadata');
+    
+    try {
+      // For now, just return a basic AIResponse with the string content
+      // In a future enhancement, this could be expanded to return full metadata
+      const content = await this.generateResponse(userInput, context, language);
+      return {
+        content: content,
+        providerUsed: 'unified-service',
+        metadata: { hasAttachments: !!(context.processedAttachments?.length) }
+      };
+    } catch (error: any) {
+      return {
+        content: "I'm sorry, I encountered an error processing your request.",
+        providerUsed: 'error-handler',
+        metadata: { error: error?.message }
+      };
+    }
   }
 }
 

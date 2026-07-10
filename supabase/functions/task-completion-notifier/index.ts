@@ -16,11 +16,26 @@ function buildCompletionEmailHtml(task: {
     outcomeSummary?: string;
     completedAt: string;
     deliverableStoragePath?: string;
+    driveDeliverables?: Array<{
+        docUrl?: string;
+        pdfUrl?: string;
+        sheetUrl?: string;
+        folderUrl?: string;
+    }>;
 }): string {
     const {
         id, title, assigneeAgentId, proofOfWorkLink,
-        expectedDeliverables, outcomeSummary, completedAt, deliverableStoragePath
+        expectedDeliverables, outcomeSummary, completedAt, deliverableStoragePath, driveDeliverables = []
     } = task;
+
+
+    const latestDeliverable = Array.isArray(driveDeliverables) && driveDeliverables.length > 0
+        ? driveDeliverables[driveDeliverables.length - 1]
+        : undefined;
+    const docLink = latestDeliverable?.docUrl;
+    const pdfLink = latestDeliverable?.pdfUrl;
+    const sheetLink = latestDeliverable?.sheetUrl;
+    const folderLink = latestDeliverable?.folderUrl;
 
     const completedDate = new Date(completedAt).toLocaleString('en-US', {
         dateStyle: 'long',
@@ -53,6 +68,10 @@ function buildCompletionEmailHtml(task: {
         ...(expectedDeliverables ? [['Expected Deliverables', expectedDeliverables]] : []),
         ...(deliverableStoragePath ? [['Storage Path', deliverableStoragePath]] : []),
         ...(outcomeSummary ? [['Outcome Summary', outcomeSummary]] : []),
+        ...(docLink ? [['Google Doc', `<a href="${docLink}">Open Document</a>`]] : []),
+        ...(pdfLink ? [['PDF Export', `<a href="${pdfLink}">Open PDF</a>`]] : []),
+        ...(sheetLink ? [['Data Sheet', `<a href="${sheetLink}">Open Sheet</a>`]] : []),
+        ...(folderLink ? [['Drive Folder', `<a href="${folderLink}">Open Folder</a>`]] : []),
     ].map(([label, value]) => `
         <tr>
           <td style="padding:8px 12px;font-family:Arial,sans-serif;font-size:13px;color:#6b7280;
@@ -158,6 +177,8 @@ serve(async (req) => {
         const taskTitle = task.title;
         const assigneeAgentId = task.assignee_agent_id;
         const proofOfWorkLink = task.proof_of_work_link;
+        const driveDeliverables = Array.isArray(task.drive_deliverables) ? task.drive_deliverables : [];
+        const latestDeliverable = driveDeliverables.length > 0 ? driveDeliverables[driveDeliverables.length - 1] : null;
         const completedAt = task.completed_at || new Date().toISOString();
         const expectedDeliverables = task.expected_deliverables;
         const deliverableStoragePath = task.deliverable_storage_path;
@@ -212,6 +233,10 @@ serve(async (req) => {
                     `**Task:** ${taskTitle}`,
                     `**Status:** ✅ COMPLETED`,
                     proofOfWorkLink ? `**Deliverable:** [View Link](${proofOfWorkLink})` : '',
+                    latestDeliverable?.docUrl ? `**Google Doc:** [Open](${latestDeliverable.docUrl})` : '',
+                    latestDeliverable?.pdfUrl ? `**PDF Export:** [Open](${latestDeliverable.pdfUrl})` : '',
+                    latestDeliverable?.sheetUrl ? `**Data Sheet:** [Open](${latestDeliverable.sheetUrl})` : '',
+                    latestDeliverable?.folderUrl ? `**Drive Folder:** [Open](${latestDeliverable.folderUrl})` : '',
                     outcomeSummary ? `**Outcome:** ${outcomeSummary}` : '',
                     expectedDeliverables ? `**Expected:** ${expectedDeliverables}` : '',
                 ].filter(Boolean).join('\n');
@@ -251,6 +276,7 @@ serve(async (req) => {
                 outcomeSummary,
                 completedAt,
                 deliverableStoragePath,
+                driveDeliverables,
             });
 
             const emailErrors: string[] = [];
@@ -260,7 +286,7 @@ serve(async (req) => {
                         body: {
                             action: 'send_email',
                             to: recipient,
-                            subject: `✅ Task Completed: ${taskTitle}`,
+                            subject: `Task Completed: ${taskTitle}`,
                             body: htmlBody,
                             is_html: true,
                         }

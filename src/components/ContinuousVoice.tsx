@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Mic, MicOff, Volume2, VolumeX } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useLanguage } from '@/contexts/LanguageContext';
 
 interface ContinuousVoiceProps {
   onTranscript: (transcript: string) => void;
@@ -21,6 +22,7 @@ export const ContinuousVoice = ({
   className,
   disabled
 }: ContinuousVoiceProps) => {
+  const { language } = useLanguage();
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [interimTranscript, setInterimTranscript] = useState('');
@@ -46,7 +48,7 @@ export const ContinuousVoice = ({
       speechRecognitionRef.current = new SpeechRecognition();
       speechRecognitionRef.current.continuous = true;
       speechRecognitionRef.current.interimResults = true;
-      speechRecognitionRef.current.lang = 'en-US';
+      speechRecognitionRef.current.lang = language === 'es' ? 'es-ES' : 'en-US';
 
       speechRecognitionRef.current.onresult = (event) => {
         let interim = '';
@@ -109,6 +111,24 @@ export const ContinuousVoice = ({
       }
     }
   }, [externalListening]);
+
+  // Update language if it changes while listening
+  useEffect(() => {
+    if (speechRecognitionRef.current) {
+      const wasListening = isListening;
+      if (wasListening) {
+        speechRecognitionRef.current.stop();
+      }
+      speechRecognitionRef.current.lang = language === 'es' ? 'es-ES' : 'en-US';
+      if (wasListening) {
+        try {
+          speechRecognitionRef.current.start();
+        } catch (e) {
+          console.error('Failed to restart with new language:', e);
+        }
+      }
+    }
+  }, [language]);
 
   const resetSilenceTimer = () => {
     if (silenceTimerRef.current) {
@@ -277,21 +297,21 @@ export const ContinuousVoice = ({
         {listening && (
           <Badge variant="default" className="flex items-center gap-1">
             <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-            Listening
+            {language === 'es' ? 'Escuchando' : 'Listening'}
           </Badge>
         )}
 
         {isProcessing && (
           <Badge variant="secondary" className="flex items-center gap-1">
             <div className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse" />
-            Processing
+            {language === 'es' ? 'Procesando' : 'Processing'}
           </Badge>
         )}
 
         {isSpeaking && (
           <Badge variant="outline" className="flex items-center gap-1">
             <Volume2 className="w-3 h-3" />
-            Eliza Speaking
+            {language === 'es' ? 'Eliza hablando' : 'Eliza Speaking'}
           </Badge>
         )}
       </div>
@@ -300,7 +320,7 @@ export const ContinuousVoice = ({
       {currentTranscript && (
         <div className="max-w-md w-full">
           <div className="bg-secondary/50 rounded-lg p-4 text-center">
-            <div className="text-xs text-muted-foreground mb-2">Live Transcript</div>
+            <div className="text-xs text-muted-foreground mb-2">{language === 'es' ? 'Transcripción en vivo' : 'Live Transcript'}</div>
             <div className="text-sm">
               <span className="text-foreground">{transcript}</span>
               {interimTranscript && (
@@ -311,7 +331,7 @@ export const ContinuousVoice = ({
             {/* Silence countdown */}
             {listening && transcript && silenceTimer > 0 && (
               <div className="mt-2 text-xs text-muted-foreground">
-                Processing in {Math.ceil((SILENCE_DURATION - silenceTimer) / 1000)}s...
+                {language === 'es' ? `Procesando en ${Math.ceil((SILENCE_DURATION - silenceTimer) / 1000)}s...` : `Processing in ${Math.ceil((SILENCE_DURATION - silenceTimer) / 1000)}s...`}
               </div>
             )}
           </div>
@@ -339,8 +359,8 @@ export const ContinuousVoice = ({
       {/* Instructions */}
       {!listening && !currentTranscript && (
         <div className="text-center text-sm text-muted-foreground max-w-sm">
-          <p>Click the microphone to start a continuous conversation with Eliza.</p>
-          <p className="mt-1 text-xs">Speak naturally - I'll respond when you pause.</p>
+          <p>{language === 'es' ? 'Haz clic en el micrófono para iniciar una conversación continua con Eliza.' : 'Click the microphone to start a continuous conversation with Eliza.'}</p>
+          <p className="mt-1 text-xs">{language === 'es' ? 'Habla con naturalidad - responderé cuando hagas una pausa.' : 'Speak naturally - I\'ll respond when you pause.'}</p>
         </div>
       )}
     </div>
