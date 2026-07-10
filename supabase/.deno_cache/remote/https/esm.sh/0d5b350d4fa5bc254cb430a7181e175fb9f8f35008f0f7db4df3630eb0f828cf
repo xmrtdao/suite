@@ -1,0 +1,7 @@
+/* esm.sh - whatwg-url@5.0.0 */
+import "/tr46@~0.0.3?target=denonext";
+import "/webidl-conversions@^3.0.0?target=denonext";
+export * from "/whatwg-url@5.0.0/denonext/whatwg-url.mjs";
+export { default } from "/whatwg-url@5.0.0/denonext/whatwg-url.mjs";
+
+// denoCacheMetadata={"headers":{"access-control-expose-headers":"X-ESM-Path","server":"cloudflare","cf-cache-status":"HIT","x-esm-path":"/whatwg-url@5.0.0/denonext/whatwg-url.mjs","cf-ray":"a190cfa0ec9292fb-SJO","last-modified":"Fri, 10 Jul 2026 04:16:48 GMT","access-control-allow-origin":"*","date":"Fri, 10 Jul 2026 16:05:38 GMT","content-type":"application/javascript; charset=utf-8","cache-control":"public, max-age=31536000, immutable","age":"100072"},"url":"https://esm.sh/whatwg-url@5.0.0?target=denonext","time":1783699536}

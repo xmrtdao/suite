@@ -1,0 +1,27 @@
+// Enhanced CORS configuration for AI Gateway
+export const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS, PUT, DELETE, PATCH",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, " + "x-supabase-auth, supabase-auth-token, x-requested-with, " + "accept, origin, referer, user-agent",
+  "Access-Control-Max-Age": "86400",
+  "Access-Control-Expose-Headers": "x-supabase-auth-token",
+  "Vary": "Origin"
+};
+export const securityHeaders = {
+  "X-Content-Type-Options": "nosniff",
+  "X-Frame-Options": "DENY",
+  "X-XSS-Protection": "1; mode=block",
+  "Referrer-Policy": "strict-origin-when-cross-origin"
+};
+export const performanceHeaders = {
+  "Cache-Control": "no-cache, no-store, must-revalidate",
+  "Pragma": "no-cache",
+  "Expires": "0"
+};
+export const productionHeaders = {
+  ...corsHeaders,
+  ...securityHeaders,
+  ...performanceHeaders
+};
+//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJzb3VyY2VzIjpbImZpbGU6Ly8vQzovVXNlcnMvUHVyZVRyZWsvRGVza3RvcC9EZXZHcnVHb2xkL3N1aXRlL3N1cGFiYXNlL2Z1bmN0aW9ucy9fc2hhcmVkL2NvcnMudHMiXSwic291cmNlc0NvbnRlbnQiOlsiLy8gRW5oYW5jZWQgQ09SUyBjb25maWd1cmF0aW9uIGZvciBBSSBHYXRld2F5XG5leHBvcnQgY29uc3QgY29yc0hlYWRlcnMgPSB7XG4gIFwiQWNjZXNzLUNvbnRyb2wtQWxsb3ctT3JpZ2luXCI6IFwiKlwiLFxuICBcIkFjY2Vzcy1Db250cm9sLUFsbG93LU1ldGhvZHNcIjogXCJHRVQsIFBPU1QsIE9QVElPTlMsIFBVVCwgREVMRVRFLCBQQVRDSFwiLFxuICBcIkFjY2Vzcy1Db250cm9sLUFsbG93LUhlYWRlcnNcIjogXG4gICAgXCJhdXRob3JpemF0aW9uLCB4LWNsaWVudC1pbmZvLCBhcGlrZXksIGNvbnRlbnQtdHlwZSwgXCIgK1xuICAgIFwieC1zdXBhYmFzZS1hdXRoLCBzdXBhYmFzZS1hdXRoLXRva2VuLCB4LXJlcXVlc3RlZC13aXRoLCBcIiArXG4gICAgXCJhY2NlcHQsIG9yaWdpbiwgcmVmZXJlciwgdXNlci1hZ2VudFwiLFxuICBcIkFjY2Vzcy1Db250cm9sLU1heC1BZ2VcIjogXCI4NjQwMFwiLFxuICBcIkFjY2Vzcy1Db250cm9sLUV4cG9zZS1IZWFkZXJzXCI6IFwieC1zdXBhYmFzZS1hdXRoLXRva2VuXCIsXG4gIFwiVmFyeVwiOiBcIk9yaWdpblwiXG59O1xuXG5leHBvcnQgY29uc3Qgc2VjdXJpdHlIZWFkZXJzID0ge1xuICBcIlgtQ29udGVudC1UeXBlLU9wdGlvbnNcIjogXCJub3NuaWZmXCIsXG4gIFwiWC1GcmFtZS1PcHRpb25zXCI6IFwiREVOWVwiLCBcbiAgXCJYLVhTUy1Qcm90ZWN0aW9uXCI6IFwiMTsgbW9kZT1ibG9ja1wiLFxuICBcIlJlZmVycmVyLVBvbGljeVwiOiBcInN0cmljdC1vcmlnaW4td2hlbi1jcm9zcy1vcmlnaW5cIlxufTtcblxuZXhwb3J0IGNvbnN0IHBlcmZvcm1hbmNlSGVhZGVycyA9IHtcbiAgXCJDYWNoZS1Db250cm9sXCI6IFwibm8tY2FjaGUsIG5vLXN0b3JlLCBtdXN0LXJldmFsaWRhdGVcIixcbiAgXCJQcmFnbWFcIjogXCJuby1jYWNoZVwiLFxuICBcIkV4cGlyZXNcIjogXCIwXCJcbn07XG5cbmV4cG9ydCBjb25zdCBwcm9kdWN0aW9uSGVhZGVycyA9IHtcbiAgLi4uY29yc0hlYWRlcnMsXG4gIC4uLnNlY3VyaXR5SGVhZGVycyxcbiAgLi4ucGVyZm9ybWFuY2VIZWFkZXJzXG59O1xuIl0sIm5hbWVzIjpbXSwibWFwcGluZ3MiOiJBQUFBLDZDQUE2QztBQUM3QyxPQUFPLE1BQU0sY0FBYztFQUN6QiwrQkFBK0I7RUFDL0IsZ0NBQWdDO0VBQ2hDLGdDQUNFLHlEQUNBLDZEQUNBO0VBQ0YsMEJBQTBCO0VBQzFCLGlDQUFpQztFQUNqQyxRQUFRO0FBQ1YsRUFBRTtBQUVGLE9BQU8sTUFBTSxrQkFBa0I7RUFDN0IsMEJBQTBCO0VBQzFCLG1CQUFtQjtFQUNuQixvQkFBb0I7RUFDcEIsbUJBQW1CO0FBQ3JCLEVBQUU7QUFFRixPQUFPLE1BQU0scUJBQXFCO0VBQ2hDLGlCQUFpQjtFQUNqQixVQUFVO0VBQ1YsV0FBVztBQUNiLEVBQUU7QUFFRixPQUFPLE1BQU0sb0JBQW9CO0VBQy9CLEdBQUcsV0FBVztFQUNkLEdBQUcsZUFBZTtFQUNsQixHQUFHLGtCQUFrQjtBQUN2QixFQUFFIn0=
+// denoCacheMetadata=3662094935871855494,7376953851292269463

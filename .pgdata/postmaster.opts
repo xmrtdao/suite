@@ -1,0 +1,1 @@
+C:/Users/PureTrek/Desktop/DevGruGold/suite/node_modules/@embedded-postgres/windows-x64/native/bin/postgres.exe "-D" "C:\Users\PureTrek\Desktop\DevGruGold\suite\.pgdata" "-p" "5432"

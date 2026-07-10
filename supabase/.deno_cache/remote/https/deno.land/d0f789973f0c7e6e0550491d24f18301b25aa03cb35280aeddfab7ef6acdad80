@@ -1,0 +1,20 @@
+// Copyright 2018-2021 the Deno authors. All rights reserved. MIT license.
+// This module is browser compatible.
+
+export const osType = (() => {
+  if (globalThis.Deno != null) {
+    return Deno.build.os;
+  }
+
+  // deno-lint-ignore no-explicit-any
+  const navigator = (globalThis as any).navigator;
+  if (navigator?.appVersion?.includes?.("Win") ?? false) {
+    return "windows";
+  }
+
+  return "linux";
+})();
+
+export const isWindows = osType === "windows";
+
+// denoCacheMetadata={"headers":{"age":"867597","accept-ranges":"bytes","server-timing":"fetchSource;dur=116","last-modified":"Tue, 15 Jun 2021 20:18:57 GMT","x-amz-cf-pop":"ORD56-P16","cross-origin-opener-policy":"same-origin","x-deno-trace-id":"83b5e9a8b74d916c7292a8690f6daf31","etag":"\"73a9f57dcaabd9ea3ecfb4f0582cee60\"","referrer-policy":"strict-origin-when-cross-origin","date":"Tue, 30 Jun 2026 15:08:09 GMT","alt-svc":"h3=\":443\"; ma=86400","x-amz-replication-status":"COMPLETED","via":"1.1 720129ba4056e60029189758c6f0de0c.cloudfront.net (CloudFront),HTTP/2 ord.vultr.prod.deno-cluster.net","x-frame-options":"DENY","cross-origin-embedder-policy":"same-origin","cross-origin-resource-policy":"same-origin","cache-control":"public, max-age=31536000, immutable","content-type":"application/typescript; charset=utf-8","server":"AmazonS3,deployd","content-security-policy":"default-src 'none'; style-src 'unsafe-inline'; sandbox","vary":"Origin","x-cache":"Hit from cloudfront","x-amz-cf-id":"3Yv8KaiQVx-3kJNIJaQbNO4YFb4FbeaHYwT3N5dpf1CPApCwWNFAgA==","strict-transport-security":"max-age=63072000; includeSubDomains; preload","x-content-type-options":"nosniff","content-length":"456","x-amz-version-id":"pxFfa_md.F1HU6jPOtS_eg4PJSokeGh5","access-control-allow-origin":"*","cache-status":"deno; hit"},"url":"https://deno.land/std@0.99.0/_util/os.ts","time":1783699685}

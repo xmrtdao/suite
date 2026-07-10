@@ -1,0 +1,6 @@
+/* esm.sh - @supabase/node-fetch@2.6.15 */
+import "/whatwg-url@^5.0.0?target=denonext";
+export * from "/@supabase/node-fetch@2.6.15/denonext/node-fetch.mjs";
+export { default } from "/@supabase/node-fetch@2.6.15/denonext/node-fetch.mjs";
+
+// denoCacheMetadata={"headers":{"content-type":"application/javascript; charset=utf-8","access-control-allow-origin":"*","server":"cloudflare","x-esm-path":"/@supabase/node-fetch@2.6.15/denonext/node-fetch.mjs","cf-cache-status":"HIT","cache-control":"public, max-age=31536000, immutable","age":"5031023","date":"Fri, 10 Jul 2026 16:05:38 GMT","last-modified":"Fri, 10 Jul 2026 04:16:48 GMT","access-control-expose-headers":"X-ESM-Path","cf-ray":"a190cfa0ec9092fb-SJO"},"url":"https://esm.sh/@supabase/node-fetch@2.6.15?target=denonext","time":1783699536}

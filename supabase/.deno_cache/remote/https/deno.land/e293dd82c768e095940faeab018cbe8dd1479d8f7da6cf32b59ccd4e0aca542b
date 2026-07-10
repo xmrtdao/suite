@@ -1,0 +1,102 @@
+// Copyright 2018-2022 the Deno authors. All rights reserved. MIT license.
+// This module is browser compatible.
+
+// Utility for representing n-tuple
+type Tuple<T, N extends number> = N extends N
+  ? number extends N ? T[] : TupleOf<T, N, []>
+  : never;
+type TupleOf<T, N extends number, R extends unknown[]> = R["length"] extends N
+  ? R
+  : TupleOf<T, N, [T, ...R]>;
+
+interface QueueNode<T> {
+  value: T;
+  next: QueueNode<T> | undefined;
+}
+
+class Queue<T> {
+  #source: AsyncIterator<T>;
+  #queue: QueueNode<T>;
+  head: QueueNode<T>;
+
+  done: boolean;
+
+  constructor(iterable: AsyncIterable<T>) {
+    this.#source = iterable[Symbol.asyncIterator]();
+    this.#queue = {
+      value: undefined!,
+      next: undefined,
+    };
+    this.head = this.#queue;
+    this.done = false;
+  }
+
+  async next() {
+    const result = await this.#source.next();
+    if (!result.done) {
+      const nextNode: QueueNode<T> = {
+        value: result.value,
+        next: undefined,
+      };
+      this.#queue.next = nextNode;
+      this.#queue = nextNode;
+    } else {
+      this.done = true;
+    }
+  }
+}
+
+/**
+ * Branches the given async iterable into the n branches.
+ *
+ * @example
+ * ```ts
+ * import { tee } from "https://deno.land/std@$STD_VERSION/async/tee.ts";
+ *
+ * const gen = async function* gen() {
+ *   yield 1;
+ *   yield 2;
+ *   yield 3;
+ * };
+ *
+ * const [branch1, branch2] = tee(gen());
+ *
+ * for await (const n of branch1) {
+ *   console.log(n); // => 1, 2, 3
+ * }
+ *
+ * for await (const n of branch2) {
+ *   console.log(n); // => 1, 2, 3
+ * }
+ * ```
+ */
+export function tee<T, N extends number = 2>(
+  iterable: AsyncIterable<T>,
+  n: N = 2 as N,
+): Tuple<AsyncIterable<T>, N> {
+  const queue = new Queue<T>(iterable);
+
+  async function* generator(): AsyncGenerator<T> {
+    let buffer = queue.head;
+    while (true) {
+      if (buffer.next) {
+        buffer = buffer.next;
+        yield buffer.value;
+      } else if (queue.done) {
+        return;
+      } else {
+        await queue.next();
+      }
+    }
+  }
+
+  const branches = Array.from({ length: n }).map(
+    () => generator(),
+  ) as Tuple<
+    AsyncIterable<T>,
+    N
+  >;
+  return branches;
+}
+
+// denoCacheMetadata={"headers":{"x-amz-cf-id":"XfepUefelXetGyxhR1d8K4KRFA21gDaejJGYILe1smeROpZNj6lJUA==","x-deno-trace-id":"f7de2572ae394a6458a06088091188a7","accept-ranges":"bytes","referrer-policy":"strict-origin-when-cross-origin","cross-origin-opener-policy":"same-origin","access-control-allow-origin":"*","x-content-type-options":"nosniff","x-frame-options":"DENY","x-amz-cf-pop":"ORD56-P16","server-timing":"fetchSource;dur=334","via":"1.1 720129ba4056e60029189758c6f0de0c.cloudfront.net (CloudFront),HTTP/2 ord.vultr.prod.deno-cluster.net","alt-svc":"h3=\":443\"; ma=86400","cache-status":"deno; hit","date":"Tue, 30 Jun 2026 15:08:05 GMT","cross-origin-embedder-policy":"same-origin","last-modified":"Wed, 14 Dec 2022 22:35:42 GMT","cross-origin-resource-policy":"same-origin","age":"867462","content-length":"2150","content-security-policy":"default-src 'none'; style-src 'unsafe-inline'; sandbox","strict-transport-security":"max-age=63072000; includeSubDomains; preload","content-type":"application/typescript; charset=utf-8","x-amz-replication-status":"COMPLETED","vary":"Origin","x-amz-server-side-encryption":"AES256","cache-control":"public, max-age=31536000, immutable","x-cache":"Hit from cloudfront","etag":"\"0bae44ce707982187e1530f5a27488f4\"","server":"AmazonS3,deployd","x-amz-version-id":"udSzv.szI37zyxAeYPincxAvuMsTsae2"},"url":"https://deno.land/std@0.168.0/async/tee.ts","time":1783699536}

@@ -1,0 +1,9 @@
+/* esm.sh - @supabase/supabase-js@2.110.2 */
+import "/@supabase/auth-js@2.110.2/denonext/auth-js.mjs";
+import "/@supabase/functions-js@2.110.2/denonext/functions-js.mjs";
+import "/@supabase/postgrest-js@2.110.2/denonext/postgrest-js.mjs";
+import "/@supabase/realtime-js@2.110.2/denonext/realtime-js.mjs";
+import "/@supabase/storage-js@2.110.2/denonext/storage-js.mjs";
+export * from "/@supabase/supabase-js@2.110.2/denonext/supabase-js.mjs";
+
+// denoCacheMetadata={"headers":{"content-type":"application/javascript; charset=utf-8","x-typescript-types":"https://esm.sh/@supabase/supabase-js@2.110.2/dist/index.d.mts","server":"cloudflare","cf-ray":"a190d64c6c75ddaa-SJO","date":"Fri, 10 Jul 2026 16:10:11 GMT","x-esm-path":"/@supabase/supabase-js@2.110.2/denonext/supabase-js.mjs","vary":"User-Agent","access-control-allow-origin":"*","cache-control":"public, max-age=31536000, immutable","access-control-expose-headers":"X-ESM-Path, X-TypeScript-Types","cf-cache-status":"DYNAMIC"},"url":"https://esm.sh/@supabase/supabase-js@2.110.2","time":1783699810}

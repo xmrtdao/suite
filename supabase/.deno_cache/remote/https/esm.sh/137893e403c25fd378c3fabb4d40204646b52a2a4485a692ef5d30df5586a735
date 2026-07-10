@@ -1,0 +1,5 @@
+/* esm.sh - webidl-conversions@3.0.1 */
+export * from "/webidl-conversions@3.0.1/denonext/webidl-conversions.mjs";
+export { default } from "/webidl-conversions@3.0.1/denonext/webidl-conversions.mjs";
+
+// denoCacheMetadata={"headers":{"content-type":"application/javascript; charset=utf-8","last-modified":"Fri, 10 Jul 2026 04:16:48 GMT","cf-ray":"a190cfa1aceb92fb-SJO","access-control-expose-headers":"X-ESM-Path","date":"Fri, 10 Jul 2026 16:05:38 GMT","access-control-allow-origin":"*","cache-control":"public, max-age=31536000, immutable","server":"cloudflare","x-esm-path":"/webidl-conversions@3.0.1/denonext/webidl-conversions.mjs","age":"7563935","cf-cache-status":"HIT"},"url":"https://esm.sh/webidl-conversions@3.0.1?target=denonext","time":1783699537}
