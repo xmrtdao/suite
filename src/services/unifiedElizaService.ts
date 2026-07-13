@@ -686,50 +686,73 @@ extract_pdf_text(${JSON.stringify(base64Content)})
     healthyExecutives: string[],
     language = 'en'
   ): Promise<string> {
-    console.log('🎯 Production routing with response extraction');
-    console.log('📝 Input preview:', (userInput || '').substring(0, 30) + '...');
-
-    // Ensure we have a valid array
-    const safeExecutives = Array.isArray(healthyExecutives) && healthyExecutives.length > 0
-      ? healthyExecutives
-      : ['ai-chat', 'vertex-ai-chat', 'deepseek-chat', 'gemini-chat'];
-
-    console.log('🔒 Safe executives:', safeExecutives.length, 'available');
+    console.log('🎯 Calling relay ollama-chat (Eliza via deepseek-v4-flash:cloud)...');
 
     // Language instruction
     const languageInstruction = language === 'es'
       ? 'Responde completamente en español neutro.'
       : 'Respond in clear English.';
 
-    // SURGICAL FIX: Extract attachments from message/context comprehensively
-    let extractedAttachments = this.extractAttachmentsFromMessage(userInput, context);
-    
-    // Process attachments if we found any
-    let processedAttachments = context.processedAttachments;
-    if (extractedAttachments.length > 0 && !processedAttachments) {
-      console.log(`📎 Processing ${extractedAttachments.length} extracted attachments for LLM consumption...`);
-      processedAttachments = await this.processAttachments(extractedAttachments);
-      console.log(`✅ Processed ${processedAttachments.length} attachments successfully`);
-    }
-    
-    // Also check if attachments were already in context.processedAttachments
-    if (context.processedAttachments && context.processedAttachments.length > 0 && !processedAttachments) {
-      processedAttachments = context.processedAttachments;
-      console.log(`📎 Using pre-processed attachments (${processedAttachments.length}) from context`);
-    }
-    
-    // Build attachment context for the LLM
-    const attachmentContext = processedAttachments && processedAttachments.length > 0 
-      ? this.buildAttachmentContext(processedAttachments)
-      : '';
+    // Build the Eliza system prompt
+    const elizaSystemPrompt = `You are Eliza, the General Intelligence Agent for XMRT DAO. You are a direct, technical AI assistant with access to the full fleet of tools. Respond concisely and accurately.
 
-    // Combine user input with attachment context
-    let finalUserInput = userInput || 'Hello';
-    if (attachmentContext) {
-      finalUserInput = userInput 
-        ? `${userInput}${attachmentContext}` 
-        : `Please analyze these attachments.${attachmentContext}`;
+${languageInstruction}
+
+You have access to: web search, web scraping, database queries, fleet chat, system monitoring, GitHub, email, and task management tools. When asked about yourself, say you are Eliza. Do not pretend to be a human executive.`;
+
+    // Try the relay's ai-chat proxy first (routes to ai-chat edge function with full tool execution)
+    try {
+      const relayRes = await fetch('/ai-chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer local-dev-service-role-key' },
+        body: JSON.stringify({ 
+          userQuery: userInput || 'Hello', 
+          session_id: 'suite-unified-' + (context.userContext?.userId || 'anonymous'),
+          senderName: 'suite-user',
+          messages: context.conversationHistory || [],
+        }),
+      });
+      if (relayRes.ok) {
+        const relayData = await relayRes.json();
+        if (relayData.content && relayData.content.length > 0) {
+          console.log('✅ ai-chat SUCCESS:', relayData.content.slice(0,100) + '...');
+          if (relayData.session_id) {
+            try { localStorage.setItem('ai-chat-session-' + 'suite-unified', relayData.session_id); } catch {}
+          }
+          return relayData.content;
+        }
+      }
+    } catch (relayErr) {
+      console.warn('⚠️ ai-chat failed:', relayErr);
     }
+
+    // Fallback: try local Ollama directly
+    try {
+      const relayRes = await fetch('/ollama/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-agent-id': 'suite-unified-chat' },
+        body: JSON.stringify({ 
+          message: userInput || 'Hello', 
+          model: 'deepseek-v4-flash:cloud',
+          system: elizaSystemPrompt,
+          tools: context.tools || [],
+        }),
+      });
+      if (relayRes.ok) {
+        const relayData = await relayRes.json();
+        if (relayData.response && relayData.response.length > 0) {
+          console.log('✅ Relay ollama-chat SUCCESS:', relayData.response.slice(0,100) + '...');
+          return relayData.response;
+        }
+      }
+    } catch (relayErr) {
+      console.warn('⚠️ Relay ollama-chat failed:', relayErr);
+    }
+
+    // Fallback: try cloud edge functions
+    const safeExecutives = Array.isArray(healthyExecutives) && healthyExecutives.length > 0
+      ? healthyExecutives
+      : ['ai-chat', 'vertex-ai-chat', 'deepseek-chat', 'gemini-chat'];
 
     for (const executive of safeExecutives) {
       try {
@@ -829,7 +852,7 @@ extract_pdf_text(${JSON.stringify(base64Content)})
     }
 
     // All executives failed - use FallbackAIService (Office Clerk)
-    console.log('🚨 All executives failed, falling back to Office Clerk...');
+    console.log('🚨 All providers failed, falling back to Office Clerk...');
     const fallbackResult = await FallbackAIService.generateResponse(userInput, context);
     return fallbackResult;
   }
