@@ -289,8 +289,21 @@ const GO_SURFING_BUTTON: ButtonConfig = {
   emoji: "🏄‍♀️",
 };
 
+const PROCEED_INTELLIGENTLY_BUTTON: ButtonConfig = {
+  label: "Proceed Intelligently",
+  emoji: "🧠",
+};
+
 const GO_SURFING_PROMPT =
   "Go Surfing 🏄‍♀️ — Eliza, use browse_web to follow your curiosity and engage your imagination for a series of 3 chained tool calls based on your own whims. Don't bother telling me what you're going to surf, just explore and return with your summarized synthesis of what you explored and what you learned.";
+
+const PROCEED_INTELLIGENTLY_PROMPT =
+  "Proceed Intelligently 🧠 — Eliza, review our conversation history and take the next most intelligent action. This could mean:\n" +
+  "1. If we were discussing a task or problem — advance it: call assign_task, search_knowledge, fleet_pulse, or the most relevant tool\n" +
+  "2. If we were exploring a topic — dive deeper: call ef:explore-curiosity with the key phrase from our conversation\n" +
+  "3. If we were debugging — check logs: call activity_log with relevant filters\n" +
+  "4. If we were planning — execute the next step\n\n" +
+  "Do NOT ask me what to do. Do NOT describe what you could do. Just pick the best tool and call it. Report what you did and what you found.";
 
 const getContextualButtons = (
   lastMessageContent: string | undefined,
@@ -367,6 +380,11 @@ const getContextualButtons = (
   if (turnCount >= 3 && !buttons.some((button) => button.label === GO_SURFING_BUTTON.label)) {
     buttons.push(GO_SURFING_BUTTON);
   }
+  
+  // Add Proceed Intelligently when there's conversation context
+  if (turnCount >= 5 && lastMessageContent && lastMessageContent.length > 20) {
+    buttons.push(PROCEED_INTELLIGENTLY_BUTTON);
+  }
 
   return buttons;
 };
@@ -401,7 +419,9 @@ export const QuickResponseButtons = ({
             onQuickResponse(
               response.label === GO_SURFING_BUTTON.label
                 ? GO_SURFING_PROMPT
-                : response.label
+                : response.label === PROCEED_INTELLIGENTLY_BUTTON.label
+                  ? PROCEED_INTELLIGENTLY_PROMPT
+                  : response.label
             )
           }
           disabled={disabled}

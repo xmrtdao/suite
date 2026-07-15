@@ -23,7 +23,8 @@ serve(async (req) => {
       auth: {
         autoRefreshToken: false,
         persistSession: false
-      }
+      },
+      db: { schema: 'app' }
     });
 
     const { action, data } = await req.json();

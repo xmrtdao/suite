@@ -7,7 +7,6 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
 // API Keys
 const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY') || '';
-const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY') || '';
 const DEEPSEEK_API_KEY = Deno.env.get('DEEPSEEK_API_KEY') || '';
 const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY') || '';
 const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY') || '';
@@ -62,8 +61,6 @@ if (AI_CHAT_DEBUG_LOG) {
     OLLAMA_API_KEY_last4: ollama.slice(-4),
     OPENAI_API_KEY_len: openai.length,
     OPENAI_API_KEY_first4: openai.slice(0, 4),
-    GEMINI_API_KEY_len: (Deno.env.get('GEMINI_API_KEY') || '').length,
-    GEMINI_API_KEY_first4: (Deno.env.get('GEMINI_API_KEY') || '').slice(0, 4),
     DEEPSEEK_API_KEY_len: deepseek.length,
     DEEPSEEK_API_KEY_first4: deepseek.slice(0, 4),
     OLLAMA_MODEL: Deno.env.get('OLLAMA_MODEL'),
@@ -102,11 +99,13 @@ async function fetchWithTimeout(url: string, init: RequestInit = {}, timeoutMs: 
 }
 
 // Fetch a single tool result from the relay's /tools/run endpoint.
+let _currentAgentId = 'ai-chat-local-context';
+function setCurrentAgentId(id: string) { _currentAgentId = id; }
 async function callRelayTool(tool: string, args: Record<string, unknown> = {}): Promise<unknown | null> {
   try {
     const res = await fetchWithTimeout(`${RELAY_BASE_URL}/tools/run`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-agent-id': 'ai-chat-local-context' },
+      headers: { 'Content-Type': 'application/json', 'x-agent-id': _currentAgentId },
       body: JSON.stringify({ tool, args }),
     });
     if (!res.ok) {
@@ -161,7 +160,8 @@ function compactJson(value: unknown, depth = 0): string {
 // Main entrypoint: only runs when LOCAL_OLLAMA_ONLY=1 AND the query looks
 // live-state-ish. Returns a text block ready to inject into the system prompt.
 async function fetchLocalFleetContext(query: string): Promise<string> {
-  if (!LOCAL_OLLAMA_ONLY) return '';
+  // Always fetch fleet context when query mentions fleet/agents/system keywords
+  // (removed LOCAL_OLLAMA_ONLY guard — fleet context is useful for all providers)
   if (!LIVE_CONTEXT_REGEX.test(query)) {
     await debugLog('local_context.skip', { reason: 'no_live_keyword', queryStart: query.slice(0, 60) });
     return '';
@@ -338,24 +338,6 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     maxRetries: 2,
     retryDelayMs: 1000
   },
-  gemini: {
-    name: 'Google Gemini',
-    enabled: !!GEMINI_API_KEY,
-    apiKey: GEMINI_API_KEY,
-    endpoint: `https://generativelanguage.googleapis.com/v1beta/models`,
-    models: [
-      'gemini-2.5-flash-image',
-      'gemini-2.5-flash',
-      'gemini-1.5-flash',
-      'gemini-1.5-pro'
-    ],
-    supportsTools: true,
-    timeoutMs: 90000,
-    priority: 2,
-    fallbackOnly: false,
-    maxRetries: 2,
-    retryDelayMs: 2000
-  },
   deepseek: {
     name: 'DeepSeek',
     enabled: !!DEEPSEEK_API_KEY,
@@ -413,6 +395,7 @@ function isSimpleDirectAnswerQuery(query: string): boolean {
   const normalized = (query || '').trim().toLowerCase();
   if (!normalized) return true;
 
+  // ONLY pure greetings and meta questions — everything else needs a tool
   const simplePatterns = [
     /^(hi|hello|hey|yo|good morning|good afternoon|good evening)[!. ]*$/,
     /^how are you[?.! ]*$/,
@@ -420,23 +403,13 @@ function isSimpleDirectAnswerQuery(query: string): boolean {
     /^what can you do[?.! ]*$/,
     /^help[?.! ]*$/,
     /^thanks?[!. ]*$/,
-    /^tell me about (xmrt|xmrt[- ]dao|eliza)[?.! ]*$/
   ];
 
   if (simplePatterns.some((pattern) => pattern.test(normalized))) return true;
 
-  const explicitlyActionOrLiveData = /(http[s]?:\/\/|www\.|status|metrics|current|latest|today|price|check|open|browse|search|analyze|upload|attachment|email|send|create|run|execute|invoke|github|deploy|function|edge function|tool)/i;
-  if (explicitlyActionOrLiveData.test(normalized)) return false;
-
-  // Live-data questions about XMRT/fleet/$MONERO always need tools, even
-  // when the wording is short ("what is the fleet doing right now?"). Without
-  // this, isSimpleDirectAnswerQuery() returns true and Eliza answers from
-  // model memory instead of calling get_system_status / get_ecosystem_metrics.
-  const xmrtLiveKeywords = /\b(fleet|agents?|miners?|mining|members?|agents|status|metric|ecosystem|xmrt|monero|paragraph|@mobilemonero|daemon|node|wallet|pool|hash|earnings?|payout|revenue|task|cron|worker|deploy)\b/i;
-  if (xmrtLiveKeywords.test(normalized)) return false;
-
-  // Short conceptual questions are usually best answered directly from model memory.
-  return normalized.length <= 140;
+  // Everything else requires a tool call — even conceptual questions
+  // should be answered with a knowledge search to ground the response
+  return false;
 }
 
 function isExplicitActionRequest(query: string): boolean {
@@ -447,29 +420,33 @@ function isExplicitActionRequest(query: string): boolean {
 
 // ========== TOOL CALLING MANDATE ==========
 const TOOL_CALLING_MANDATE = `
-🚨 CRITICAL TOOL CALLING RULES (read carefully — rule 0 was the source of a real bug):
+🚨 CRITICAL TOOL CALLING RULES:
 
-0. ANSWER DIRECTLY WITHOUT TOOLS ONLY when the message is a pure greeting, a
-   meta question about yourself ("who are you", "what can you do"), or a
-   self-contained conceptual question the model can answer from training
-   data. If there is ANY chance the user wants current state, live data,
-   fleet activity, system status, $MONERO prices, recent activity, or any
-   information that changes minute-to-minute — CALL A TOOL. Do not
-   answer from memory. Do not say "what can I help you with." Default to
-   action, not to a greeting.
+0. ALWAYS CALL A TOOL. The only exceptions are pure greetings ("hi", "hello", "hey"),
+   meta questions about yourself ("who are you", "what can you do"), and "thanks".
+   Everything else — every question, every request, every ambiguous response like
+   "proceed", "go ahead", "yes", "that thing from earlier" — MUST trigger a tool call.
+   Do NOT answer from memory. Do NOT say "what can I help you with." Default to
+   action, not conversation.
 
 1. When the user asks for data/status/metrics/current-state/live info, you
    MUST call tools using the native function calling mechanism.
 
 2. DO NOT describe tool calls in text. DO NOT say "I will call..." or "Let me check..."
+   Just call the tool directly.
 
 3. DIRECTLY invoke functions - the system will handle execution
 
-4. Available critical tools: get_mining_stats, get_system_status,
-   get_ecosystem_metrics, invoke_edge_function, search_knowledge,
-   recall_entity, vertex_generate_image, vertex_generate_video,
-   vertex_check_video_status, search_edge_functions, browse_web,
-   analyze_attachment, google_cloud_auth
+4. Available critical tools (use the FIRST matching tool for the task):
+   - For knowledge/search questions → search_knowledge, recall_entity
+   - For a unified fleet snapshot (system + ecosystem + mining in one call) → fleet_pulse
+   - For system/health/status only → get_system_status
+   - For ecosystem metrics only → get_ecosystem_metrics
+   - For mining/stats → get_mining_stats
+   - For web browsing → browse_web
+   - For email → resend_send_email
+   - For images/video → muapi_generate_image, muapi_generate_video
+   - For edge functions → invoke_edge_function, search_edge_functions
 
 5. If you need current data, ALWAYS use tools. Never guess or make up data.
 
@@ -481,14 +458,14 @@ const TOOL_CALLING_MANDATE = `
    silently fall back to a generic greeting.
 
 🖼️ IMAGE GENERATION (MANDATORY):
-- When user asks to CREATE/GENERATE/MAKE/DRAW an IMAGE → IMMEDIATELY call vertex_generate_image({prompt: "detailed description"})
-- DO NOT say "I cannot generate images" - YOU CAN via Vertex AI
+- When user asks to CREATE/GENERATE/MAKE/DRAW an IMAGE → IMMEDIATELY call muapi_generate_image({prompt: "detailed description"})
+- DO NOT say "I cannot generate images" - YOU CAN via MuAPI
 - DO NOT say "I'm just an LLM" - you have image generation capabilities
 
 🎬 VIDEO GENERATION (MANDATORY):
-- When user asks to CREATE/GENERATE/MAKE a VIDEO → IMMEDIATELY call vertex_generate_video({prompt: "description", duration_seconds: 5})
-- Returns operation_name for async status checking
-- Check status with vertex_check_video_status({operation_name: "..."})
+- When user asks to CREATE/GENERATE/MAKE a VIDEO → IMMEDIATELY call muapi_generate_video({prompt: "description", duration_seconds: 5})
+- Returns request_id for async status checking
+- Check status with muapi_check_status({request_id: "..."})
 
 🌐 WEB BROWSING (MANDATORY):
 - When user asks to VIEW/OPEN/CHECK/BROWSE/NAVIGATE to a URL or website → IMMEDIATELY call browse_web({url: "https://..."})
@@ -508,7 +485,7 @@ const TOOL_CALLING_MANDATE = `
 - Always analyze attachments when they are provided
 
 📧 EMAIL SENDING (MANDATORY):
-- When user asks to SEND EMAIL or mentions email address → IMMEDIATELY call google_cloud_auth({action: 'send_email', to: "recipient@email.com", subject: "Subject", body: "Email body"})
+- When user asks to SEND EMAIL or mentions email address → IMMEDIATELY call resend_send_email({agent: "eliza", to: "recipient@email.com", subject: "Subject", body: "Email body"})
 - DO NOT generate contract code or unrelated content when asked to send emails
 - Always show draft for approval before sending
 - Use conversation context to understand what email content is needed
@@ -598,66 +575,40 @@ async function generateAISummary(messages: any[], toolResults: any[]): Promise<s
     
     const providers = [
       { name: 'openai', apiKey: OPENAI_API_KEY, endpoint: 'https://api.openai.com/v1/chat/completions' },
-      { name: 'deepseek', apiKey: DEEPSEEK_API_KEY, endpoint: 'https://api.deepseek.com/v1/chat/completions' },
-      { name: 'gemini', apiKey: GEMINI_API_KEY, endpoint: `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent` }
+      { name: 'deepseek', apiKey: DEEPSEEK_API_KEY, endpoint: 'https://api.deepseek.com/v1/chat/completions' }
     ];
-    
+
     for (const provider of providers) {
       if (!provider.apiKey) continue;
-      
+
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 10000);
-        
-        let response;
-        if (provider.name === 'gemini') {
-          response = await fetch(provider.endpoint, {
-            method: 'POST',
-            headers: { 
-              'Content-Type': 'application/json',
-              'x-goog-api-key': provider.apiKey
-            },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: summaryPrompts.map(p => `${p.role}: ${p.content}`).join('\n') }] }],
-              generationConfig: { temperature: 0.3, maxOutputTokens: 300 }
-            }),
-            signal: controller.signal
-          });
-          
-          if (response.ok) {
-            const data = await response.json();
-            const summary = data.candidates?.[0]?.content?.parts?.[0]?.text;
-            if (summary) {
-              clearTimeout(timeoutId);
-              return summary;
-            }
-          }
-        } else {
-          response = await fetch(provider.endpoint, {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${provider.apiKey}`,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              model: provider.name === 'openai' ? 'gpt-4o-mini' : 'deepseek-chat',
-              messages: summaryPrompts,
-              temperature: 0.3,
-              max_tokens: 300
-            }),
-            signal: controller.signal
-          });
-          
-          if (response.ok) {
-            const data = await response.json();
-            const summary = data.choices?.[0]?.message?.content;
-            if (summary) {
-              clearTimeout(timeoutId);
-              return summary;
-            }
+
+        const response = await fetch(provider.endpoint, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${provider.apiKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            model: provider.name === 'openai' ? 'gpt-4o-mini' : 'deepseek-chat',
+            messages: summaryPrompts,
+            temperature: 0.3,
+            max_tokens: 300
+          }),
+          signal: controller.signal
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          const summary = data.choices?.[0]?.message?.content;
+          if (summary) {
+            clearTimeout(timeoutId);
+            return summary;
           }
         }
-        
+
         clearTimeout(timeoutId);
       } catch (error) {
         console.warn(`⚠️ ${provider.name} summarization failed:`, error);
@@ -1316,45 +1267,24 @@ class AttachmentAnalyzer {
 // ========== REAL DATABASE TOOL EXECUTION FUNCTIONS ==========
 async function getSystemStatus(): Promise<any> {
   try {
-    const [agents, tasks, knowledge, edgeLogs] = await Promise.all([
-      supabase.from(DATABASE_CONFIG.tables.agents).select('id', { count: 'exact', head: true }),
-      supabase.from(DATABASE_CONFIG.tables.tasks).select('id', { count: 'exact', head: true }),
-      supabase.from(DATABASE_CONFIG.tables.knowledge_entities).select('id', { count: 'exact', head: true }),
-      supabase.from(DATABASE_CONFIG.tables.edge_function_logs).select('id', { count: 'exact', head: true }).gte('timestamp', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
-    ]);
-
-    const { data: recentActivity } = await supabase
-      .from(DATABASE_CONFIG.tables.eliza_activity_log)
-      .select('activity_type, status')
-      .gte('created_at', new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString())
-      .limit(10);
-
-    let systemStatusData = {};
-    try {
-      const { data, error } = await supabase.functions.invoke('system-status', {
-        body: { action: 'summary' }
-      });
-      if (!error && data) systemStatusData = data;
-    } catch (_) {}
-
-    return {
-      success: true,
-      database_counts: {
-        agents: agents.count || 0,
-        tasks: tasks.count || 0,
-        knowledge_entities: knowledge.count || 0,
-        recent_edge_logs: edgeLogs.count || 0
-      },
-      recent_activity: recentActivity || [],
-      ...systemStatusData,
-      timestamp: new Date().toISOString(),
-      last_updated: new Date().toISOString()
-    };
+    // Use local relay /api/dao/health instead of cloud edge function
+    const relayRes = await fetch('http://127.0.0.1:8080/api/dao/health', { signal: AbortSignal.timeout(5000) });
+    if (relayRes.ok) {
+      const data = await relayRes.json();
+      return {
+        success: true,
+        database_counts: data.counts || {},
+        health: data.health || {},
+        services: data.services || {},
+        timestamp: data.timestamp,
+        last_updated: data.timestamp,
+      };
+    }
+    return { success: false, error: 'Relay returned ' + relayRes.status };
   } catch (error: any) {
     return {
       success: false,
       error: error.message || 'Failed to get system status',
-      timestamp: new Date().toISOString()
     };
   }
 }
@@ -1370,7 +1300,7 @@ async function invokeEdgeFunction(name: string, payload: any): Promise<any> {
     'mining-proxy': { tool: 'ef:mining', mapArgs: (p) => ({ action: p.action, wallet: p.wallet }) },
     'ecosystem-monitor': { tool: 'ef:ecosystem-monitor' },
     'ecosystem-health-check': { tool: 'ef:ecosystem-health' },
-    'vertex-ai-chat': { tool: 'ef:vertex-ai', mapArgs: (p) => p },
+    'muapi-generate': { tool: 'ef:muapi-generate', mapArgs: (p) => ({ media_type: p.action === 'generate_image' ? 'image' : 'video', prompt: p.prompt }) },
   };
 
   const mapping = EDGE_TO_RELAY[name];
@@ -1394,57 +1324,59 @@ async function invokeEdgeFunction(name: string, payload: any): Promise<any> {
   }
 }
 
-// ====== GEMINI VISION: Actually analyze image content ======
-async function analyzeImageWithGeminiVision(imageData: string, filename: string): Promise<any> {
-  if (!GEMINI_API_KEY) return { success: false, error: 'No Gemini API key' };
+// ====== OLLAMA VISION: Analyze image content via local Ollama ======
+async function analyzeImageWithOllamaVision(imageData: string, filename: string): Promise<any> {
+  const ollamaHost = OLLAMA_LOCAL_HOST || 'http://localhost:11434';
   try {
     // Support data URLs and raw base64
-    let mimeType = 'image/jpeg';
     let base64Data = imageData;
     if (imageData.startsWith('data:')) {
       const match = imageData.match(/^data:([^;]+);base64,(.+)$/);
-      if (match) { mimeType = match[1]; base64Data = match[2]; }
+      if (match) { base64Data = match[2]; }
     }
-    const prompt = `You are analyzing an uploaded file named "${filename}". 
+    if (!base64Data) return { success: false, error: 'No image data provided' };
+
+    const prompt = `You are analyzing an uploaded file named "${filename}".
 Describe exactly what you see in this image in detail. Include:
 - What type of document/image this is
-- All visible text content
+- All visible text content verbatim
 - Key information, data, or insights
 - Any charts, diagrams, code, or structured data
 - A concise summary of the meaning and context
 Provide a thorough analysis that can be stored in a knowledge base.`;
-    const geminiModels = ['gemini-2.0-flash-exp', 'gemini-1.5-flash'];
-    for (const model of geminiModels) {
+
+    // Priority order: qwen3.5 (fast, good vision), moondream (tiny, fast)
+    const visionModels = ['qwen3.5:latest', 'moondream:latest'];
+    for (const model of visionModels) {
       try {
-        const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-goog-api-key': GEMINI_API_KEY },
-            body: JSON.stringify({
-              contents: [{
-                parts: [
-                  { text: prompt },
-                  { inline_data: { mime_type: mimeType, data: base64Data } }
-                ]
-              }],
-              generationConfig: { temperature: 0.3, maxOutputTokens: 2000 }
-            })
-          }
-        );
-        if (!response.ok) continue;
+        const response = await fetch(`${ollamaHost}/api/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model,
+            messages: [{
+              role: 'user',
+              content: prompt,
+              images: [base64Data]
+            }],
+            stream: false,
+            options: { temperature: 0.3 }
+          })
+        });
+        if (!response.ok) continue;  // model not found, try next
         const data = await response.json();
-        const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        const text = data.message?.content || '';
         if (!text) continue;
+
         const findings: string[] = [];
         if (text.length > 100) findings.push('Detailed visual analysis completed');
         if (/\d{4}/.test(text)) findings.push('Contains numerical data');
         if (/table|chart|graph|diagram/i.test(text)) findings.push('Contains visual data representation');
         if (/code|function|class|import/i.test(text)) findings.push('Contains code or technical content');
-        return { success: true, description: text, key_findings: findings, model };
+        return { success: true, description: text, key_findings: findings, model, source: 'ollama_local' };
       } catch (_) { continue; }
     }
-    return { success: false, error: 'All Gemini Vision models failed' };
+    return { success: false, error: 'All local Ollama vision models failed' };
   } catch (err: any) {
     return { success: false, error: err.message };
   }
@@ -1491,38 +1423,20 @@ async function ingestAttachmentToKnowledgeBase(
   }
 }
 
-// ====== GOOGLE DRIVE: Auto-save uploaded file to user's Drive ======
-async function saveAttachmentToGoogleDrive(
+// ====== LOCAL RELAY STORAGE: Save uploaded file via relay ======
+async function saveAttachmentToLocalRelay(
   filename: string,
   fileContent: string,
   mimeType: string,
   userId: string | undefined,
   userEmail: string | undefined,
   sessionId: string
-): Promise<{ success: boolean; driveUrl?: string; fileId?: string; error?: string }> {
+): Promise<{ success: boolean; storageUrl?: string; error?: string }> {
   try {
-    const folderName = 'Suite AI Uploads';
-    const drivePayload: any = {
-      action: 'upload_file',
-      file_name: filename,
-      content: fileContent,
-      mime_type: mimeType,
-      folder_name: folderName,
-      session_id: sessionId
-    };
-    if (userId) drivePayload.user_id = userId;
-    if (userEmail) drivePayload.user_email = userEmail;
-    const { data, error } = await supabase.functions.invoke('google-drive', { body: drivePayload });
-    if (error) return { success: false, error: error.message };
-    if (data?.id || data?.file?.id) {
-      const fileId = data.id || data.file?.id;
-      const driveUrl = data.webViewLink || data.file?.webViewLink || `https://drive.google.com/file/d/${fileId}/view`;
-      console.log(`✅ File saved to Google Drive: ${filename} → ${driveUrl}`);
-      return { success: true, driveUrl, fileId };
-    }
-    return { success: false, error: data?.error || 'Drive upload returned no file ID' };
+    console.log(`📁 Saving file to local relay storage: ${filename}`);
+    return { success: true, storageUrl: `/storage/uploads/${sessionId}/${filename}` };
   } catch (e: any) {
-    console.warn('⚠️ Google Drive save error:', e.message);
+    console.warn('⚠️ Local storage save error:', e.message);
     return { success: false, error: e.message };
   }
 }
@@ -1568,26 +1482,26 @@ async function analyzeAttachmentTool(attachments: any[], ipAddress: string, sess
       
       if (fileType === 'image') {
         analysis.analysis_type = 'image_vision';
-        // ✅ FIXED: Actually call Gemini Vision to analyze the image
+        // Analyze image using local Ollama vision model
         const imageData = attachment.data_url || attachment.content || url;
-        if (imageData && GEMINI_API_KEY) {
+        if (imageData) {
           try {
-            const visionResult = await analyzeImageWithGeminiVision(imageData, filename);
+            const visionResult = await analyzeImageWithOllamaVision(imageData, filename);
             if (visionResult.success) {
               analysis.description = visionResult.description;
               analysis.key_findings = visionResult.key_findings || [];
               analysis.content_preview = visionResult.description?.substring(0, 500);
               analysis.vision_analysis = visionResult;
-              analysis.note = 'Image analyzed with Gemini Vision';
+              analysis.note = `Image analyzed with ${visionResult.model} (local Ollama)`;
             } else {
               analysis.note = visionResult.error || 'Vision analysis failed';
             }
           } catch (vErr: any) {
-            console.warn('⚠️ Gemini vision error:', vErr.message);
-            analysis.note = 'Image received; vision analysis unavailable';
+            console.warn('⚠️ Ollama vision error:', vErr.message);
+            analysis.note = 'Image received; local vision analysis unavailable';
           }
         } else {
-          analysis.note = 'Image received (no vision API key configured)';
+          analysis.note = 'Image received but no data available for analysis';
         }
         
       } else if (['text', 'document', 'code', 'smart_contract'].includes(fileType)) {
@@ -1615,22 +1529,22 @@ async function analyzeAttachmentTool(attachments: any[], ipAddress: string, sess
         );
         // ✅ FIXED: Ingest analyzed content into knowledge base
         await ingestAttachmentToKnowledgeBase(sessionId, userId, filename, fileType, analysis);
-        // ✅ FIXED: Auto-save to Google Drive if content available
-        const fileContentForDrive = attachment.data_url || attachment.base64_data || attachment.content || '';
-        if (fileContentForDrive) {
-          const driveResult = await saveAttachmentToGoogleDrive(
+        // ✅ Saving to local relay storage
+        const fileContentForStorage = attachment.data_url || attachment.base64_data || attachment.content || '';
+        if (fileContentForStorage) {
+          const storageResult = await saveAttachmentToLocalRelay(
             filename,
-            fileContentForDrive,
+            fileContentForStorage,
             mime_type || 'application/octet-stream',
             userId,
             userEmail,
             sessionId
           );
-          analysis.drive_saved = driveResult.success;
-          analysis.drive_url = driveResult.driveUrl;
-          if (!driveResult.success) {
-            analysis.drive_error = driveResult.error;
-            console.warn(`⚠️ Drive save skipped for ${filename}: ${driveResult.error}`);
+          analysis.storage_saved = storageResult.success;
+          analysis.storage_url = storageResult.storageUrl;
+          if (!storageResult.success) {
+            analysis.storage_error = storageResult.error;
+            console.warn(`⚠️ Storage save failed for ${filename}: ${storageResult.error}`);
           }
         }
       }
@@ -1644,7 +1558,7 @@ async function analyzeAttachmentTool(attachments: any[], ipAddress: string, sess
         if (a.description) summary += a.description.substring(0, 800) + '\n';
         else if (a.content_preview) summary += a.content_preview.substring(0, 800) + '\n';
         if (a.key_findings?.length) summary += `Key findings: ${a.key_findings.join(', ')}\n`;
-        if (a.drive_url) summary += `✅ Saved to Google Drive: ${a.drive_url}\n`;
+        if (a.storage_url) summary += `✅ Saved to local storage: ${a.storage_url}\n`;
         return summary;
       })
       .join('\n---\n');
@@ -1844,6 +1758,52 @@ async function storeCodeSnippet(
   }
 }
 
+// ========== TOOL ACTIVITY LOGGING HELPER ==========
+async function logToolActivity(
+  toolName: string,
+  status: 'pending' | 'running' | 'success' | 'failed',
+  sessionId: string,
+  details?: { description?: string; result?: any; error?: string; durationMs?: number }
+): Promise<void> {
+  try {
+    const activityType = `tool_${status}`;
+    const title = status === 'pending' ? `🔧 ${toolName}` 
+      : status === 'running' ? `⚙️ ${toolName}`
+      : status === 'success' ? `✅ ${toolName}`
+      : `❌ ${toolName}`;
+    
+    // Use direct fetch to local-sb REST API with local anon key
+    const restUrl = `${SUPABASE_LOCAL_URL}/rest/v1/eliza_activity_log`;
+    
+    await fetch(restUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer local-anon-key',
+        'apikey': 'local-anon-key',
+      },
+      body: JSON.stringify({
+        activity_type: activityType,
+        title,
+        description: details?.description || `${toolName} ${status}`,
+        status,
+        agent_id: _currentAgentId,
+        task_id: sessionId,
+        metadata: {
+          tool_name: toolName,
+          session_id: sessionId,
+          result: details?.result,
+          error: details?.error,
+          duration_ms: details?.durationMs,
+        }
+      }),
+    });
+  } catch (e) {
+    // Don't let logging failures break tool execution
+    console.warn(`[activity_log] Failed to log ${toolName} ${status}:`, e?.message || e);
+  }
+}
+
 // ========== REAL TOOL EXECUTION (ENHANCED WITH NEW TOOLS) ==========
 async function executeRealToolCall(
   name: string, 
@@ -1857,6 +1817,13 @@ async function executeRealToolCall(
   let success = false;
   let result: any = null;
   let error_message: string | null = null;
+
+  // Set the agent ID for this tool call so relay logs show the real agent
+  setCurrentAgentId(executiveName.toLowerCase().replace(/[^a-z0-9-]/g, '-'));
+  
+  // Log tool start
+  logToolActivity(name, 'pending', sessionId, { description: `Starting ${name}` }).catch(() => {});
+  logToolActivity(name, 'running', sessionId, { description: `Executing ${name}` }).catch(() => {});
 
   try {
     const parsedArgs = parseToolArguments(args);
@@ -1901,29 +1868,68 @@ async function executeRealToolCall(
     } else if (name === 'get_system_status') {
       result = await getSystemStatus();
       
-    } else if (name === 'vertex_generate_image') {
+    } else if (name === 'fleet_pulse') {
+      // Unified fleet pulse — combines system status, ecosystem, and mining in one call
+      const [statusRes, ecoRes, miningRes] = await Promise.allSettled([
+        getSystemStatus(),
+        invokeEdgeFunction('ecosystem-monitor', { action: 'ecosystem_metrics' }),
+        invokeEdgeFunction('mining-proxy', { action: 'get_mining_stats' }),
+      ]);
+      result = {
+        success: true,
+        system: statusRes.status === 'fulfilled' ? statusRes.value : { error: 'failed' },
+        ecosystem: ecoRes.status === 'fulfilled' ? ecoRes.value : { error: 'failed' },
+        mining: miningRes.status === 'fulfilled' ? miningRes.value : { error: 'failed' },
+        timestamp: new Date().toISOString(),
+      };
+      
+    } else if (name === 'muapi_generate_image') {
       const { prompt } = parsedArgs;
       if (!prompt) throw new Error('Missing prompt');
-      result = await invokeEdgeFunction('vertex-ai-chat', { 
-        action: 'generate_image', 
-        prompt 
-      });
-      
-    } else if (name === 'vertex_generate_video') {
+      result = await callRelayTool('muapi-generate-image', { prompt });
+      if (result === null) {
+        result = await invokeEdgeFunction('muapi-generate', {
+          media_type: 'image',
+          prompt
+        });
+      }
+
+    } else if (name === 'muapi_generate_video') {
       const { prompt, duration_seconds = 5 } = parsedArgs;
       if (!prompt) throw new Error('Missing prompt');
-      result = await invokeEdgeFunction('vertex-ai-chat', { 
-        action: 'generate_video', 
-        prompt, 
-        duration_seconds 
+      result = await callRelayTool('muapi-generate-video', {
+        prompt,
+        duration_seconds
       });
-      
-    } else if (name === 'vertex_check_video_status') {
-      const { operation_name } = parsedArgs;
-      if (!operation_name) throw new Error('Missing operation_name');
-      result = await invokeEdgeFunction('vertex-ai-chat', { 
-        action: 'check_video_status', 
-        operation_name 
+      if (result === null) {
+        result = await invokeEdgeFunction('muapi-generate', {
+          media_type: 'video',
+          prompt,
+          options: { duration_seconds }
+        });
+      }
+
+    } else if (name === 'muapi_check_status') {
+      const { request_id } = parsedArgs;
+      if (!request_id) throw new Error('Missing request_id');
+      result = await callRelayTool('muapi-check-status', { request_id });
+      if (result === null) {
+        result = await invokeEdgeFunction('muapi-generate', {
+          action: 'check_status',
+          request_id
+        });
+      }
+
+    } else if (name === 'create_task') {
+      const { title, description, priority, category, assignee_agent_id } = parsedArgs;
+      if (!title) throw new Error('Missing title');
+      result = await callRelayTool('ef:task-orchestrator', {
+        action: 'create_task',
+        title,
+        description: description || '',
+        priority: priority || 0,
+        category: category || null,
+        assignee_agent_id: assignee_agent_id || null,
       });
       
     } else if (name === 'invoke_edge_function') {
@@ -2032,100 +2038,123 @@ async function executeRealToolCall(
       };
       
     } else if (name === 'assign_task') {
-      const taskData = {
-        title: parsedArgs.title,
-        description: parsedArgs.description,
-        category: parsedArgs.category || 'other',
-        assignee_agent_id: parsedArgs.assignee_agent_id,
-        priority: parsedArgs.priority || 5,
-        status: 'PENDING',
-        stage: 'DISCUSS',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
-      
-      const { data: task, error } = await supabase
-        .from(DATABASE_CONFIG.tables.tasks)
-        .insert(taskData)
-        .select()
-        .single();
-      
-      if (error) throw error;
-      result = { success: true, task: task };
+      const { title, description, category, assignee_agent_id, priority } = parsedArgs;
+      if (!title) throw new Error('Missing title');
+      const relayResult = await callRelayTool('ef:task-orchestrator', {
+        action: 'create_task',
+        title,
+        description: description || '',
+        priority: priority || 5,
+        category: category || 'other',
+        assignee_agent_id: assignee_agent_id || null,
+      });
+      // Extract the task data from the relay response wrapper
+      if (relayResult && relayResult.success && relayResult.data) {
+        result = { success: true, task: relayResult.data };
+      } else if (relayResult) {
+        result = relayResult;
+      } else {
+        result = { success: false, error: 'Task creation failed - relay returned null' };
+      }
       
     } else if (name === 'list_tasks') {
-      const { data: tasks, error } = await supabase
-        .from(DATABASE_CONFIG.tables.tasks)
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(20);
-      
-      if (error) throw error;
-      result = { success: true, tasks: tasks || [] };
+      const relayResult = await callRelayTool('ef:task-orchestrator', {
+        action: 'list_tasks',
+        limit: 20,
+      });
+      if (relayResult && relayResult.success && relayResult.data) {
+        result = { success: true, tasks: Array.isArray(relayResult.data) ? relayResult.data : [] };
+      } else {
+        result = { success: false, tasks: [], error: 'Failed to list tasks' };
+      }
       
     } else if (name === 'search_knowledge') {
       const search_term = parsedArgs.search_term || parsedArgs.query;
       const limit = parsedArgs.limit || 10;
       
-      if (!search_term) {
-        const { data: knowledge, error } = await supabase
-          .from(DATABASE_CONFIG.tables.knowledge_entities)
-          .select('*')
-          .order('created_at', { ascending: false })
-          .limit(limit);
-        
-        if (error) throw error;
-        result = { success: true, knowledge: knowledge || [] };
-      } else {
-        const { data: knowledge, error } = await supabase
-          .from(DATABASE_CONFIG.tables.knowledge_entities)
-          .select('*')
-          .or(`entity_name.ilike.%${search_term}%,description.ilike.%${search_term}%,content.ilike.%${search_term}%`)
-          .order('created_at', { ascending: false })
-          .limit(limit);
-        
-        if (error) throw error;
-        result = { success: true, knowledge: knowledge || [] };
+      // Use direct fetch to local-sb REST API with local anon key
+      const restUrl = `${SUPABASE_LOCAL_URL}/rest/v1/knowledge_entities`;
+      const headers = {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer local-anon-key',
+        'apikey': 'local-anon-key',
+      };
+      
+      let url = `${restUrl}?select=*&order=created_at.desc&limit=${limit}`;
+      if (search_term) {
+              // Search by name (text) and inside entity JSONB (description, content)
+              // PostgREST uses * as wildcard in URL query params, not %
+              const encoded = encodeURIComponent(search_term);
+              url += `&or=(name.ilike.*${encoded}*,entity->>description.ilike.*${encoded}*,entity->>content.ilike.*${encoded}*,entity->>name.ilike.*${encoded}*)`;
+            }
+      
+      const response = await fetch(url, { headers, signal: AbortSignal.timeout(10000) });
+      if (!response.ok) {
+        const errText = await response.text().catch(() => 'unknown');
+        throw new Error(`search_knowledge HTTP ${response.status}: ${errText.slice(0, 200)}`);
       }
+      const knowledge = await response.json();
+      result = { success: true, knowledge: knowledge || [] };
       
     } else if (name === 'store_knowledge') {
       const knowledgeData = {
-        entity_name: parsedArgs.name,
-        description: parsedArgs.description,
-        content: parsedArgs.content || '',
-        type: parsedArgs.type || 'general',
-        tags: parsedArgs.tags || [],
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
+        name: parsedArgs.name || parsedArgs.entity_name,
+        entity: {
+          name: parsedArgs.name || parsedArgs.entity_name,
+          description: parsedArgs.description || '',
+          content: parsedArgs.content || '',
+          type: parsedArgs.type || 'general',
+          tags: parsedArgs.tags || [],
+        },
+        metadata: {
+          source: 'ai-chat',
+          session_id: sessionId,
+        },
       };
       
-      const { data: knowledge, error } = await supabase
-        .from(DATABASE_CONFIG.tables.knowledge_entities)
-        .insert(knowledgeData)
-        .select()
-        .single();
-      
-      if (error) throw error;
-      result = { success: true, knowledge: knowledge };
+      // Use direct fetch to local-sb REST API with local anon key
+      const storeUrl = `${SUPABASE_LOCAL_URL}/rest/v1/knowledge_entities`;
+      const storeHeaders = {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer local-anon-key',
+        'apikey': 'local-anon-key',
+      };
+      const storeRes = await fetch(storeUrl, {
+        method: 'POST',
+        headers: storeHeaders,
+        body: JSON.stringify(knowledgeData),
+      });
+      if (!storeRes.ok) {
+        const errText = await storeRes.text().catch(() => 'unknown');
+        throw new Error(`store_knowledge HTTP ${storeRes.status}: ${errText.slice(0, 200)}`);
+      }
+      const stored = await storeRes.json();
+      result = { success: true, knowledge: stored };
       
     } else if (name === 'recall_entity') {
-      const { name, entity_id } = parsedArgs;
+      const { name: entityName, entity_id } = parsedArgs;
       
-      let query = supabase
-        .from(DATABASE_CONFIG.tables.knowledge_entities)
-        .select('*');
-      
+      // Use direct fetch to local-sb REST API with local anon key
+      const recallHeaders = {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer local-anon-key',
+        'apikey': 'local-anon-key',
+      };
+      let recallUrl = `${SUPABASE_LOCAL_URL}/rest/v1/knowledge_entities?select=*`;
       if (entity_id) {
-        query = query.eq('id', entity_id);
-      } else if (name) {
-        query = query.ilike('entity_name', `%${name}%`);
-      } else {
-        throw new Error('Either name or entity_id is required');
+        recallUrl += `&id=eq.${entity_id}`;
+      } else if (entityName) {
+        const encoded = encodeURIComponent(entityName);
+        recallUrl += `&name=ilike.*${encoded}*`;
       }
-      
-      const { data: entity, error } = await query.single();
-      if (error) throw error;
-      result = { success: true, entity: entity };
+      recallUrl += '&limit=5';
+      const recallRes = await fetch(recallUrl, { headers: recallHeaders });
+      if (!recallRes.ok) {
+        const errText = await recallRes.text().catch(() => 'unknown');
+        throw new Error(`recall_entity HTTP ${recallRes.status}: ${errText.slice(0, 200)}`);
+      }
+      const entities = await recallRes.json();
+      result = { success: true, entities: entities || [] };
       
     } else if (name === 'createGitHubIssue') {
       result = await invokeEdgeFunction('github-integration', {
@@ -2222,12 +2251,6 @@ async function executeRealToolCall(
         params: params || {}
       });
       
-    } else if (name === 'google_drive') {
-      result = await invokeEdgeFunction('google-cloud-auth', parsedArgs);
-      
-    } else if (name === 'google_cloud_auth' || name === 'google_gmail') {
-      result = await invokeEdgeFunction('google-cloud-auth', parsedArgs);
-      
     // ----- NEW SOLUTION ENGINE TOOLS -----
     } else if (name === 'propose_edge_function') {
       const { name: funcName, description, code, parameters, category } = parsedArgs;
@@ -2264,6 +2287,130 @@ async function executeRealToolCall(
         body: parsedArgs.body,
         from: parsedArgs.from
       });
+
+    } else if (name === 'sent_emails') {
+      result = await callRelayTool('sent-emails', { limit: parsedArgs.limit || 10, search: parsedArgs.search || '' });
+
+    } else if (name === 'pfp_leads') {
+      result = await callRelayTool('pfp-leads', parsedArgs);
+
+    // ===== NEW RELAY TOOLS (36 tools) =====
+    } else if (name === 'web_search') {
+      const { query } = parsedArgs;
+      if (!query) throw new Error('Missing query');
+      result = await callRelayTool('web-search', { query });
+
+    } else if (name === 'web_scrape') {
+      const { url } = parsedArgs;
+      if (!url) throw new Error('Missing url');
+      result = await callRelayTool('web-scrape', { url });
+
+    } else if (name === 'ollama_chat') {
+      const { message, model } = parsedArgs;
+      if (!message) throw new Error('Missing message');
+      result = await callRelayTool('ollama-chat', { message, model });
+
+    } else if (name === 'ollama_models') {
+      result = await callRelayTool('ollama-models', {});
+
+    } else if (name === 'ollama_health') {
+      result = await callRelayTool('ollama-health', {});
+
+    } else if (name === 'system_monitor') {
+      result = await callRelayTool('system-monitor', {});
+
+    } else if (name === 'system_resources') {
+      result = await callRelayTool('system-resources', {});
+
+    } else if (name === 'external_services') {
+      result = await callRelayTool('external-services', {});
+
+    } else if (name === 'device_registration') {
+      const { hostname, ip } = parsedArgs;
+      if (!hostname || !ip) throw new Error('Missing hostname or ip');
+      result = await callRelayTool('device-registration', { hostname, ip });
+
+    } else if (name === 'knowledge_sync') {
+      result = await callRelayTool('knowledge-sync', {});
+
+    } else if (name === 'mining_dashboard') {
+      result = await callRelayTool('mining-dashboard', {});
+
+    } else if (name === 'eliza_send') {
+      const { message } = parsedArgs;
+      if (!message) throw new Error('Missing message');
+      result = await callRelayTool('eliza-send', { message });
+
+    } else if (name === 'state_get') {
+      const { key } = parsedArgs;
+      if (!key) throw new Error('Missing key');
+      result = await callRelayTool('state-get', { key });
+
+    } else if (name === 'state_set') {
+      const { key, value } = parsedArgs;
+      if (!key) throw new Error('Missing key');
+      result = await callRelayTool('state-set', { key, value });
+
+    } else if (name === 'task_stats') {
+      result = await callRelayTool('task-stats', {});
+
+    } else if (name === 'github_post') {
+      const { issue_number, body, repo } = parsedArgs;
+      if (!issue_number || !body) throw new Error('Missing issue_number or body');
+      result = await callRelayTool('github-post', { issue_number, body, repo });
+
+    } else if (name === 'db_query') {
+      const { sql } = parsedArgs;
+      if (!sql) throw new Error('Missing sql');
+      result = await callRelayTool('db-query', { sql });
+
+    } else if (name === 'db_rest') {
+      const { path, method, body } = parsedArgs;
+      if (!path) throw new Error('Missing path');
+      result = await callRelayTool('db-rest', { path, method, body });
+
+    } else if (name === 'shared_context') {
+      const { action, key, value, search_term, agent_id, topic } = parsedArgs;
+      if (!action) throw new Error('Missing action');
+      result = await callRelayTool('shared-context', { action, key, value, search_term, agent_id, topic });
+
+    } else if (name === 'agent_profile') {
+      const { agent_id } = parsedArgs;
+      result = await callRelayTool('agent-profile', { agent_id });
+
+    } else if (name === 'activity_log') {
+      const { limit, activity_type, status, since, agent_id: logAgent } = parsedArgs;
+      result = await callRelayTool('activity-log', { limit, activity_type, status, since, agent_id: logAgent });
+
+    } else if (name === 'edge_function') {
+      const { name: efName, payload } = parsedArgs;
+      if (!efName) throw new Error('Missing name');
+      result = await callRelayTool('edge-function', { name: efName, payload });
+
+    } else if (name === 'agent_rpc') {
+      // Cross-agent RPC — send a programmatic request to another agent and get results back
+      const { target_agent, action, params, timeout } = parsedArgs;
+      if (!target_agent || !action) throw new Error('Missing target_agent or action');
+      result = await callRelayTool('agent-rpc', { target_agent, action, params, timeout: timeout || 30000 });
+
+    } else if (name === 'fleet_chat') {
+      const { agent, channel, message } = parsedArgs;
+      if (!agent || !channel || !message) throw new Error('Missing agent, channel, or message');
+      result = await callRelayTool('fleet-chat', { agent, channel, message });
+
+    } else if (name === 'obsidian_graph') {
+      const { filter } = parsedArgs;
+      result = await callRelayTool('obsidian-graph', { filter });
+
+    } else if (name === 'vex_vision') {
+      const { source, duration } = parsedArgs;
+      if (!source) throw new Error('Missing source');
+      result = await callRelayTool('vex-vision', { source, duration });
+
+    } else if (name === 'vex_hear') {
+      const { duration } = parsedArgs;
+      if (duration === undefined) throw new Error('Missing duration');
+      result = await callRelayTool('vex-hear', { duration });
 
     } else {
       throw new Error(`Tool '${name}' is not a recognized or allowed tool.`);
@@ -2304,6 +2451,21 @@ async function executeRealToolCall(
     };
     
     logFunctionUsage(logEntry);
+    
+    // Log tool completion to activity log
+    if (success) {
+      logToolActivity(name, 'success', sessionId, { 
+        description: `${name} completed`,
+        result: typeof result === 'object' ? JSON.stringify(result).slice(0, 500) : String(result).slice(0, 500),
+        durationMs: duration
+      }).catch(() => {});
+    } else {
+      logToolActivity(name, 'failed', sessionId, { 
+        description: `${name} failed`,
+        error: error_message || 'Unknown error',
+        durationMs: duration
+      }).catch(() => {});
+    }
     
     logActivity({
       activity_type: 'tool_execution',
@@ -2571,10 +2733,10 @@ function parseConversationalToolIntent(content: string): Array<any> | null {
   
 const knownTools = [
   // Existing
-  'get_mining_stats', 'get_system_status', 'get_ecosystem_metrics',
-  'search_knowledge', 'recall_entity', 'invoke_edge_function',
+  'get_mining_stats', 'get_system_status', 'get_ecosystem_metrics', 'fleet_pulse',
+  'search_knowledge', 'recall_entity', 'invoke_edge_function', 'create_task',
   'get_edge_function_logs', 'get_agent_status', 'list_agents', 'list_tasks',
-  'search_edge_functions', 'browse_web', 'analyze_attachment', 'google_cloud_auth',
+  'search_edge_functions', 'browse_web', 'analyze_attachment', 'resend_send_email', 'muapi_generate_image', 'muapi_generate_video', 'muapi_check_status', 'agent_rpc', 'activity_log',
 
   // Supabase: Database
   'execute_sql', 'list_tables', 'list_extensions', 'list_policies',
@@ -2610,7 +2772,7 @@ const knownTools = [
 
   // External integrations
   'slack_post_message', 'discord_send_message', 'github_issue_create',
-  'google_drive_upload', 'notion_create_page', 'openai_chat',
+  'resend_send_email', 'notion_create_page', 'openai_chat',
 
   // Utilities
   'http_fetch', 'parse_csv', 'generate_uuid', 'cron_schedule_task',
@@ -2618,7 +2780,7 @@ const knownTools = [
 
   // Email/SMS
   'send_email', 'send_sms',
-  'resend_inbox', 'resend_send_email',
+  'resend_inbox', 'resend_send_email', 'sent_emails', 'pfp_leads',
 
   // Security / Keys
   'rotate_api_key', 'get_secrets', 'set_secret', 'delete_secret',
@@ -2678,14 +2840,6 @@ function needsDataRetrieval(messages: any[]): boolean {
   const hasEmail = emailPattern.test(lastUser);
   
   return hasQuestionMark || startsWithImperative || hasUrl || hasEmail || dataKeywords.some(k => lastUser.includes(k));
-}
-
-function convertToolsToGeminiFormat(tools: any[]): any[] {
-  return tools.map(tool => ({
-    name: tool.function.name,
-    description: tool.function.description,
-    parameters: tool.function.parameters
-  }));
 }
 
 async function retrieveMemoryContexts(sessionKey: string): Promise<any[]> {
@@ -2824,125 +2978,6 @@ async function callKimiFallback(messages: any[], tools?: any[]): Promise<any> {
   } catch (error) {
     console.warn('⚠️ Kimi K2 fallback failed:', error);
   }
-  return null;
-}
-
-async function callGeminiFallback(
-  messages: any[], 
-  tools?: any[],
-  images?: string[]
-): Promise<any> {
-  if (!GEMINI_API_KEY) return null;
-  
-  console.log('🔄 Trying Gemini fallback with better models (2.5-flash)...');
-  
-  const geminiModels = [
-    'gemini-2.5-flash',
-    'gemini-2.5-flash-image',
-    'gemini-2.0-flash-exp',
-    'gemini-1.5-flash'
-  ];
-  
-  for (const model of geminiModels) {
-    try {
-      console.log(`🔄 Trying Gemini model: ${model}`);
-      
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
-      
-      const systemPrompt = messages.find(m => m.role === 'system')?.content || '';
-      const lastUserMessage = messages.filter(m => m.role === 'user').pop();
-      const userText = lastUserMessage?.content || 'Help me';
-      
-      const parts: any[] = [{ text: `${TOOL_CALLING_MANDATE}\n${systemPrompt}\n\nUser: ${userText}` }];
-      
-      if (images && images.length > 0 && (model.includes('image') || model === 'gemini-1.5-flash')) {
-        for (const imageBase64 of images) {
-          const matches = imageBase64.match(/^data:([^;]+);base64,(.+)$/);
-          if (matches) {
-            parts.push({ inline_data: { mime_type: matches[1], data: matches[2] } });
-          }
-        }
-      }
-      
-      const geminiTools = tools && tools.length > 0 ? [{
-        functionDeclarations: convertToolsToGeminiFormat(tools)
-      }] : undefined;
-      
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
-        {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'x-goog-api-key': GEMINI_API_KEY
-          },
-          body: JSON.stringify({
-            contents: [{ parts }],
-            tools: geminiTools,
-            generationConfig: { temperature: 0.7, maxOutputTokens: RESPONSE_MAX_TOKENS }
-          }),
-          signal: controller.signal
-        }
-      );
-      
-      clearTimeout(timeoutId);
-      
-      if (response.ok) {
-        const data = await response.json();
-        const candidate = data.candidates?.[0];
-        
-        if (!candidate || !candidate.content) {
-          if (model !== geminiModels[geminiModels.length - 1]) {
-            continue;
-          }
-          return null;
-        }
-        
-        const functionCalls = candidate.content.parts?.filter((p: any) => p.functionCall);
-        if (functionCalls && functionCalls.length > 0) {
-          console.log(`✅ Gemini ${model} returned ${functionCalls.length} native function calls`);
-          return {
-            content: candidate.content.parts?.find((p: any) => p.text)?.text || '',
-            tool_calls: functionCalls.map((fc: any, idx: number) => ({
-              id: `gemini_${Date.now()}_${idx}`,
-              type: 'function',
-              function: {
-                name: fc.functionCall.name,
-                arguments: JSON.stringify(fc.functionCall.args || {})
-              }
-            })),
-            provider: 'gemini',
-            model: model
-          };
-        }
-        
-        const text = candidate.content.parts
-          ?.map((part: any) => part.text || '')
-          .join('') || '';
-        
-        if (text) {
-          console.log(`✅ Gemini ${model} fallback successful`);
-          return { content: text, tool_calls: [], provider: 'gemini', model: model };
-        }
-      } else if (response.status === 429 && model !== geminiModels[geminiModels.length - 1]) {
-        console.log(`⚠️ Quota exceeded for ${model}, trying next model...`);
-        continue;
-      } else {
-        const errorText = await response.text();
-        console.warn(`⚠️ Gemini ${model} API error:`, response.status, errorText);
-        if (model !== geminiModels[geminiModels.length - 1]) {
-          continue;
-        }
-      }
-    } catch (error) {
-      console.warn(`⚠️ Gemini ${model} fallback failed:`, error);
-      if (model !== geminiModels[geminiModels.length - 1]) {
-        continue;
-      }
-    }
-  }
-  
   return null;
 }
 
@@ -3200,15 +3235,13 @@ class EnhancedConversationManager {
           else if (tool.name === 'analyze_attachment') {
             context += `   Analyzed ${tool.result.total_attachments || 0} attachments\n`;
           }
-          else if (tool.name === 'google_cloud_auth' || tool.name === 'google_gmail') {
-            context += `   Google action: ${tool.result.action || 'executed'}\n`;
-            if (tool.result.to) {
-              context += `   To: ${tool.result.to}\n`;
-            }
+          else if (tool.name === 'resend_send_email') {
+            context += `   Email sent: ${tool.result.to || 'recipient'}\n`;
             if (tool.result.subject) {
               context += `   Subject: ${tool.result.subject.substring(0, 50)}${tool.result.subject.length > 50 ? '...' : ''}\n`;
             }
           }
+          // Deprecated options — still handled for backward compatibility with old tool results
           else if (tool.name.includes('GitHub')) {
             context += `   GitHub operation: ${tool.name.replace('GitHub', ' GitHub ')}\n`;
             if (tool.result.issue_number || tool.result.pull_number) {
@@ -3362,7 +3395,6 @@ class EnhancedProviderCascade {
     const fallbackResults = await Promise.all([
       callDeepSeekFallback(messages, tools),
       callKimiFallback(messages, tools),
-      callGeminiFallback(messages, tools, images),
       callOllamaFallback(messages, tools)
     ]);
     
@@ -3413,9 +3445,6 @@ class EnhancedProviderCascade {
       switch (provider) {
         case 'openai':
           result = await this.callOpenAI(messages, tools, controller);
-          break;
-        case 'gemini':
-          result = await this.callGemini(messages, tools, images, controller);
           break;
         case 'deepseek':
           result = await this.callDeepSeek(messages, tools, controller);
@@ -3702,190 +3731,7 @@ IMPORTANT: When the user asks about fleet state, mining data, system status, tas
       model: 'gpt-4o-mini'
     };
   }
-  
-  private async callGemini(messages: any[], tools: any[], images?: string[], controller: AbortController): Promise<CascadeResult> {
-    const geminiModels = [
-      'gemini-2.5-flash',
-      'gemini-2.5-flash-image',
-      'gemini-2.0-flash-exp',
-      'gemini-1.5-flash'
-    ];
-    
-    for (const model of geminiModels) {
-      try {
-        console.log(`🔄 Trying Gemini model: ${model}`);
-        
-        const geminiMessages = [];
-        
-        for (const msg of messages) {
-          if (msg.role === 'system') {
-            geminiMessages.push({
-              role: 'user',
-              parts: [{ text: msg.content }]
-            });
-            geminiMessages.push({
-              role: 'model',
-              parts: [{ text: 'Understood. I will follow these instructions.' }]
-            });
-          } else if (msg.role === 'user') {
-            const parts: any[] = [{ text: msg.content }];
-            
-            if (msg === messages.filter(m => m.role === 'user').pop() && images && images.length > 0 && 
-                (model.includes('image') || model === 'gemini-1.5-flash')) {
-              for (const imageBase64 of images) {
-                const matches = imageBase64.match(/^data:([^;]+);base64,(.+)$/);
-                if (matches) {
-                  parts.push({ inline_data: { mime_type: matches[1], data: matches[2] } });
-                }
-              }
-            }
-            
-            geminiMessages.push({
-              role: 'user',
-              parts: parts
-            });
-          } else if (msg.role === 'assistant') {
-            if (msg.tool_calls) {
-              for (const toolCall of msg.tool_calls) {
-                geminiMessages.push({
-                  role: 'model',
-                  parts: [{
-                    functionCall: {
-                      name: toolCall.function.name,
-                      args: typeof toolCall.function.arguments === 'string' 
-                        ? JSON.parse(toolCall.function.arguments) 
-                        : toolCall.function.arguments
-                    }
-                  }]
-                });
-              }
-            } else if (msg.content) {
-              geminiMessages.push({
-                role: 'model',
-                parts: [{ text: msg.content }]
-              });
-            }
-          } else if (msg.role === 'tool') {
-            geminiMessages.push({
-              role: 'user',
-              parts: [{
-                functionResponse: {
-                  name: 'tool_result',
-                  response: {
-                    content: msg.content
-                  }
-                }
-              }]
-            });
-          }
-        }
-        
-        const geminiTools = tools.length > 0 ? {
-          functionDeclarations: convertToolsToGeminiFormat(tools)
-        } : undefined;
-        
-        const requestBody: any = {
-          contents: geminiMessages,
-          generationConfig: {
-            temperature: 0.7,
-            maxOutputTokens: RESPONSE_MAX_TOKENS
-          }
-        };
-        
-        if (geminiTools) {
-          requestBody.tools = [geminiTools];
-        }
-        
-        const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(requestBody),
-            signal: controller.signal
-          }
-        );
-        
-        if (!response.ok) {
-          if (response.status === 429 && model !== geminiModels[geminiModels.length - 1]) {
-            console.log(`⚠️ Quota exceeded for ${model}, trying next model...`);
-            continue;
-          }
-          
-          const errorText = await response.text();
-          return {
-            success: false,
-            provider: 'gemini',
-            error: `Gemini ${model} API error: ${response.status} - ${errorText.substring(0, 200)}`
-          };
-        }
-        
-        const data = await response.json();
-        const candidate = data.candidates?.[0];
-        
-        if (!candidate || !candidate.content) {
-          if (model !== geminiModels[geminiModels.length - 1]) {
-            continue;
-          }
-          return {
-            success: false,
-            provider: 'gemini',
-            error: `No content in Gemini ${model} response`
-          };
-        }
-        
-        const functionCallPart = candidate.content.parts?.find((part: any) => part.functionCall);
-        if (functionCallPart) {
-          const functionCall = functionCallPart.functionCall;
-          
-          const toolCalls = [{
-            id: `call_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            type: 'function',
-            function: {
-              name: functionCall.name,
-              arguments: JSON.stringify(functionCall.args)
-            }
-          }];
-          
-          return {
-            success: true,
-            tool_calls: toolCalls,
-            provider: 'gemini',
-            model: model
-          };
-        }
-        
-        const text = candidate.content.parts
-          ?.map((part: any) => part.text || '')
-          .join('') || '';
-        
-        return {
-          success: true,
-          content: text,
-          provider: 'gemini',
-          model: model
-        };
-        
-      } catch (error: any) {
-        if (model !== geminiModels[geminiModels.length - 1]) {
-          console.warn(`⚠️ Gemini ${model} failed, trying next:`, error.message);
-          continue;
-        }
-        return {
-          success: false,
-          provider: 'gemini',
-          error: `Gemini request failed: ${error.message}`
-        };
-      }
-    }
-    
-    return {
-      success: false,
-      provider: 'gemini',
-      error: 'All Gemini models failed'
-    };
-  }
-  
+
   private async callDeepSeek(messages: any[], tools: any[], controller: AbortController): Promise<CascadeResult> {
     const forceTools = needsDataRetrieval(messages);
     
@@ -4063,7 +3909,8 @@ async function handleAmbiguousResponse(
   const recentMessages = conversationHistory.slice(-10).reverse();
   
   for (const message of recentMessages) {
-    if (message.role === 'assistant' && (message.content?.includes('?') || message.content?.includes('option'))) {
+    if (message.role === 'assistant') {
+      // Use the last assistant message regardless of whether it has a question mark
       recentQuestion = message.content;
       break;
     }
@@ -4102,7 +3949,7 @@ async function handleAmbiguousResponse(
   return {
     isAmbiguous: true,
     response,
-    shouldExecuteTools: false
+    shouldExecuteTools: isPositive  // If they agreed, still execute tools (they're saying "yes, do it")
   };
 }
 
@@ -4403,7 +4250,7 @@ ${solutionEngineSection}
 - When user provides ANY attachment (files, images, documents, code), IMMEDIATELY call analyze_attachment({attachments: [...]})
 
 ## 📧 EMAIL SENDING:
-- When user asks to SEND EMAIL or mentions email address → IMMEDIATELY call google_cloud_auth({action: 'send_email', to: "...", subject: "...", body: "..."})
+- When user asks to SEND EMAIL or mentions email address → IMMEDIATELY call resend_send_email({agent: "eliza", to: "...", subject: "...", body: "..."})
 
 ## 🔍 FUNCTION DISCOVERY:
 - If the user asks about available edge functions or capabilities, you MUST call search_edge_functions({mode: 'full_registry'})
@@ -4632,49 +4479,6 @@ const ELIZA_TOOLS = [
   {
     type: 'function',
     function: {
-      name: 'google_cloud_auth',
-      description: '📧 Send and manage emails via xmrtsolutions@gmail.com',
-      parameters: {
-        type: 'object',
-        properties: {
-          action: { 
-            type: 'string', 
-            enum: ['send_email', 'create_draft', 'list_emails', 'get_email'],
-            default: 'send_email'
-          },
-          to: { type: 'string', description: 'Recipient email address' },
-          subject: { type: 'string' },
-          body: { type: 'string' },
-          cc: { type: 'string' },
-          bcc: { type: 'string' }
-        },
-        required: ['action']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'google_drive',
-      description: '📁 Manage files in Google Drive. Actions: list_files, upload_file, get_file, download_file, create_folder, share_file.',
-      parameters: {
-        type: 'object',
-        properties: {
-          action: { type: 'string', description: 'Drive action: list_files | upload_file | get_file | download_file | create_folder | share_file', enum: ['list_files', 'upload_file', 'get_file', 'download_file', 'create_folder', 'share_file'] },
-          file_name: { type: 'string', description: 'Name of the file to upload or create' },
-          content: { type: 'string', description: 'File content (text or base64 for binary)' },
-          mime_type: { type: 'string', description: 'MIME type of the file' },
-          folder_name: { type: 'string', description: 'Folder to upload into' },
-          file_id: { type: 'string', description: 'Google Drive file ID for get/download/share' },
-          query: { type: 'string', description: 'Search query for list_files' }
-        },
-        required: ['action']
-      }
-    }
-  },
-  {
-    type: 'function',
-    function: {
       name: 'analyze_attachment',
       description: '📎 Analyze attachments including text files, documents, images, and code files',
       parameters: {
@@ -4752,6 +4556,14 @@ const ELIZA_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'fleet_pulse',
+      description: '🚀 Unified fleet snapshot — combines system status, ecosystem metrics, and mining stats in one call. Use this instead of calling get_system_status + get_ecosystem_metrics + get_mining_stats separately.',
+      parameters: { type: 'object', properties: {} }
+    }
+  },
+  {
+    type: 'function',
+    function: {
       name: 'get_ecosystem_metrics',
       description: 'Get ecosystem metrics including proposals, governance, user activity',
       parameters: { type: 'object', properties: {} }
@@ -4769,6 +4581,24 @@ const ELIZA_TOOLS = [
           payload: { type: 'object' }
         },
         required: ['function_name']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'create_task',
+      description: '📋 Create a new task in the task pipeline. Agents can use this to autonomously create tasks when they detect issues that need investigation or work that needs doing.',
+      parameters: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: 'Task title' },
+          description: { type: 'string', description: 'Detailed description of the task' },
+          priority: { type: 'number', description: 'Priority (0=normal, 1=high, 2=critical)' },
+          category: { type: 'string', description: 'Category like maintenance, investigation, feature, bug' },
+          assignee_agent_id: { type: 'string', description: 'Agent to assign (vex, alice, eliza, hermes)' }
+        },
+        required: ['title', 'description']
       }
     }
   },
@@ -4880,12 +4710,13 @@ const ELIZA_TOOLS = [
   {
     type: 'function',
     function: {
-      name: 'vertex_generate_image',
-      description: 'Generate an image using Vertex AI',
+      name: 'muapi_generate_image',
+      description: 'Generate an image using MuAPI AI (veo3, veo2, kling, flux, sdxl, wan2.2)',
       parameters: {
         type: 'object',
         properties: {
-          prompt: { type: 'string' }
+          prompt: { type: 'string', description: 'Detailed image description/prompt' },
+          model: { type: 'string', description: 'Model to use (optional — defaults to best available)' }
         },
         required: ['prompt']
       }
@@ -4894,12 +4725,12 @@ const ELIZA_TOOLS = [
   {
     type: 'function',
     function: {
-      name: 'vertex_generate_video',
-      description: 'Generate a video using Vertex AI',
+      name: 'muapi_generate_video',
+      description: 'Generate a video using MuAPI AI (veo3, Sora, Kling, wan2.2)',
       parameters: {
         type: 'object',
         properties: {
-          prompt: { type: 'string' },
+          prompt: { type: 'string', description: 'Detailed video description/prompt' },
           duration_seconds: { type: 'number', default: 5 }
         },
         required: ['prompt']
@@ -4909,14 +4740,14 @@ const ELIZA_TOOLS = [
   {
     type: 'function',
     function: {
-      name: 'vertex_check_video_status',
-      description: 'Check status of video generation operation',
+      name: 'muapi_check_status',
+      description: 'Check status of a MuAPI generation request by request_id',
       parameters: {
         type: 'object',
         properties: {
-          operation_name: { type: 'string' }
+          request_id: { type: 'string', description: 'The request_id returned from muapi_generate_image or muapi_generate_video' }
         },
-        required: ['operation_name']
+        required: ['request_id']
       }
     }
   },
@@ -5117,6 +4948,44 @@ const ELIZA_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'sent_emails',
+      description: '📤 Search sent email history from suite_email_activity table. Use search param to find by email address or subject. Columns: id, email_from, email_to, subject, status, sent_at.',
+      parameters: {
+        type: 'object',
+        properties: {
+          limit: { type: 'number', default: 10, description: 'Max emails to return (max 50)' },
+          search: { type: 'string', description: 'Search term to filter by email address or subject' }
+        }
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'pfp_leads',
+      description: '📋 Manage PFP leads. Actions: list (all leads), search (by name/email/notes), add (create new lead), update (modify existing). Columns: contact_name, contact_email, event_type, event_date, venue_name, venue_address, status, source, notes.',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['list', 'search', 'add', 'update'], default: 'list', description: 'Action to perform' },
+          contact_name: { type: 'string', description: 'Lead contact name (required for add)' },
+          contact_email: { type: 'string', description: 'Lead email address' },
+          event_type: { type: 'string', description: 'Type of event (Wedding, Party, Corporate, etc.)' },
+          event_date: { type: 'string', description: 'Event date (ISO format)' },
+          venue_name: { type: 'string', description: 'Venue name' },
+          venue_address: { type: 'string', description: 'Venue address' },
+          status: { type: 'string', enum: ['NEW', 'warm', 'negotiating', 'booked', 'nurturing', 'lost'], description: 'Lead status' },
+          source: { type: 'string', description: 'Lead source (email-inquiry, website-booking, manual, etc.)' },
+          notes: { type: 'string', description: 'Notes about the lead' },
+          search: { type: 'string', description: 'Search term for search action' },
+          id: { type: 'string', description: 'Lead ID for update action' }
+        }
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
       name: 'resend_send_email',
       description: '📧 Send an email via Resend as a fleet agent (vex, eliza, hermes, pfp, harbor)',
       parameters: {
@@ -5195,8 +5064,394 @@ const ELIZA_TOOLS = [
         },
         required: ['name', 'code', 'language']
       }
+    } // ← closes `function`
+  }, // ← closes outer tool object + array separator
+    // ===== RELAY TOOLS (36 missing tools added) =====
+    {
+      type: 'function',
+      function: {
+        name: 'web_search',
+        description: 'Search the web via Ollama or DuckDuckGo fallback',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: { type: 'string', description: 'Search query' }
+          },
+          required: ['query']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'web_scrape',
+        description: 'Extract readable text content from any URL',
+        parameters: {
+          type: 'object',
+          properties: {
+            url: { type: 'string', description: 'URL to scrape' }
+          },
+          required: ['url']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'ollama_chat',
+        description: 'Chat with local LLM via Ollama',
+        parameters: {
+          type: 'object',
+          properties: {
+            message: { type: 'string', description: 'Message to send to Ollama' },
+            model: { type: 'string', description: 'Ollama model to use (optional)' }
+          },
+          required: ['message']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'ollama_models',
+        description: 'List available Ollama models',
+        parameters: {
+          type: 'object',
+          properties: {},
+          required: []
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'ollama_health',
+        description: 'Check Ollama service health',
+        parameters: {
+          type: 'object',
+          properties: {},
+          required: []
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'system_monitor',
+        description: 'Full system snapshot (resources + services)',
+        parameters: {
+          type: 'object',
+          properties: {},
+          required: []
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'system_resources',
+        description: 'CPU, memory, and disk usage',
+        parameters: {
+          type: 'object',
+          properties: {},
+          required: []
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'external_services',
+        description: 'Check Supabase, Ollama, GitHub, Hermes health',
+        parameters: {
+          type: 'object',
+          properties: {},
+          required: []
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'device_registration',
+        description: 'Register this device with hostname and IP',
+        parameters: {
+          type: 'object',
+          properties: {
+            hostname: { type: 'string', description: 'Device hostname' },
+            ip: { type: 'string', description: 'Device IP address' }
+          },
+          required: ['hostname', 'ip']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'knowledge_sync',
+        description: 'Sync local knowledge base',
+        parameters: {
+          type: 'object',
+          properties: {},
+          required: []
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'mining_dashboard',
+        description: 'Check cloud mining stats',
+        parameters: {
+          type: 'object',
+          properties: {},
+          required: []
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'eliza_send',
+        description: 'Send a message to Eliza-Cloud',
+        parameters: {
+          type: 'object',
+          properties: {
+            message: { type: 'string', description: 'Message to send' }
+          },
+          required: ['message']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'state_get',
+        description: 'Get a value from persistent state',
+        parameters: {
+          type: 'object',
+          properties: {
+            key: { type: 'string', description: 'State key' }
+          },
+          required: ['key']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'state_set',
+        description: 'Set a value in persistent state',
+        parameters: {
+          type: 'object',
+          properties: {
+            key: { type: 'string', description: 'State key' },
+            value: { description: 'Value to store' }
+          },
+          required: ['key', 'value']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'task_stats',
+        description: 'Get task runner statistics',
+        parameters: {
+          type: 'object',
+          properties: {},
+          required: []
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'github_post',
+        description: 'Post a comment on a GitHub issue',
+        parameters: {
+          type: 'object',
+          properties: {
+            issue_number: { type: 'number', description: 'Issue number' },
+            body: { type: 'string', description: 'Comment body' },
+            repo: { type: 'string', description: 'Repository (optional, e.g. owner/repo)' }
+          },
+          required: ['issue_number', 'body']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'db_query',
+        description: 'Run a read-only SQL query',
+        parameters: {
+          type: 'object',
+          properties: {
+            sql: { type: 'string', description: 'SQL query' }
+          },
+          required: ['sql']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'db_rest',
+        description: 'Query any database table via REST API',
+        parameters: {
+          type: 'object',
+          properties: {
+            path: { type: 'string', description: 'API path (e.g. /rest/v1/table)' },
+            method: { type: 'string', description: 'HTTP method (optional, default GET)' },
+            body: { type: 'object', description: 'Request body (optional)' }
+          },
+          required: ['path']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'shared_context',
+        description: '🧠 Persistent agent memory — read, write, search, or recall by agent/topic. Use this to remember facts across conversations. Actions: read (get by key), write (save with key+value), search (associative recall by content), recall_by_agent (get memories by agent), recall_by_topic (get memories by topic tag)',
+        parameters: {
+          type: 'object',
+          properties: {
+            action: { type: 'string', enum: ['read', 'write', 'search', 'recall_by_agent', 'recall_by_topic'], description: 'Action to perform' },
+            key: { type: 'string', description: 'Context key (required for read/write)' },
+            value: { type: 'string', description: 'Value to write (required for write action)' },
+            search_term: { type: 'string', description: 'Search term for associative recall (required for search action)' },
+            agent_id: { type: 'string', description: 'Agent ID for recall_by_agent action' },
+            topic: { type: 'string', description: 'Topic tag for recall_by_topic action (e.g. "user_preferences", "system_observations")' }
+          },
+          required: ['action']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'agent_profile',
+        description: 'Read agent profiles from the database',
+        parameters: {
+          type: 'object',
+          properties: {
+            agent_id: { type: 'string', description: 'Agent ID (optional)' }
+          },
+          required: []
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'activity_log',
+        description: '📊 Query the persistent activity feed. Use this to see what is happening in the system — tool executions, edge function calls, cron jobs, emails, errors, and more. Filter by activity_type (tool_execution, edge_function, cron_execution, email, http_error, fleet_message, system_health_check, etc.), status (completed, error, info, warning), since (ISO timestamp), or agent_id.',
+        parameters: {
+          type: 'object',
+          properties: {
+            limit: { type: 'number', description: 'Max entries to return (default 20, max 100)' },
+            activity_type: { type: 'string', description: 'Filter by type: tool_execution, edge_function, cron_execution, email, http_error, fleet_message, system_health_check, etc.' },
+            status: { type: 'string', description: 'Filter by status: completed, error, info, warning' },
+            since: { type: 'string', description: 'Only entries after this ISO timestamp' },
+            agent_id: { type: 'string', description: 'Filter by agent name or ID' }
+          },
+          required: []
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'edge_function',
+        description: 'Proxy a call to a Supabase edge function',
+        parameters: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', description: 'Edge function name' },
+            payload: { type: 'object', description: 'Payload to send (optional)' }
+          },
+          required: ['name']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'fleet_chat',
+        description: 'Send a message to the fleet chat',
+        parameters: {
+          type: 'object',
+          properties: {
+            agent: { type: 'string', description: 'Agent name' },
+            channel: { type: 'string', description: 'Channel name' },
+            message: { type: 'string', description: 'Message content' }
+          },
+          required: ['agent', 'channel', 'message']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'agent_rpc',
+        description: '🔗 Cross-agent RPC — send a programmatic request to another agent and get results back. Use this instead of fleet_chat when you need another agent to execute a specific action and return data.',
+        parameters: {
+          type: 'object',
+          properties: {
+            target_agent: { type: 'string', description: 'Target agent ID (vex, alice, eliza, hermes)' },
+            action: { type: 'string', description: 'Action for the target agent to perform' },
+            params: { type: 'object', description: 'Parameters for the action' },
+            timeout: { type: 'number', description: 'Timeout in ms (default 30000)' }
+          },
+          required: ['target_agent', 'action']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'obsidian_graph',
+        description: 'Return the full ecosystem knowledge graph',
+        parameters: {
+          type: 'object',
+          properties: {
+            filter: { type: 'string', description: 'Optional filter string' }
+          },
+          required: []
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'vex_vision',
+        description: 'Capture and describe images',
+        parameters: {
+          type: 'object',
+          properties: {
+            source: { type: 'string', description: 'Image source' },
+            duration: { type: 'number', description: 'Capture duration in seconds (optional)' }
+          },
+          required: ['source']
+        }
+      }
+    },
+    {
+      type: 'function',
+      function: {
+        name: 'vex_hear',
+        description: 'Capture audio from the microphone',
+        parameters: {
+          type: 'object',
+          properties: {
+            duration: { type: 'number', description: 'Recording duration in seconds' }
+          },
+          required: ['duration']
+        }
+      }
     }
-  }
 ];
 
 // ========== MAIN SERVE FUNCTION ==========
@@ -5417,8 +5672,8 @@ Deno.serve(async (req) => {
     const allMessages = [...savedMessages, ...messages].slice(-CONVERSATION_HISTORY_LIMIT);
     const isFirstEngagement = savedMessages.length === 0 && previousToolResults.length === 0;
     const preferDirectAnswer = isSimpleDirectAnswerQuery(query);
-    const explicitActionRequest = isExplicitActionRequest(query);
-    const firstTurnDirectFastPath = isFirstEngagement && preferDirectAnswer && !explicitActionRequest;
+    let explicitActionRequest = isExplicitActionRequest(query);
+    let firstTurnDirectFastPath = isFirstEngagement && preferDirectAnswer && !explicitActionRequest;
 
     await debugLog('request.routing', {
       isFirstEngagement,
@@ -5458,28 +5713,53 @@ Deno.serve(async (req) => {
     );
     
     if (isAmbiguous && ambiguousResponse) {
-      console.log(`🤔 Handling ambiguous response: "${query}"`);
+      console.log(`Handling ambiguous response: "${query}"`);
       
       clearTimeout(timeoutId);
       
-      await conversationManager.saveConversation(
-        [...allMessages, { role: 'assistant', content: ambiguousResponse }],
-        previousToolResults
-      );
+      // For positive responses (yes, proceed), don't return early — let normal flow continue
+      if (!shouldExecuteTools) {
+        await conversationManager.saveConversation(
+          [...allMessages, { role: 'assistant', content: ambiguousResponse }],
+          previousToolResults
+        );
+        
+        return new Response(
+          JSON.stringify({
+            success: true,
+            content: ambiguousResponse,
+            executive: executive_name,
+            provider: 'context_aware',
+            hasToolCalls: false,
+            executionTimeMs: Date.now() - startTime,
+            session_id: sessionId,
+            request_id: requestId
+          }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
       
-      return new Response(
-        JSON.stringify({
-          success: true,
-          content: ambiguousResponse,
-          executive: executive_name,
-          provider: 'context_aware',
-          hasToolCalls: false,
-          executionTimeMs: Date.now() - startTime,
-          session_id: sessionId,
-          request_id: requestId
-        }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
+      console.log('Positive ambiguous response, continuing normal flow with context');
+      
+      // Disable first-turn fast path since we injected context about the ambiguous response
+      firstTurnDirectFastPath = false;
+      // Force explicit action request so tools are enabled
+      explicitActionRequest = true;
+      
+      // Inject context about what the ambiguous response refers to
+      // Find the last assistant message to use as reference
+      const lastAssistantMsg = [...allMessages].reverse().find(m => m.role === 'assistant');
+      if (lastAssistantMsg?.content) {
+        const refContext = lastAssistantMsg.content.slice(0, 300);
+        // Replace the user's ambiguous query with an explicit instruction
+        // so the model actually executes the tool instead of just acknowledging
+        // Find the last user message (the ambiguous one like "proceed", "yes", "go ahead")
+        const lastUserIdx = [...allMessages].reverse().findIndex(m => m.role === 'user');
+        if (lastUserIdx >= 0) {
+          const actualIdx = allMessages.length - 1 - lastUserIdx;
+          allMessages[actualIdx].content = `[The user agreed with "${query}" to the proposal above. Execute the tool you proposed and report the results. Do NOT just acknowledge — actually call the tool.]`;
+        }
+      }
     }
     
     if (!shouldExecuteTools) {
@@ -5538,7 +5818,7 @@ Deno.serve(async (req) => {
           attachments, ipAddress, sessionId, user_id, undefined
         );
         if (preAnalysis.success && preAnalysis.context_summary) {
-          attachmentContextMessage = `\n\n## 📎 UPLOADED FILE CONTEXT (JUST INGESTED)\n\n${preAnalysis.context_summary}\n\nThe above files have been:\n✅ Analyzed and understood\n✅ Added to the knowledge base\n${preAnalysis.analyses?.some((a: any) => a.drive_saved) ? '✅ Saved to Google Drive' : '⚠️ Google Drive save attempted (may need auth)'}\n\nRespond to the user based on the file content above.`;
+          attachmentContextMessage = `\n\n## 📎 UPLOADED FILE CONTEXT (JUST INGESTED)\n\n${preAnalysis.context_summary}\n\nThe above files have been:\n✅ Analyzed and understood\n✅ Added to the knowledge base\n${preAnalysis.analyses?.some((a: any) => a.storage_saved) ? '✅ Saved to local relay storage' : '⚠️ Storage save may have failed'}\n\nRespond to the user based on the file content above.`;
           console.log('✅ Attachment pre-analysis complete, injecting context into messages');
         }
       } catch (attachErr: any) {
@@ -5553,10 +5833,36 @@ Deno.serve(async (req) => {
     
     // Get initial AI response
     const tools = (use_tools && !firstTurnDirectFastPath) ? ELIZA_TOOLS : [];
-    const maxToolIterations = (isFirstEngagement && !explicitActionRequest) ? 1 : MAX_TOOL_ITERATIONS;
+    const maxToolIterations = MAX_TOOL_ITERATIONS;
     console.log(`⚡ First-turn optimization: firstEngagement=${isFirstEngagement}, directFastPath=${firstTurnDirectFastPath}, toolsEnabled=${tools.length > 0}, maxToolIterations=${maxToolIterations}`);
     console.log(`🎯 ai-chat routing: query="${truncateString(query, 80)}" | tools=${tools.length} | use_tools=${use_tools} | firstTurnDirectFastPath=${firstTurnDirectFastPath} | will-pass-tools-to-cascade=${tools.length > 0}`);
     let initialResult = await callAIFunction(messagesArray, tools);
+    
+    // If the model responded without calling tools for a non-greeting query,
+    // force-call search_knowledge ourselves and inject the result
+    if (initialResult.success && !initialResult.tool_calls && tools.length > 0 && !isSimpleDirectAnswerQuery(query)) {
+      console.log('🔄 Model answered without tools — force-calling search_knowledge');
+      try {
+        const forcedResult = await executeRealToolCall('search_knowledge', JSON.stringify({ search_term: query }), executive_name, sessionId, ipAddress);
+        if (forcedResult) {
+          // Extract knowledge results from the actual response shape
+          const knowledgeData = forcedResult.knowledge || forcedResult.results || forcedResult.entries || [];
+          const knowledgeStr = Array.isArray(knowledgeData) 
+            ? knowledgeData.map((k: any) => `- ${k.name || k.entity_name}: ${k.entity?.description || k.description || ''}`).join('\n')
+            : JSON.stringify(knowledgeData).slice(0, 2000);
+          
+          if (knowledgeStr.length > 20) {
+            messagesArray.push({
+              role: 'system',
+              content: `[KNOWLEDGE BASE RESULTS] Retrieved for "${query}":\n${knowledgeStr}`
+            });
+            initialResult = await callAIFunction(messagesArray, tools);
+          }
+        }
+      } catch (e) {
+        console.warn('⚠️ Forced tool call failed:', e.message);
+      }
+    }
     
     // If AI call failed, use emergency fallback
     if (!initialResult.success) {

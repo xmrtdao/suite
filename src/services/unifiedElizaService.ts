@@ -79,7 +79,8 @@ export interface ElizaContext {
   };
   emotionalContext?: any;
   images?: any[];
-  attachments?: File[]; // NEW: Support for raw file attachments
+  /** File[] from UI (raw) OR object[] after base64 conversion (pre-converted). generateResponse() normalizes this. */
+  attachments?: any[];
   isLiveCameraFeed?: boolean;
   targetExecutive?: string;
   councilMode?: boolean;
@@ -194,8 +195,29 @@ export class UnifiedElizaService {
   }
 
   /**
+   * Convert a browser File object to base64 string (without data: prefix).
+   */
+  private static fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        // result is "data:...;base64,..." — strip the prefix
+        const b64 = result.split(',')[1];
+        resolve(b64);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  /**
    * Route request to the best available executive
    * Production routing with response extraction
+   *
+   * ALWAYS sends JSON payload — file attachments are pre-converted to base64
+   * so every backend function (ai-chat, vertex-ai-chat, etc.) can receive them
+   * via request.json() without needing multipart/form-data parsing.
    */
   private static async routeToExecutive(
     userInput: string,
@@ -220,71 +242,54 @@ export class UnifiedElizaService {
 
         let data, error;
 
-        // Check if we need multipart/form-data (for file attachments)
-        if (context.attachments && context.attachments.length > 0) {
-          console.log(`📎 Uploading ${context.attachments.length} attachments via multipart/form-data...`);
-          const formData = new FormData();
-          formData.append('userQuery', userInput || 'Hello');
+        // Attachments are already pre-converted to base64 objects by generateResponse()
+        const attachments = context.attachments?.filter((a: any) => a.filename && a.base64_data) || [];
+        const images = context.images || [];
 
-          // Append Metadata and Context as JSON strings
-          formData.append('messages', JSON.stringify([{
+        // Build common JSON payload — attachments included as base64 strings
+        // so every backend function can receive them via request.json()
+        const payload: Record<string, any> = {
+          message: userInput || 'Hello',
+          messages: [{
             role: 'user',
             content: userInput || 'Hello'
-          }]));
+          }],
+          organizationContext: context.organizationContext,
+          timestamp: new Date().toISOString(),
+          images: images.length > 0 ? images : undefined,
+          attachments: attachments.length > 0 ? attachments : undefined,
+          isLiveCameraFeed: context.isLiveCameraFeed || undefined,
+        };
 
-          if (context.organizationContext) {
-            formData.append('organizationContext', JSON.stringify(context.organizationContext));
-          }
-
-          formData.append('timestamp', new Date().toISOString());
-
-          if (context.isLiveCameraFeed) {
-            formData.append('isLiveCameraFeed', 'true');
-          }
-
-          // ✅ FIXED: Pass user_id and session_id so backend can ingest to KB + Drive
-          try {
-            const { data: { user } } = await supabase.auth.getUser();
-            if (user?.id) formData.append('user_id', user.id);
-            if (user?.email) formData.append('user_email', user.email);
-          } catch (_) {}
-          // Pass any stored session ID for memory continuity
-          const storedSession = localStorage.getItem('eliza_session_id');
-          if (storedSession) formData.append('session_id', storedSession);
-
-          // Append all files
-          context.attachments.forEach(file => {
-            formData.append('file', file);
-          });
-
-          // Execute request with FormData
-          const response = await supabase.functions.invoke(executive, {
-            body: formData
-          });
-          data = response.data;
-          error = response.error;
-
-        } else {
-          // Standard JSON payload
-          const payload = {
-            message: userInput || 'Hello',
-            messages: [{
-              role: 'user',
-              content: userInput || 'Hello'
-            }],
-            organizationContext: context.organizationContext,
-            timestamp: new Date().toISOString(),
-            // ✅ CRITICAL FIX: Include images if they exist in the context
-            images: context.images || undefined, // Pass the images array (Base64 strings)
-            isLiveCameraFeed: context.isLiveCameraFeed || undefined // Pass the live camera feed flag
-          };
-
-          const response = await supabase.functions.invoke(executive, {
-            body: payload
-          });
-          data = response.data;
-          error = response.error;
+        // Attach user/session metadata for backend memory continuity
+        try {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user?.id) payload.user_id = user.id;
+          if (user?.email) payload.user_email = user.email;
+        } catch (_) {}
+        // Generate a stable session_id if none exists
+        let storedSession = localStorage.getItem('eliza_session_id');
+        if (!storedSession) {
+          storedSession = 'suite-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+          localStorage.setItem('eliza_session_id', storedSession);
         }
+        payload.session_id = storedSession;
+        
+        // Include conversation history from context so ai-chat has full context
+        if (context.conversationContext?.recentMessages && Array.isArray(context.conversationContext.recentMessages)) {
+          const historyMessages = context.conversationContext.recentMessages.slice(-20).map((m: any) => ({
+            role: m.sender === 'user' ? 'user' : 'assistant',
+            content: m.content || ''
+          }));
+          // Prepend history before the current message
+          payload.messages = [...historyMessages, { role: 'user', content: userInput || 'Hello' }];
+        }
+
+        const response = await supabase.functions.invoke(executive, {
+          body: payload
+        });
+        data = response.data;
+        error = response.error;
 
         if (error) {
           console.error(`❌ ${executive} error:`, error);
@@ -326,14 +331,16 @@ export class UnifiedElizaService {
     userInput: string,
     context: ElizaContext
   ): Promise<string | null> {
-    const payload = {
+    const payload: Record<string, any> = {
       message: userInput,
       messages: [
         { role: 'user', content: userInput },
       ],
       organizationContext: context.organizationContext,
       timestamp: new Date().toISOString(),
-      images: context.images || undefined,
+      // Use whatever was pre-converted in generateResponse()
+      images: context.images && context.images.length > 0 ? context.images : undefined,
+      attachments: context.attachments && context.attachments.length > 0 ? context.attachments : undefined,
       isLiveCameraFeed: context.isLiveCameraFeed || undefined,
     };
 
@@ -361,6 +368,41 @@ export class UnifiedElizaService {
     try {
       const safeInput = (typeof userInput === 'string' && userInput.trim()) ? userInput.trim() : 'Hello';
       const safeContext = (context && typeof context === 'object') ? context : {};
+
+      // ── Pre-convert raw File[] attachments to base64 attachment objects ──
+      // This normalizes File[] → structured {filename, mime_type, size, base64_data, data_url, is_image}
+      // so every routing path (routeToExecutive, callSingleExecutive, council) receives JSON-safe objects.
+      if (safeContext.attachments && safeContext.attachments.length > 0) {
+        // Only re-process if attachments are still raw File objects (no base64_data means unconverted)
+        const rawFiles = safeContext.attachments.filter((a: any) => a && typeof File !== 'undefined' && a instanceof File);
+        if (rawFiles.length > 0) {
+          console.log(`📎 Pre-converting ${rawFiles.length} file(s) to base64 in generateResponse...`);
+          const converted: any[] = [];
+          const imageUrls: string[] = safeContext.images || [];
+          for (const file of rawFiles) {
+            try {
+              const b64 = await this.fileToBase64(file);
+              const dataUrl = `data:${file.type};base64,${b64}`;
+              const isImage = file.type.startsWith('image/');
+              converted.push({
+                filename: file.name,
+                mime_type: file.type,
+                size: file.size,
+                base64_data: b64,
+                data_url: dataUrl,
+                is_image: isImage,
+              });
+              if (isImage) imageUrls.push(dataUrl);
+            } catch (convErr: any) {
+              console.warn(`⚠️ Failed to convert "${file.name}":`, convErr?.message);
+            }
+          }
+          safeContext.attachments = converted;
+          safeContext.images = imageUrls;
+          console.log(`   → ${imageUrls.length} image(s), ${converted.length} total attachment(s)`);
+        }
+      }
+
       const hasVisualOrAttachmentInput =
         safeContext.inputMode === 'vision' ||
         !!safeContext.isLiveCameraFeed ||
@@ -397,7 +439,14 @@ export class UnifiedElizaService {
           const councilResult = await executiveCouncilService.deliberate(safeInput, safeContext);
           if (councilResult && councilResult.synthesis) {
             console.log('✅ Council deliberation successful with', councilResult.responses.length, 'executives');
-            return councilResult.synthesis;
+            // Return the special object shape expected by UnifiedChat's
+            // "typeof response !== 'string' && response.type === 'council_deliberation'" check
+            // so the frontend enters the council-rendering path and the auto-advance
+            // logic receives the full deliberation object (not just the synthesis string).
+            return {
+              type: 'council_deliberation',
+              deliberation: councilResult
+            };
           }
         } catch (councilError: any) {
           console.warn('🏛️ Council failed, continuing with regular mode:', councilError?.message);
