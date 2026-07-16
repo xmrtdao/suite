@@ -326,10 +326,17 @@
   </footer>
 
   <script>
-    async function handleLogin() {
+    function buildDashboardUrl(apiKey, jwt) {
+      const params = new URLSearchParams();
+      if (apiKey) params.set('api_key', apiKey);
+      if (jwt) params.set('jwt', jwt);
+      const qs = params.toString();
+      return 'https://relay.mobilemonero.com/suite/dashboard' + (qs ? '?' + qs : '');
+    }
+
+    function handleLogin() {
       const apiKey = document.getElementById('apiKey').value.trim();
       const jwt = document.getElementById('jwt').value.trim();
-      const btn = document.getElementById('loginBtn');
       const status = document.getElementById('status');
 
       status.className = 'status';
@@ -342,51 +349,15 @@
         return;
       }
 
-      btn.disabled = true;
-      btn.innerHTML = '<span class="spinner"></span> Authenticating...';
-      status.className = 'status info';
-      status.textContent = 'Connecting to Suite relay...';
-      status.style.display = 'block';
-
-      const relayUrl = 'https://relay.mobilemonero.com';
-      const dashboardUrl = relayUrl + '/suite/dashboard';
-
+      // Store credentials for the dashboard to pick up
       try {
-        const testRes = await fetch(relayUrl + '/health', {
-          signal: AbortSignal.timeout(8000),
-          headers: apiKey ? { 'x-api-key': apiKey } : {}
-        });
-        if (!testRes.ok && testRes.status !== 401) throw new Error('Relay returned ' + testRes.status);
+        sessionStorage.setItem('suite_api_key', apiKey);
+        sessionStorage.setItem('suite_jwt', jwt);
+      } catch(e) {}
 
-        status.className = 'status success';
-        status.textContent = 'Relay reachable. Redirecting...';
-        status.style.display = 'block';
-
-        let redirectUrl = dashboardUrl;
-        const params = new URLSearchParams();
-        if (apiKey) params.set('api_key', apiKey);
-        if (jwt) params.set('jwt', jwt);
-        const qs = params.toString();
-        if (qs) redirectUrl += '?' + qs;
-
-        try { sessionStorage.setItem('suite_api_key', apiKey); sessionStorage.setItem('suite_jwt', jwt); } catch(e) {}
-        setTimeout(() => { window.location.href = redirectUrl; }, 1000);
-
-      } catch (err) {
-        status.className = 'status info';
-        status.innerHTML = 'Relay not reachable via tunnel.<br />Try your local instance instead.';
-        status.style.display = 'block';
-        btn.disabled = false;
-        btn.textContent = 'Try Local Dashboard';
-        btn.onclick = function() {
-          const localUrl = 'http://localhost:8080/suite/dashboard';
-          const params = new URLSearchParams();
-          if (apiKey) params.set('api_key', apiKey);
-          if (jwt) params.set('jwt', jwt);
-          const qs = params.toString();
-          window.location.href = localUrl + (qs ? '?' + qs : '');
-        };
-      }
+      // Redirect directly — the relay handles auth on the dashboard side.
+      // No CORS preflight needed since we're doing a top-level navigation.
+      window.location.href = buildDashboardUrl(apiKey, jwt);
     }
 
     document.addEventListener('DOMContentLoaded', () => {
