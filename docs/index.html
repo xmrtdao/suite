@@ -3,213 +3,327 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Suite AI | XMRT DAO</title>
-  <meta name="description" content="Suite AI — autonomous operations platform by XMRT DAO. Persistent memory, AI executives, and deep integrations." />
+  <title>Suite | Scale Your Operations With Suite AI</title>
+  <meta name="description" content="Suite combines persistent memory, AI executives, and deep Google, GitHub, and Supabase integrations to plan, execute, and publish work across your stack." />
   <meta name="author" content="Suite by XMRT-DAO" />
   <meta name="robots" content="index, follow" />
-  <meta property="og:title" content="Suite AI | XMRT DAO" />
+  <meta property="og:title" content="Suite | Scale Your Operations With Suite AI" />
   <meta property="og:description" content="Autonomous operations platform with persistent memory, AI executives, and deep integrations." />
   <meta property="og:url" content="https://xmrtdao.github.io/suite/" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:site" content="@XMRT_DAO" />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='15' fill='%233b82f6'/><path d='M10 12C10 10.8954 10.8954 10 12 10H18C20.2091 10 22 11.7909 22 14C22 16.2091 20.2091 18 18 18H14C11.7909 18 10 19.7909 10 22C10 24.2091 11.7909 26 14 26H20C21.1046 26 22 25.1046 22 24' stroke='white' stroke-width='2.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Permanent+Marker&display=swap" rel="stylesheet" />
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-      background: #0a0a0f;
-      color: #e0e0e0;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #ffffff;
+      color: #1e293b;
+      -webkit-font-smoothing: antialiased;
     }
-    .container {
-      max-width: 480px;
-      width: 100%;
-      padding: 40px 24px;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      min-height: 100vh;
+    .container { max-width: 1200px; margin: 0 auto; padding: 0 16px; }
+
+    /* ── Header ── */
+    header {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 50;
+      background: rgba(255,255,255,0.8); backdrop-filter: blur(12px);
+      border-bottom: 1px solid rgba(0,0,0,0.08);
     }
-    .logo {
-      width: 64px;
-      height: 64px;
-      background: linear-gradient(135deg, #60a5fa, #4ade80);
-      border-radius: 16px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 28px;
-      font-weight: 700;
-      color: #0a0a0f;
-      margin-bottom: 16px;
+    header .inner {
+      display: flex; align-items: center; justify-content: space-between;
+      height: 64px; padding: 0 16px; max-width: 1200px; margin: 0 auto;
     }
-    h1 {
-      font-size: 24px;
-      font-weight: 600;
-      color: #f0f0f0;
-      margin-bottom: 4px;
+    .logo-wrap { display: flex; align-items: center; gap: 8px; }
+    .logo-svg { height: 32px; width: auto; }
+    .logo-text { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; color: #1e293b; }
+
+    /* ── Hero ── */
+    .hero {
+      position: relative; overflow: hidden; padding: 80px 16px 40px; text-align: center;
     }
-    .subtitle {
-      font-size: 14px;
-      color: #6b6b80;
-      margin-bottom: 32px;
-      text-align: center;
+    .hero-bg {
+      position: fixed; inset: 0; z-index: -10; pointer-events: none;
     }
-    .card {
-      background: #12121a;
-      border: 1px solid #1e1e2e;
-      border-radius: 12px;
-      padding: 32px;
-      width: 100%;
-      margin-bottom: 16px;
+    .hero-bg-grad {
+      position: absolute; inset: 0;
+      background: linear-gradient(135deg, #ffffff, #ffffff, rgba(59,130,246,0.05));
     }
-    .card h2 {
-      font-size: 16px;
-      font-weight: 500;
-      color: #a0a0b0;
-      margin-bottom: 20px;
-      text-align: center;
+    .hero-blob {
+      position: absolute; top: 25%; left: -128px;
+      width: 384px; height: 384px;
+      background: rgba(59,130,246,0.08); border-radius: 50%;
+      filter: blur(64px); opacity: 0.6;
     }
-    .form-group {
-      margin-bottom: 16px;
+    .hero-grid {
+      position: absolute; inset: 0;
+      background-image: linear-gradient(rgba(59,130,246,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(59,130,246,0.03) 1px, transparent 1px);
+      background-size: 60px 60px;
+      mask-image: radial-gradient(ellipse 80% 80% at 50% 50%, black, transparent);
+      -webkit-mask-image: radial-gradient(ellipse 80% 80% at 50% 50%, black, transparent);
     }
-    label {
-      display: block;
-      font-size: 12px;
-      font-weight: 500;
-      color: #8a8a9a;
-      margin-bottom: 6px;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
+    .hero h1 {
+      font-size: 36px; font-weight: 800; line-height: 1.2; margin-bottom: 24px;
     }
-    input {
-      width: 100%;
-      padding: 10px 14px;
-      background: #0a0a0f;
-      border: 1px solid #2a2a3a;
-      border-radius: 8px;
-      color: #e0e0e0;
-      font-size: 14px;
-      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-      outline: none;
-      transition: border-color 0.2s;
+    .hero h1 .gradient {
+      background: linear-gradient(135deg, #3b82f6, #60a5fa);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      background-clip: text;
     }
-    input:focus {
-      border-color: #60a5fa;
+    .hero h1 .dim { color: rgba(30,41,59,0.9); }
+    .hero p.sub {
+      font-size: 18px; line-height: 1.6; color: #64748b;
+      max-width: 640px; margin: 0 auto 40px;
     }
-    input::placeholder {
-      color: #4a4a5a;
+
+    /* ── CTA Buttons ── */
+    .cta-row {
+      display: flex; flex-wrap: wrap; gap: 12px; justify-content: center; margin-bottom: 48px;
     }
-    .btn {
-      width: 100%;
-      padding: 12px;
-      background: linear-gradient(135deg, #60a5fa, #4ade80);
-      border: none;
-      border-radius: 8px;
-      color: #0a0a0f;
-      font-size: 15px;
-      font-weight: 600;
-      cursor: pointer;
-      transition: opacity 0.2s;
-      margin-top: 8px;
+    .btn-primary {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 14px 32px; border-radius: 8px; border: none;
+      background: #3b82f6; color: white; font-size: 16px; font-weight: 600;
+      cursor: pointer; transition: all 0.2s; text-decoration: none;
     }
-    .btn:hover { opacity: 0.9; }
-    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-primary:hover { background: #2563eb; box-shadow: 0 4px 12px rgba(59,130,246,0.3); }
+    .btn-outline {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 14px 32px; border-radius: 8px;
+      background: transparent; color: #1e293b; font-size: 16px; font-weight: 500;
+      border: 1px solid rgba(59,130,246,0.3); cursor: pointer;
+      transition: all 0.2s; text-decoration: none;
+    }
+    .btn-outline:hover { border-color: rgba(59,130,246,0.6); background: rgba(59,130,246,0.05); }
+    .btn-emerald {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 14px 32px; border-radius: 8px;
+      background: transparent; color: #10b981; font-size: 16px; font-weight: 500;
+      border: 1px solid rgba(16,185,129,0.3); cursor: pointer;
+      transition: all 0.2s; text-decoration: none;
+    }
+    .btn-emerald:hover { border-color: rgba(16,185,129,0.6); background: rgba(16,185,129,0.1); }
+
+    /* ── Stats ── */
+    .stats-row {
+      display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;
+      max-width: 768px; margin: 0 auto 8px;
+    }
+    .stat-card {
+      padding: 20px; border-radius: 16px;
+      background: rgba(0,0,0,0.02); border: 1px solid rgba(0,0,0,0.06);
+      text-align: center; transition: all 0.2s;
+    }
+    .stat-card:hover { border-color: rgba(59,130,246,0.3); background: rgba(0,0,0,0.03); }
+    .stat-icon {
+      width: 40px; height: 40px; border-radius: 12px;
+      background: rgba(59,130,246,0.1); display: flex; align-items: center;
+      justify-content: center; margin: 0 auto 12px;
+    }
+    .stat-icon svg { width: 20px; height: 20px; color: #3b82f6; }
+    .stat-value { font-size: 28px; font-weight: 700; }
+    .stat-label { font-size: 12px; color: #64748b; margin-top: 4px; }
+    .stat-disclaimer { font-size: 12px; color: #94a3b8; text-align: center; margin-top: 8px; }
+
+    /* ── Auth Card ── */
+    .auth-section { padding: 40px 16px 60px; }
+    .auth-card {
+      max-width: 440px; margin: 0 auto;
+      background: #ffffff; border: 1px solid rgba(0,0,0,0.08);
+      border-radius: 16px; padding: 32px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.06);
+    }
+    .auth-card h2 {
+      font-size: 18px; font-weight: 600; color: #1e293b;
+      text-align: center; margin-bottom: 8px;
+    }
+    .auth-card .hint {
+      font-size: 13px; color: #64748b; text-align: center; margin-bottom: 24px;
+    }
+    .form-group { margin-bottom: 16px; }
+    .form-group label {
+      display: block; font-size: 12px; font-weight: 600; color: #475569;
+      margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.05em;
+    }
+    .form-group input {
+      width: 100%; padding: 10px 14px;
+      background: #f8fafc; border: 1px solid #e2e8f0;
+      border-radius: 8px; color: #1e293b; font-size: 14px;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      outline: none; transition: border-color 0.2s;
+    }
+    .form-group input:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.1); }
+    .form-group input::placeholder { color: #94a3b8; }
+    .btn-auth {
+      width: 100%; padding: 12px; border: none; border-radius: 8px;
+      background: #3b82f6; color: white; font-size: 15px; font-weight: 600;
+      cursor: pointer; transition: all 0.2s; margin-top: 8px;
+    }
+    .btn-auth:hover { background: #2563eb; }
+    .btn-auth:disabled { opacity: 0.5; cursor: not-allowed; }
     .status {
-      margin-top: 12px;
-      padding: 10px 14px;
-      border-radius: 8px;
-      font-size: 13px;
-      display: none;
+      margin-top: 12px; padding: 10px 14px; border-radius: 8px;
+      font-size: 13px; display: none;
     }
-    .status.error { display: block; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); color: #f87171; }
-    .status.success { display: block; background: rgba(74,222,128,0.1); border: 1px solid rgba(74,222,128,0.3); color: #4ade80; }
-    .status.info { display: block; background: rgba(96,165,250,0.1); border: 1px solid rgba(96,165,250,0.3); color: #60a5fa; }
+    .status.error { display: block; background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.2); color: #ef4444; }
+    .status.success { display: block; background: rgba(16,185,129,0.08); border: 1px solid rgba(16,185,129,0.2); color: #10b981; }
+    .status.info { display: block; background: rgba(59,130,246,0.08); border: 1px solid rgba(59,130,246,0.2); color: #3b82f6; }
     .divider {
-      display: flex; align-items: center; gap: 12px; width: 100%; margin: 20px 0;
-      color: #3a3a4a; font-size: 12px;
+      display: flex; align-items: center; gap: 12px; margin: 20px 0;
+      color: #94a3b8; font-size: 12px;
     }
-    .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: #2a2a3a; }
-    .info-text { font-size: 12px; color: #5a5a6a; text-align: center; line-height: 1.6; margin-top: 8px; }
-    .info-text a { color: #60a5fa; text-decoration: none; }
-    .info-text a:hover { text-decoration: underline; }
-    .features {
-      display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; margin-top: 8px;
+    .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: #e2e8f0; }
+    .local-link {
+      text-align: center; font-size: 13px; color: #64748b; line-height: 1.6;
     }
-    .feature {
-      background: #12121a; border: 1px solid #1e1e2e; border-radius: 8px;
-      padding: 12px; text-align: center;
-    }
-    .feature-icon { font-size: 20px; margin-bottom: 4px; }
-    .feature-label { font-size: 11px; color: #6b6b80; }
-    .footer { margin-top: auto; padding: 24px 0 16px; text-align: center; font-size: 11px; color: #3a3a4a; }
-    .footer a { color: #5a5a6a; text-decoration: none; }
-    .footer a:hover { color: #8a8a9a; }
+    .local-link strong { color: #1e293b; }
+    .local-link a { color: #3b82f6; text-decoration: none; }
+    .local-link a:hover { text-decoration: underline; }
     .spinner {
       display: inline-block; width: 14px; height: 14px;
-      border: 2px solid rgba(10,10,15,0.3); border-top-color: #0a0a0f;
+      border: 2px solid rgba(255,255,255,0.3); border-top-color: white;
       border-radius: 50%; animation: spin 0.6s linear infinite;
       vertical-align: middle; margin-right: 6px;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
-    @media (max-width: 400px) {
-      .container { padding: 24px 16px; }
-      .card { padding: 24px; }
-      .features { grid-template-columns: 1fr; }
+
+    /* ── Footer ── */
+    footer {
+      border-top: 1px solid rgba(0,0,0,0.06); padding: 24px 16px;
+      text-align: center; font-size: 12px; color: #94a3b8;
+    }
+    footer a { color: #64748b; text-decoration: none; }
+    footer a:hover { color: #3b82f6; }
+    footer .sep { margin: 0 8px; color: #cbd5e1; }
+
+    @media (min-width: 640px) {
+      .stats-row { grid-template-columns: repeat(4, 1fr); }
+      .hero h1 { font-size: 48px; }
+    }
+    @media (min-width: 1024px) {
+      .hero h1 { font-size: 64px; }
+      .hero { padding: 120px 16px 60px; }
     }
   </style>
 </head>
 <body>
-  <div class="container">
-    <div class="logo">S</div>
-    <h1>Suite AI</h1>
-    <p class="subtitle">Autonomous operations platform by XMRT DAO</p>
+  <!-- Header -->
+  <header>
+    <div class="inner">
+      <div class="logo-wrap">
+        <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" class="logo-svg" aria-label="Suite logo">
+          <circle cx="16" cy="16" r="15" fill="#3b82f6" />
+          <path d="M10 12C10 10.8954 10.8954 10 12 10H18C20.2091 10 22 11.7909 22 14C22 16.2091 20.2091 18 18 18H14C11.7909 18 10 19.7909 10 22C10 24.2091 11.7909 26 14 26H20C21.1046 26 22 25.1046 22 24" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none" />
+          <circle cx="22" cy="12" r="2" fill="white" opacity="0.8" />
+        </svg>
+        <span class="logo-text">Suite</span>
+      </div>
+    </div>
+  </header>
 
-    <div class="card">
+  <!-- Hero -->
+  <section class="hero">
+    <div class="hero-bg">
+      <div class="hero-bg-grad"></div>
+      <div class="hero-blob"></div>
+      <div class="hero-grid"></div>
+    </div>
+    <div class="container">
+      <h1>
+        Scale Your <span class="gradient">Operations</span><br />
+        <span class="dim">With Suite AI</span>
+      </h1>
+      <p class="sub">
+        Suite combines persistent memory, AI executives, and deep Google, GitHub, and Supabase integrations to plan, execute, and publish work across your stack.
+      </p>
+
+      <div class="cta-row">
+        <a href="#auth" class="btn-primary">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/></svg>
+          Access Dashboard
+        </a>
+        <a href="https://github.com/xmrtdao/suite" target="_blank" class="btn-outline">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+          View on GitHub
+        </a>
+        <a href="#auth" class="btn-emerald">
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/><path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/></svg>
+          Executive Dashboard
+        </a>
+      </div>
+
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="stat-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></svg>
+          </div>
+          <div class="stat-value">$12.4M</div>
+          <div class="stat-label">Average C-Suite Savings</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          </div>
+          <div class="stat-value">41%</div>
+          <div class="stat-label">Forecasted Payroll Lift</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M12 8V4H8"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></svg>
+          </div>
+          <div class="stat-value">120+</div>
+          <div class="stat-label">Autonomous Functions</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>
+          </div>
+          <div class="stat-value">24/7</div>
+          <div class="stat-label">Always-On Operations</div>
+        </div>
+      </div>
+      <p class="stat-disclaimer">* Forecast metrics are generated from Suite AI forecasts and executive swarm predictive analysis.</p>
+    </div>
+  </section>
+
+  <!-- Auth Section -->
+  <section id="auth" class="auth-section">
+    <div class="auth-card">
       <h2>🔐 Authenticate</h2>
-      <p class="info-text" style="margin-bottom:16px;">Enter your API key and JWT to access the Suite dashboard.</p>
+      <p class="hint">Enter your API key and JWT to access the Suite dashboard.</p>
 
       <div class="form-group">
         <label for="apiKey">API Key</label>
         <input type="text" id="apiKey" placeholder="suite-api-key-..." autocomplete="off" spellcheck="false" />
       </div>
-
       <div class="form-group">
         <label for="jwt">JWT Token</label>
         <input type="password" id="jwt" placeholder="eyJhbGciOiJSUzI1NiIs..." autocomplete="off" />
       </div>
 
-      <button class="btn" id="loginBtn" onclick="handleLogin()">Access Dashboard</button>
-
+      <button class="btn-auth" id="loginBtn" onclick="handleLogin()">Access Dashboard</button>
       <div class="status" id="status"></div>
-    </div>
 
-    <div class="divider">or</div>
+      <div class="divider">or</div>
 
-    <div class="card" style="padding:20px;text-align:center;">
-      <p class="info-text">
+      <p class="local-link">
         Run Suite locally at<br />
-        <strong style="color:#e0e0e0;">http://localhost:8080/suite/dashboard</strong><br /><br />
-        <a href="https://github.com/xmrtdao/suite" target="_blank" rel="noopener">View on GitHub →</a>
+        <strong>http://localhost:8080/suite/dashboard</strong>
       </p>
     </div>
+  </section>
 
-    <div class="features">
-      <div class="feature"><div class="feature-icon">🧠</div><div class="feature-label">Persistent Memory</div></div>
-      <div class="feature"><div class="feature-icon">🤖</div><div class="feature-label">AI Executives</div></div>
-      <div class="feature"><div class="feature-icon">🔗</div><div class="feature-label">Deep Integrations</div></div>
-      <div class="feature"><div class="feature-icon">⚡</div><div class="feature-label">Autonomous Ops</div></div>
-    </div>
-
-    <div class="footer">
-      <a href="https://xmrtdao.github.io/suite/">Suite AI</a> &middot;
-      <a href="https://github.com/xmrtdao" target="_blank">XMRT DAO</a> &middot;
-      <a href="https://xmrtsolutions.com" target="_blank">XMRT Solutions</a>
-    </div>
-  </div>
+  <!-- Footer -->
+  <footer>
+    <a href="https://xmrtdao.github.io/suite/">Suite AI</a>
+    <span class="sep">&middot;</span>
+    <a href="https://github.com/xmrtdao" target="_blank">XMRT DAO</a>
+    <span class="sep">&middot;</span>
+    <a href="https://xmrtsolutions.com" target="_blank">XMRT Solutions</a>
+  </footer>
 
   <script>
     async function handleLogin() {
@@ -231,7 +345,7 @@
       btn.disabled = true;
       btn.innerHTML = '<span class="spinner"></span> Authenticating...';
       status.className = 'status info';
-      status.textContent = 'Attempting to reach Suite relay...';
+      status.textContent = 'Connecting to Suite relay...';
       status.style.display = 'block';
 
       const relayUrl = 'https://relay.mobilemonero.com';
@@ -242,13 +356,10 @@
           signal: AbortSignal.timeout(8000),
           headers: apiKey ? { 'x-api-key': apiKey } : {}
         });
-
-        if (!testRes.ok && testRes.status !== 401) {
-          throw new Error('Relay returned ' + testRes.status);
-        }
+        if (!testRes.ok && testRes.status !== 401) throw new Error('Relay returned ' + testRes.status);
 
         status.className = 'status success';
-        status.textContent = 'Relay reachable. Redirecting to dashboard...';
+        status.textContent = 'Relay reachable. Redirecting...';
         status.style.display = 'block';
 
         let redirectUrl = dashboardUrl;
@@ -258,18 +369,13 @@
         const qs = params.toString();
         if (qs) redirectUrl += '?' + qs;
 
-        try {
-          sessionStorage.setItem('suite_api_key', apiKey);
-          sessionStorage.setItem('suite_jwt', jwt);
-        } catch(e) {}
-
+        try { sessionStorage.setItem('suite_api_key', apiKey); sessionStorage.setItem('suite_jwt', jwt); } catch(e) {}
         setTimeout(() => { window.location.href = redirectUrl; }, 1000);
 
       } catch (err) {
         status.className = 'status info';
         status.innerHTML = 'Relay not reachable via tunnel.<br />Try your local instance instead.';
         status.style.display = 'block';
-
         btn.disabled = false;
         btn.textContent = 'Try Local Dashboard';
         btn.onclick = function() {
