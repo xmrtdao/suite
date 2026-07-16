@@ -1,137 +1,386 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Suite | Scale Your Operations With Suite AI</title>
-    <meta name="description" content="Suite combines persistent memory, AI executives, and deep Google, GitHub, and Supabase integrations to plan, execute, and publish work across your stack." />
-    <meta name="keywords" content="AI operations platform, AI executives, workflow automation, persistent memory, Google integration, GitHub integration, Supabase integration, autonomous operations" />
-    <meta name="author" content="Suite by XMRT-DAO" />
-    <meta name="robots" content="index, follow, max-image-preview:large" />
-    <meta name="googlebot" content="index, follow" />
-    <meta name="language" content="English" />
-    <meta name="geo.region" content="US" />
-    <meta name="geo.placename" content="Global" />
-    <meta name="classification" content="Business, AI, Enterprise Software, Corporate Automation" />
-    <meta name="news_keywords" content="AI operations platform, workflow automation, AI executives, enterprise integrations" />
-    <link rel="canonical" href="https://suite-beta.vercel.app/" />
-    
-    <!-- Favicon -->
-    <link rel="icon" href="/favicon.svg?v=2" type="image/svg+xml" />
-    <link rel="icon" href="/favicon.png?v=2" type="image/png" sizes="512x512" />
-    <link rel="apple-touch-icon" href="/favicon.png?v=2" />
-    <link rel="manifest" href="/manifest.json" />
-    
-    <!-- Open Graph / Facebook -->
-    <meta property="og:type" content="website" />
-    <meta property="og:title" content="Scale Your Operations With Suite AI | Suite" />
-    <meta property="og:description" content="Suite combines persistent memory, AI executives, and deep Google, GitHub, and Supabase integrations to plan, execute, and publish work across your stack." />
-    <meta property="og:image" content="https://suite-beta.vercel.app/suite-social-card.svg" />
-    <meta property="og:image:alt" content="Scale Your Operations With Suite AI - plan, execute, and publish work across your stack" />
-    <meta property="og:image:width" content="1200" />
-    <meta property="og:image:height" content="630" />
-    <meta property="og:image:type" content="image/svg+xml" />
-    <meta property="og:url" content="https://suite-beta.vercel.app/" />
-    <meta property="og:site_name" content="Suite" />
-    <meta property="og:locale" content="en_US" />
-    <meta property="og:see_also" content="https://suite-beta.vercel.app" />
-    
-    <!-- LinkedIn Specific -->
-    <meta property="og:article:author" content="Suite by XMRT-DAO" />
-    <meta property="og:article:published_time" content="2024-12-01T00:00:00Z" />
-    <meta name="linkedin:owner" content="Suite" />
-    
-    <!-- Twitter -->
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:site" content="@XMRT_DAO" />
-    <meta name="twitter:creator" content="@XMRT_DAO" />
-    <meta name="twitter:title" content="Scale Your Operations With Suite AI" />
-    <meta name="twitter:description" content="Suite combines persistent memory, AI executives, and deep Google, GitHub, and Supabase integrations to plan, execute, and publish work across your stack." />
-    <meta name="twitter:image" content="https://suite-beta.vercel.app/suite-social-card.svg" />
-    <meta name="twitter:image:alt" content="Scale Your Operations With Suite AI - plan, execute, and publish work across your stack" />
-    <meta name="twitter:label1" content="⚙️ Workflow Coverage" />
-    <meta name="twitter:data1" content="Plan → Execute → Publish" />
-    <meta name="twitter:label2" content="🔗 Native Integrations" />
-    <meta name="twitter:data2" content="Google, GitHub, Supabase" />
-    
-    <!-- Pinterest -->
-    <meta name="pinterest-rich-pin" content="true" />
-    
-    <!-- Structured Data for SEO -->
-    <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "Organization",
-      "name": "Suite by XMRT-DAO",
-      "description": "Suite combines persistent memory, AI executives, and deep Google, GitHub, and Supabase integrations to plan, execute, and publish work across your stack.",
-      "url": "https://suite-beta.vercel.app/",
-      "logo": "https://suite-beta.vercel.app/favicon.png",
-      "slogan": "Scale Your Operations With Suite AI",
-      "contactPoint": {
-        "@type": "ContactPoint",
-        "contactType": "sales",
-        "email": "xmrtsolutions@gmail.com",
-        "description": "Corporate Licensing Inquiries"
-      },
-      "knowsAbout": [
-        "AI Executive Replacement",
-        "Ethical AI",
-        "Employee Salary Redistribution",
-        "Corporate Cost Savings",
-        "AI CEO",
-        "AI CTO",
-        "AI CFO",
-        "AI COO",
-        "Worker Empowerment",
-        "Downward Redistribution"
-      ]
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Suite AI | XMRT DAO</title>
+  <meta name="description" content="Suite AI — autonomous operations platform by XMRT DAO. Persistent memory, AI executives, and deep integrations." />
+  <meta name="author" content="Suite by XMRT-DAO" />
+  <meta name="robots" content="index, follow" />
+  <meta property="og:title" content="Suite AI | XMRT DAO" />
+  <meta property="og:description" content="Autonomous operations platform with persistent memory, AI executives, and deep integrations." />
+  <meta property="og:url" content="https://xmrtdao.github.io/suite/" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:site" content="@XMRT_DAO" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: #0a0a0f;
+      color: #e0e0e0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
     }
-    </script>
-    
-    <!-- Product Structured Data -->
-    <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "SoftwareApplication",
-      "name": "Suite AI Executives",
-      "applicationCategory": "BusinessApplication",
-      "operatingSystem": "Web",
-      "offers": {
-        "@type": "AggregateOffer",
-        "lowPrice": "0",
-        "highPrice": "Custom",
-        "priceCurrency": "USD",
-        "offerCount": "4"
-      },
-      "aggregateRating": {
-        "@type": "AggregateRating",
-        "ratingValue": "4.9",
-        "ratingCount": "127"
-      },
-      "description": "Suite is an AI operations platform that uses executive agents and deep integrations to plan, execute, and publish work across your stack."
+    .container {
+      max-width: 480px;
+      width: 100%;
+      padding: 40px 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
     }
-    </script>
-    
-    <!-- Additional Meta Tags -->
-    <meta name="theme-color" content="#0f172a" />
-    <meta name="application-name" content="Suite" />
-    <meta name="format-detection" content="telephone=no" />
-    <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="apple-mobile-web-app-title" content="Suite" />
-    
-    <!-- Permissions Policy for Camera/Microphone in PWA -->
-    <meta http-equiv="Permissions-Policy" content="camera=self, microphone=self, display-capture=self, geolocation=self" />
-    
-    <!-- Google Fonts - Inter for Apple-like feel -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-  </head>
+    .logo {
+      width: 64px;
+      height: 64px;
+      background: linear-gradient(135deg, #60a5fa, #4ade80);
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      font-weight: 700;
+      color: #0a0a0f;
+      margin-bottom: 16px;
+    }
+    h1 {
+      font-size: 24px;
+      font-weight: 600;
+      color: #f0f0f0;
+      margin-bottom: 4px;
+    }
+    .subtitle {
+      font-size: 14px;
+      color: #6b6b80;
+      margin-bottom: 32px;
+      text-align: center;
+    }
+    .card {
+      background: #12121a;
+      border: 1px solid #1e1e2e;
+      border-radius: 12px;
+      padding: 32px;
+      width: 100%;
+      margin-bottom: 16px;
+    }
+    .card h2 {
+      font-size: 16px;
+      font-weight: 500;
+      color: #a0a0b0;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+    .form-group {
+      margin-bottom: 16px;
+    }
+    label {
+      display: block;
+      font-size: 12px;
+      font-weight: 500;
+      color: #8a8a9a;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    input {
+      width: 100%;
+      padding: 10px 14px;
+      background: #0a0a0f;
+      border: 1px solid #2a2a3a;
+      border-radius: 8px;
+      color: #e0e0e0;
+      font-size: 14px;
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input:focus {
+      border-color: #60a5fa;
+    }
+    input::placeholder {
+      color: #4a4a5a;
+    }
+    .btn {
+      width: 100%;
+      padding: 12px;
+      background: linear-gradient(135deg, #60a5fa, #4ade80);
+      border: none;
+      border-radius: 8px;
+      color: #0a0a0f;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.2s;
+      margin-top: 8px;
+    }
+    .btn:hover {
+      opacity: 0.9;
+    }
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .status {
+      margin-top: 12px;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      display: none;
+    }
+    .status.error {
+      display: block;
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: #f87171;
+    }
+    .status.success {
+      display: block;
+      background: rgba(74, 222, 128, 0.1);
+      border: 1px solid rgba(74, 222, 128, 0.3);
+      color: #4ade80;
+    }
+    .status.info {
+      display: block;
+      background: rgba(96, 165, 250, 0.1);
+      border: 1px solid rgba(96, 165, 250, 0.3);
+      color: #60a5fa;
+    }
+    .divider {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      width: 100%;
+      margin: 20px 0;
+      color: #3a3a4a;
+      font-size: 12px;
+    }
+    .divider::before, .divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: #2a2a3a;
+    }
+    .info-text {
+      font-size: 12px;
+      color: #5a5a6a;
+      text-align: center;
+      line-height: 1.6;
+      margin-top: 8px;
+    }
+    .info-text a {
+      color: #60a5fa;
+      text-decoration: none;
+    }
+    .info-text a:hover {
+      text-decoration: underline;
+    }
+    .features {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      width: 100%;
+      margin-top: 8px;
+    }
+    .feature {
+      background: #12121a;
+      border: 1px solid #1e1e2e;
+      border-radius: 8px;
+      padding: 12px;
+      text-align: center;
+    }
+    .feature-icon {
+      font-size: 20px;
+      margin-bottom: 4px;
+    }
+    .feature-label {
+      font-size: 11px;
+      color: #6b6b80;
+    }
+    .footer {
+      margin-top: auto;
+      padding: 24px 0 16px;
+      text-align: center;
+      font-size: 11px;
+      color: #3a3a4a;
+    }
+    .footer a {
+      color: #5a5a6a;
+      text-decoration: none;
+    }
+    .footer a:hover {
+      color: #8a8a9a;
+    }
+    .spinner {
+      display: inline-block;
+      width: 14px;
+      height: 14px;
+      border: 2px solid rgba(10, 10, 15, 0.3);
+      border-top-color: #0a0a0f;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (max-width: 400px) {
+      .container { padding: 24px 16px; }
+      .card { padding: 24px; }
+      .features { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">S</div>
+    <h1>Suite AI</h1>
+    <p class="subtitle">Autonomous operations platform by XMRT DAO</p>
 
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
+    <div class="card">
+      <h2>🔐 Authenticate</h2>
+      <p class="info-text" style="margin-bottom:16px;">Enter your API key and JWT to access the Suite dashboard.</p>
+
+      <div class="form-group">
+        <label for="apiKey">API Key</label>
+        <input type="text" id="apiKey" placeholder="suite-api-key-..." autocomplete="off" spellcheck="false" />
+      </div>
+
+      <div class="form-group">
+        <label for="jwt">JWT Token</label>
+        <input type="password" id="jwt" placeholder="eyJhbGciOiJSUzI1NiIs..." autocomplete="off" />
+      </div>
+
+      <button class="btn" id="loginBtn" onclick="handleLogin()">Access Dashboard</button>
+
+      <div class="status" id="status"></div>
+    </div>
+
+    <div class="divider">or</div>
+
+    <div class="card" style="padding:20px;text-align:center;">
+      <p class="info-text">
+        Run Suite locally at<br />
+        <strong style="color:#e0e0e0;">http://localhost:8080/suite/dashboard</strong><br /><br />
+        <a href="https://github.com/xmrtdao/suite" target="_blank" rel="noopener">View on GitHub →</a>
+      </p>
+    </div>
+
+    <div class="features">
+      <div class="feature">
+        <div class="feature-icon">🧠</div>
+        <div class="feature-label">Persistent Memory</div>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🤖</div>
+        <div class="feature-label">AI Executives</div>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">🔗</div>
+        <div class="feature-label">Deep Integrations</div>
+      </div>
+      <div class="feature">
+        <div class="feature-icon">⚡</div>
+        <div class="feature-label">Autonomous Ops</div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <a href="https://xmrtdao.github.io/suite/">Suite AI</a> &middot;
+      <a href="https://github.com/xmrtdao" target="_blank">XMRT DAO</a> &middot;
+      <a href="https://xmrtsolutions.com" target="_blank">XMRT Solutions</a>
+    </div>
+  </div>
+
+  <script>
+    async function handleLogin() {
+      const apiKey = document.getElementById('apiKey').value.trim();
+      const jwt = document.getElementById('jwt').value.trim();
+      const btn = document.getElementById('loginBtn');
+      const status = document.getElementById('status');
+
+      status.className = 'status';
+      status.style.display = 'none';
+
+      if (!apiKey && !jwt) {
+        status.className = 'status error';
+        status.textContent = 'Please enter an API key or JWT token.';
+        status.style.display = 'block';
+        return;
+      }
+
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> Authenticating...';
+      status.className = 'status info';
+      status.textContent = 'Attempting to reach Suite relay...';
+      status.style.display = 'block';
+
+      // Try to reach the relay via the tunnel
+      const relayUrl = 'https://relay.mobilemonero.com';
+      const dashboardUrl = relayUrl + '/suite/dashboard';
+
+      try {
+        const testRes = await fetch(relayUrl + '/health', {
+          signal: AbortSignal.timeout(8000),
+          headers: apiKey ? { 'x-api-key': apiKey } : {}
+        });
+
+        if (!testRes.ok && testRes.status !== 401) {
+          throw new Error('Relay returned ' + testRes.status);
+        }
+
+        status.className = 'status success';
+        status.textContent = 'Relay reachable. Redirecting to dashboard...';
+        status.style.display = 'block';
+
+        // Build redirect URL with credentials
+        let redirectUrl = dashboardUrl;
+        const params = new URLSearchParams();
+        if (apiKey) params.set('api_key', apiKey);
+        if (jwt) params.set('jwt', jwt);
+        const qs = params.toString();
+        if (qs) redirectUrl += '?' + qs;
+
+        // Store in sessionStorage for the dashboard to pick up
+        try {
+          sessionStorage.setItem('suite_api_key', apiKey);
+          sessionStorage.setItem('suite_jwt', jwt);
+        } catch(e) {}
+
+        setTimeout(() => {
+          window.location.href = redirectUrl;
+        }, 1000);
+
+      } catch (err) {
+        // Relay not reachable — offer local fallback
+        status.className = 'status info';
+        status.innerHTML = 'Relay not reachable via tunnel.<br />Try your local instance instead.';
+        status.style.display = 'block';
+
+        btn.disabled = false;
+        btn.textContent = 'Try Local Dashboard';
+
+        btn.onclick = function() {
+          const localUrl = 'http://localhost:8080/suite/dashboard';
+          const params = new URLSearchParams();
+          if (apiKey) params.set('api_key', apiKey);
+          if (jwt) params.set('jwt', jwt);
+          const qs = params.toString();
+          window.location.href = localUrl + (qs ? '?' + qs : '');
+        };
+      }
+    }
+
+    // Allow Enter key to submit
+    document.addEventListener('DOMContentLoaded', () => {
+      const inputs = document.querySelectorAll('input');
+      inputs.forEach(input => {
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') handleLogin();
+        });
+      });
+    });
+  </script>
+</body>
 </html>
