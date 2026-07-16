@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Suite AI | XMRT DAO</title>
+  <meta name="description" content="Suite AI — autonomous operations platform by XMRT DAO. Persistent memory, AI executives, and deep integrations." />
+  <meta name="author" content="Suite by XMRT-DAO" />
+  <meta name="robots" content="index, follow" />
+  <meta property="og:title" content="Suite AI | XMRT DAO" />
+  <meta property="og:description" content="Autonomous operations platform with persistent memory, AI executives, and deep integrations." />
+  <meta property="og:url" content="https://xmrtdao.github.io/suite/" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:site" content="@XMRT_DAO" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: #0a0a0f;
+      color: #e0e0e0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .container {
+      max-width: 480px;
+      width: 100%;
+      padding: 40px 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+    }
+    .logo {
+      width: 64px;
+      height: 64px;
+      background: linear-gradient(135deg, #60a5fa, #4ade80);
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      font-weight: 700;
+      color: #0a0a0f;
+      margin-bottom: 16px;
+    }
+    h1 {
+      font-size: 24px;
+      font-weight: 600;
+      color: #f0f0f0;
+      margin-bottom: 4px;
+    }
+    .subtitle {
+      font-size: 14px;
+      color: #6b6b80;
+      margin-bottom: 32px;
+      text-align: center;
+    }
+    .card {
+      background: #12121a;
+      border: 1px solid #1e1e2e;
+      border-radius: 12px;
+      padding: 32px;
+      width: 100%;
+      margin-bottom: 16px;
+    }
+    .card h2 {
+      font-size: 16px;
+      font-weight: 500;
+      color: #a0a0b0;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+    .form-group {
+      margin-bottom: 16px;
+    }
+    label {
+      display: block;
+      font-size: 12px;
+      font-weight: 500;
+      color: #8a8a9a;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    input {
+      width: 100%;
+      padding: 10px 14px;
+      background: #0a0a0f;
+      border: 1px solid #2a2a3a;
+      border-radius: 8px;
+      color: #e0e0e0;
+      font-size: 14px;
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input:focus {
+      border-color: #60a5fa;
+    }
+    input::placeholder {
+      color: #4a4a5a;
+    }
+    .btn {
+      width: 100%;
+      padding: 12px;
+      background: linear-gradient(135deg, #60a5fa, #4ade80);
+      border: none;
+      border-radius: 8px;
+      color: #0a0a0f;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.2s;
+      margin-top: 8px;
+    }
+    .btn:hover { opacity: 0.9; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .status {
+      margin-top: 12px;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      display: none;
+    }
+    .status.error { display: block; background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); color: #f87171; }
+    .status.success { display: block; background: rgba(74,222,128,0.1); border: 1px solid rgba(74,222,128,0.3); color: #4ade80; }
+    .status.info { display: block; background: rgba(96,165,250,0.1); border: 1px solid rgba(96,165,250,0.3); color: #60a5fa; }
+    .divider {
+      display: flex; align-items: center; gap: 12px; width: 100%; margin: 20px 0;
+      color: #3a3a4a; font-size: 12px;
+    }
+    .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: #2a2a3a; }
+    .info-text { font-size: 12px; color: #5a5a6a; text-align: center; line-height: 1.6; margin-top: 8px; }
+    .info-text a { color: #60a5fa; text-decoration: none; }
+    .info-text a:hover { text-decoration: underline; }
+    .features {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; margin-top: 8px;
+    }
+    .feature {
+      background: #12121a; border: 1px solid #1e1e2e; border-radius: 8px;
+      padding: 12px; text-align: center;
+    }
+    .feature-icon { font-size: 20px; margin-bottom: 4px; }
+    .feature-label { font-size: 11px; color: #6b6b80; }
+    .footer { margin-top: auto; padding: 24px 0 16px; text-align: center; font-size: 11px; color: #3a3a4a; }
+    .footer a { color: #5a5a6a; text-decoration: none; }
+    .footer a:hover { color: #8a8a9a; }
+    .spinner {
+      display: inline-block; width: 14px; height: 14px;
+      border: 2px solid rgba(10,10,15,0.3); border-top-color: #0a0a0f;
+      border-radius: 50%; animation: spin 0.6s linear infinite;
+      vertical-align: middle; margin-right: 6px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (max-width: 400px) {
+      .container { padding: 24px 16px; }
+      .card { padding: 24px; }
+      .features { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">S</div>
+    <h1>Suite AI</h1>
+    <p class="subtitle">Autonomous operations platform by XMRT DAO</p>
+
+    <div class="card">
+      <h2>🔐 Authenticate</h2>
+      <p class="info-text" style="margin-bottom:16px;">Enter your API key and JWT to access the Suite dashboard.</p>
+
+      <div class="form-group">
+        <label for="apiKey">API Key</label>
+        <input type="text" id="apiKey" placeholder="suite-api-key-..." autocomplete="off" spellcheck="false" />
+      </div>
+
+      <div class="form-group">
+        <label for="jwt">JWT Token</label>
+        <input type="password" id="jwt" placeholder="eyJhbGciOiJSUzI1NiIs..." autocomplete="off" />
+      </div>
+
+      <button class="btn" id="loginBtn" onclick="handleLogin()">Access Dashboard</button>
+
+      <div class="status" id="status"></div>
+    </div>
+
+    <div class="divider">or</div>
+
+    <div class="card" style="padding:20px;text-align:center;">
+      <p class="info-text">
+        Run Suite locally at<br />
+        <strong style="color:#e0e0e0;">http://localhost:8080/suite/dashboard</strong><br /><br />
+        <a href="https://github.com/xmrtdao/suite" target="_blank" rel="noopener">View on GitHub →</a>
+      </p>
+    </div>
+
+    <div class="features">
+      <div class="feature"><div class="feature-icon">🧠</div><div class="feature-label">Persistent Memory</div></div>
+      <div class="feature"><div class="feature-icon">🤖</div><div class="feature-label">AI Executives</div></div>
+      <div class="feature"><div class="feature-icon">🔗</div><div class="feature-label">Deep Integrations</div></div>
+      <div class="feature"><div class="feature-icon">⚡</div><div class="feature-label">Autonomous Ops</div></div>
+    </div>
+
+    <div class="footer">
+      <a href="https://xmrtdao.github.io/suite/">Suite AI</a> &middot;
+      <a href="https://github.com/xmrtdao" target="_blank">XMRT DAO</a> &middot;
+      <a href="https://xmrtsolutions.com" target="_blank">XMRT Solutions</a>
+    </div>
+  </div>
+
+  <script>
+    async function handleLogin() {
+      const apiKey = document.getElementById('apiKey').value.trim();
+      const jwt = document.getElementById('jwt').value.trim();
+      const btn = document.getElementById('loginBtn');
+      const status = document.getElementById('status');
+
+      status.className = 'status';
+      status.style.display = 'none';
+
+      if (!apiKey && !jwt) {
+        status.className = 'status error';
+        status.textContent = 'Please enter an API key or JWT token.';
+        status.style.display = 'block';
+        return;
+      }
+
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner"></span> Authenticating...';
+      status.className = 'status info';
+      status.textContent = 'Attempting to reach Suite relay...';
+      status.style.display = 'block';
+
+      const relayUrl = 'https://relay.mobilemonero.com';
+      const dashboardUrl = relayUrl + '/suite/dashboard';
+
+      try {
+        const testRes = await fetch(relayUrl + '/health', {
+          signal: AbortSignal.timeout(8000),
+          headers: apiKey ? { 'x-api-key': apiKey } : {}
+        });
+
+        if (!testRes.ok && testRes.status !== 401) {
+          throw new Error('Relay returned ' + testRes.status);
+        }
+
+        status.className = 'status success';
+        status.textContent = 'Relay reachable. Redirecting to dashboard...';
+        status.style.display = 'block';
+
+        let redirectUrl = dashboardUrl;
+        const params = new URLSearchParams();
+        if (apiKey) params.set('api_key', apiKey);
+        if (jwt) params.set('jwt', jwt);
+        const qs = params.toString();
+        if (qs) redirectUrl += '?' + qs;
+
+        try {
+          sessionStorage.setItem('suite_api_key', apiKey);
+          sessionStorage.setItem('suite_jwt', jwt);
+        } catch(e) {}
+
+        setTimeout(() => { window.location.href = redirectUrl; }, 1000);
+
+      } catch (err) {
+        status.className = 'status info';
+        status.innerHTML = 'Relay not reachable via tunnel.<br />Try your local instance instead.';
+        status.style.display = 'block';
+
+        btn.disabled = false;
+        btn.textContent = 'Try Local Dashboard';
+        btn.onclick = function() {
+          const localUrl = 'http://localhost:8080/suite/dashboard';
+          const params = new URLSearchParams();
+          if (apiKey) params.set('api_key', apiKey);
+          if (jwt) params.set('jwt', jwt);
+          const qs = params.toString();
+          window.location.href = localUrl + (qs ? '?' + qs : '');
+        };
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      document.querySelectorAll('input').forEach(input => {
+        input.addEventListener('keydown', (e) => { if (e.key === 'Enter') handleLogin(); });
+      });
+    });
+  </script>
+</body>
+</html>
