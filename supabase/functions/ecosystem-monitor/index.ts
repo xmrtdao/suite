@@ -49,13 +49,13 @@ serve(async (req) => {
 
     // Define XMRT ecosystem repositories
     const repos = [
-      { owner: 'DevGruGold', name: 'XMRT-Ecosystem' },
-      { owner: 'DevGruGold', name: 'XMRT.io' },
-      { owner: 'DevGruGold', name: 'XMRT-DAO-Ecosystem' },
-      { owner: 'DevGruGold', name: 'XMRT_EcosystemV2' },
-      { owner: 'DevGruGold', name: 'xmrtassistant' },
-      { owner: 'DevGruGold', name: 'MESHNET' },
-      { owner: 'DevGruGold', name: 'eliza-daemon' },
+      { owner: 'xmrtdao', name: 'mobilemonero' },
+      { owner: 'xmrtdao', name: 'atlas-amd-hackathon' },
+      { owner: 'xmrtdao', name: 'xmrt-university' },
+      { owner: 'partyfavorphoto', name: 'XMRT-Ecosystem' },
+      { owner: 'partyfavorphoto', name: 'MESHNET' },
+      { owner: 'partyfavorphoto', name: 'optimus-booth-activation' },
+      { owner: 'partyfavorphoto', name: 'partyfavorphoto-tools' },
     ];
 
     const repoActivityScores: any[] = [];
@@ -125,7 +125,7 @@ serve(async (req) => {
       daily_connections: deviceMetrics?.total_connections || 0,
       daily_charging_sessions: deviceMetrics?.total_charging_sessions || 0,
       avg_session_duration: deviceMetrics?.avg_session_duration_seconds || 0,
-      health_score: calculateInfrastructureScore(deviceMetrics, activeDevices)
+      health_score: calculateInfrastructureScore(deviceMetrics, activeDevices || [])
     };
 
     console.log(`🔌 Infrastructure Health Score: ${infrastructureHealth.health_score}/100`);

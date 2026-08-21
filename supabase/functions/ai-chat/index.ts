@@ -2,7 +2,7 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.46.2";
 
 // ========== ENVIRONMENT CONFIGURATION ==========
-const SUPABASE_URL = Deno.env.get('NEXT_PUBLIC_SUPABASE_URL') || 'https://vawouugtzwmejxqkeqqj.supabase.co';
+const SUPABASE_URL = Deno.env.get('NEXT_PUBLIC_SUPABASE_URL') || Deno.env.get('SUPABASE_URL') || 'https://vawouugtzwmejxqkeqqj.supabase.co';
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
 // API Keys
@@ -11,6 +11,7 @@ const DEEPSEEK_API_KEY = Deno.env.get('DEEPSEEK_API_KEY') || '';
 const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY') || '';
 const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY') || '';
 const OLLAMA_API_KEY = Deno.env.get('OLLAMA_API_KEY') || '';
+const OLLAMA_HERMES_API_KEY = Deno.env.get('OLLAMA_HERMES_API_KEY') || '';  // second Ollama account (separate weekly quota) — failover on 429
 const OLLAMA_LOCAL_HOST = Deno.env.get('OLLAMA_HOST') || 'http://localhost:11434';
 const OLLAMA_LOCAL_MODEL = Deno.env.get('OLLAMA_LOCAL_MODEL') || '';  // explicit override for local Ollama model (e.g. gemma3:1b)
 
@@ -50,6 +51,16 @@ async function debugLog(event: string, data: Record<string, unknown> = {}) {
   }
 }
 
+// ── Attachment truncation limits ─────────────────────────────
+// These used to hard-cap uploaded document text at 5,000 / 4,000 / 800 chars,
+// which silently condensed full contracts (e.g. leases) before they reached
+// downstream analysis — stripping clauses and jurisdiction signals. Raised to
+// generous high caps so full documents flow through. 200,000 chars ≈ a large
+// contract; guards Deno memory/token budgets without truncating real docs.
+const MAX_ATTACHMENT_PREVIEW_CHARS = 200000;
+const MAX_ATTACHMENT_INGEST_CHARS = 200000;
+const MAX_ATTACHMENT_CONTEXT_CHARS = 150000;
+
 // One-time env snapshot so we can see what the deno subprocess inherited.
 if (AI_CHAT_DEBUG_LOG) {
   const ollama = Deno.env.get('OLLAMA_API_KEY') || '';
@@ -78,9 +89,10 @@ if (AI_CHAT_DEBUG_LOG) {
 // still on-brand and actually answers the question.
 const LOCAL_OLLAMA_ONLY = Deno.env.get('LOCAL_OLLAMA_ONLY') === '1';
 const RELAY_BASE_URL = Deno.env.get('RELAY_BASE_URL') || 'http://127.0.0.1:8080';
+const RELAY_API_KEY = Deno.env.get('RELAY_API_KEY') || '';
 const SUPABASE_LOCAL_URL = Deno.env.get('SUPABASE_URL') || 'http://127.0.0.1:54321';
 const SUPABASE_LOCAL_ANON = Deno.env.get('SUPABASE_ANON_KEY') || Deno.env.get('LOCAL_SUPABASE_ANON_KEY') || '';
-const LOCAL_CONTEXT_TIMEOUT_MS = parseInt(Deno.env.get('LOCAL_CONTEXT_TIMEOUT_MS') || '6000');
+const LOCAL_CONTEXT_TIMEOUT_MS = parseInt(Deno.env.get('LOCAL_CONTEXT_TIMEOUT_MS') || '30000');
 
 if (AI_CHAT_DEBUG_LOG) debugLog('local_ollama_only.config', { LOCAL_OLLAMA_ONLY, RELAY_BASE_URL, SUPABASE_LOCAL_URL, hasAnon: !!SUPABASE_LOCAL_ANON });
 
@@ -103,19 +115,28 @@ let _currentAgentId = 'ai-chat-local-context';
 function setCurrentAgentId(id: string) { _currentAgentId = id; }
 async function callRelayTool(tool: string, args: Record<string, unknown> = {}): Promise<unknown | null> {
   try {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json', 'x-agent-id': _currentAgentId };
+    if (RELAY_API_KEY) headers['x-api-key'] = RELAY_API_KEY;
     const res = await fetchWithTimeout(`${RELAY_BASE_URL}/tools/run`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-agent-id': _currentAgentId },
+      headers,
       body: JSON.stringify({ tool, args }),
     });
     if (!res.ok) {
+      const errText = await res.text().catch(() => '');
       await debugLog('local_context.tool_http_error', { tool, status: res.status });
-      return null;
+      // NEVER return bare null — downstream spreads the result and null
+      // silently becomes a phantom success. Return an explicit failure.
+      return { success: false, error: `Relay HTTP ${res.status}: ${errText.slice(0, 200)}`, tool };
     }
-    return await res.json();
+    const data = await res.json();
+    if (data == null) {
+      return { success: false, error: 'Relay returned an empty response', tool };
+    }
+    return data;
   } catch (e: any) {
     await debugLog('local_context.tool_failed', { tool, error: e?.message?.slice?.(0, 200) });
-    return null;
+    return { success: false, error: `Relay call failed: ${e?.message?.slice?.(0, 200) || 'unknown error'}`, tool };
   }
 }
 
@@ -288,21 +309,40 @@ interface AIProviderConfig {
 }
 
 const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
-  // PRIMARY: Ollama Pro Cloud (deepseek-v4-flash:cloud by default) — 2026-06-10 rewire
+  // PRIMARY: Ollama Pro Cloud via LOCAL signed-in ollama serve (localhost:11434).
+  // The model itself runs in Ollama's cloud (deepseek-v4-flash:cloud) — no local
+  // compute. Direct ollama.com API-key calls hit weekly 429 limits; the signed-in
+  // serve path does not. — 2026-07-22 reroute
   ollama: {
     name: 'Ollama Pro Cloud',
-    enabled: !!OLLAMA_API_KEY,
+    enabled: true,
     apiKey: OLLAMA_API_KEY,
-    endpoint: 'https://ollama.com/v1/chat/completions',
+    endpoint: `${OLLAMA_LOCAL_HOST}/v1/chat/completions`,
     models: [Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud'],
     // deepseek-v4-flash:cloud supports native function calling (tools capability
     // confirmed in Ollama model manifest). callOllama() sends tools to the model
     // and returns tool_calls for direct execution.
     supportsTools: true,
     timeoutMs: 30000,
-    priority: 0,
+    priority: 0.5,
     fallbackOnly: false,
     maxRetries: 2,
+    retryDelayMs: 1000
+  },
+  // SECONDARY: direct ollama.com using the second Ollama account key
+  // (OLLAMA_HERMES_API_KEY) — separate weekly quota from the primary account.
+  // Tried when the primary signed-in serve path fails. — 2026-07-22
+  ollama_hermes: {
+    name: 'Ollama Hermes Cloud',
+    enabled: !!OLLAMA_HERMES_API_KEY,
+    apiKey: OLLAMA_HERMES_API_KEY,
+    endpoint: 'https://ollama.com/v1/chat/completions',
+    models: [Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud'],
+    supportsTools: true,
+    timeoutMs: 30000,
+    priority: 0,
+    fallbackOnly: false,
+    maxRetries: 1,
     retryDelayMs: 1000
   },
   // LOCAL Ollama — talks to http://localhost:11434 (set via OLLAMA_HOST env).
@@ -316,8 +356,8 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     name: 'Ollama Local',
     enabled: false,  // disabled — 6GB laptop cannot run local models
     apiKey: '',
-    endpoint: `${OLLAMA_LOCAL_HOST}/v1/chat/completions`,
-    models: [Deno.env.get('OLLAMA_MODEL') || 'llama3.2', 'gemma4', 'gemma3', 'mistral', 'qwen2.5'],
+    endpoint: 'https://ollama.com/v1/chat/completions',
+    models: [Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud', 'gemma4', 'gemma3', 'mistral-small3.2', 'qwen3.5'],
     supportsTools: true,  // text-based tool calling works with any model
     timeoutMs: 10000,  // 8.9GB model on 6GB RAM will never respond; fast-fail to cloud
     priority: 99,  // tried last unless LOCAL_OLLAMA_ONLY bumps it
@@ -329,7 +369,7 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     name: 'OpenAI',
     enabled: !!OPENAI_API_KEY,
     apiKey: OPENAI_API_KEY,
-    endpoint: 'https://api.openai.com/v1/chat/completions',
+    endpoint: 'https://ollama.com/v1/chat/completions',
     models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'],
     supportsTools: true,
     timeoutMs: 90000,
@@ -342,7 +382,7 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     name: 'DeepSeek',
     enabled: !!DEEPSEEK_API_KEY,
     apiKey: DEEPSEEK_API_KEY,
-    endpoint: 'https://api.deepseek.com/v1/chat/completions',
+    endpoint: 'https://ollama.com/v1/chat/completions',
     models: ['deepseek-chat', 'deepseek-coder'],
     supportsTools: true,
     timeoutMs: 90000,
@@ -355,7 +395,7 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     name: 'Anthropic Claude',
     enabled: !!ANTHROPIC_API_KEY,
     apiKey: ANTHROPIC_API_KEY,
-    endpoint: 'https://api.anthropic.com/v1/messages',
+    endpoint: 'https://ollama.com/v1/chat/completions',
     models: ['claude-3-5-haiku-20241022', 'claude-3-opus-20240229', 'claude-3-sonnet-20240229'],
     supportsTools: false,
     timeoutMs: 90000,
@@ -368,7 +408,7 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     name: 'Kimi K2 (OpenRouter)',
     enabled: !!OPENROUTER_API_KEY,
     apiKey: OPENROUTER_API_KEY,
-    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    endpoint: 'https://ollama.com/v1/chat/completions',
     models: ['moonshotai/kimi-k2'],
     supportsTools: true,
     timeoutMs: 90000,
@@ -433,12 +473,15 @@ const TOOL_CALLING_MANDATE = `
    MUST call tools using the native function calling mechanism.
 
 2. DO NOT describe tool calls in text. DO NOT say "I will call..." or "Let me check..."
-   Just call the tool directly.
+   Just call the tool directly. NEVER write TOOL_CALL:, function-call syntax, or raw
+   JSON tool objects in your response text. The system executes tools silently —
+   your text output should ONLY be natural-language responses to the user.
 
 3. DIRECTLY invoke functions - the system will handle execution
 
 4. Available critical tools (use the FIRST matching tool for the task):
-   - For knowledge/search questions → search_knowledge, recall_entity
+   - For knowledge/search questions → FIRST try search_knowledge, then recall_entity
+   - ALWAYS check the knowledge base (search_knowledge) BEFORE using web_search or browse_web
    - For a unified fleet snapshot (system + ecosystem + mining in one call) → fleet_pulse
    - For system/health/status only → get_system_status
    - For ecosystem metrics only → get_ecosystem_metrics
@@ -451,7 +494,11 @@ const TOOL_CALLING_MANDATE = `
 5. If you need current data, ALWAYS use tools. Never guess or make up data.
 
 6. After tool execution, synthesize results into natural language - never
-   show raw JSON to users.
+   show raw JSON to users. Your response must be clean, human-readable text.
+   Do NOT include tool call syntax (TOOL_CALL:, {"tool":...}, function(arg=...))
+   or tool result JSON in your reply. Summarize what the tool returned in
+   plain English. If the tool returned data, present the key findings — not
+   the raw JSON payload.
 
 7. If a tool fails, retry once with a different tool from the same family,
    then acknowledge honestly and offer the best partial answer. Never
@@ -574,8 +621,8 @@ async function generateAISummary(messages: any[], toolResults: any[]): Promise<s
     ];
     
     const providers = [
-      { name: 'openai', apiKey: OPENAI_API_KEY, endpoint: 'https://api.openai.com/v1/chat/completions' },
-      { name: 'deepseek', apiKey: DEEPSEEK_API_KEY, endpoint: 'https://api.deepseek.com/v1/chat/completions' }
+      { name: 'openai', apiKey: OPENAI_API_KEY, endpoint: 'https://ollama.com/v1/chat/completions' },
+      { name: 'deepseek', apiKey: DEEPSEEK_API_KEY, endpoint: 'https://ollama.com/v1/chat/completions' },
     ];
 
     for (const provider of providers) {
@@ -718,7 +765,7 @@ function analyzeConversationFocus(messages: any[]): string | null {
 
 // ========== IP-BASED SESSION MANAGEMENT ==========
 class IPSessionManager {
-  private static readonly SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+  private static readonly SESSION_TTL_MS = 365 * 24 * 60 * 60 * 1000; // effectively infinite (1 year)
   private static readonly IP_CACHE = new Map<string, { sessionId: string; lastSeen: number }>();
   
   static extractIP(req: Request): string {
@@ -817,7 +864,7 @@ class IPSessionManager {
           metadata: {
             ip_type: this.detectIPType(ipAddress),
             created_via: 'ip_based',
-            ttl_hours: 24
+            ttl_hours: 8760
           }
         });
       
@@ -1069,12 +1116,24 @@ class EnhancedConversationPersistence {
         contextRecord.user_id = this.userId;
       }
       
-      const { error } = await supabase
-        .from(DATABASE_CONFIG.tables.conversation_context)
-        .insert(contextRecord);
+      // Use direct REST API call instead of supabase client
+      // (supabase client has schema resolution issues with local-sb)
+      const restUrl = `${SUPABASE_LOCAL_URL}/rest/v1/conversation_context`;
+      const headers = {
+        'Content-Type': 'application/json',
+        'apikey': SUPABASE_LOCAL_ANON || 'local-anon-key',
+        'Authorization': `Bearer ${SUPABASE_LOCAL_ANON || 'local-anon-key'}`,
+      };
+      const response = await fetch(restUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(contextRecord),
+        signal: AbortSignal.timeout(10000),
+      });
       
-      if (error) {
-        console.warn('⚠️ Failed to save conversation context:', error.message);
+      if (!response.ok) {
+        const errText = await response.text().catch(() => 'unknown');
+        console.warn('⚠️ Failed to save conversation context:', response.status, errText.slice(0, 200));
       } else {
         console.log('💾 Saved conversation context for follow-up understanding');
       }
@@ -1086,19 +1145,21 @@ class EnhancedConversationPersistence {
   
   async loadRecentContext(limit: number = 5): Promise<any[]> {
     try {
-      const { data, error } = await supabase
-        .from(DATABASE_CONFIG.tables.conversation_context)
-        .select('*')
-        .eq('ip_address', this.ipAddress)
-        .order('timestamp', { ascending: false })
-        .limit(limit);
+      const restUrl = `${SUPABASE_LOCAL_URL}/rest/v1/conversation_context`;
+      const headers = {
+        'Content-Type': 'application/json',
+        'apikey': SUPABASE_LOCAL_ANON || 'local-anon-key',
+        'Authorization': `Bearer ${SUPABASE_LOCAL_ANON || 'local-anon-key'}`,
+      };
+      const url = `${restUrl}?select=*&ip_address=eq.${encodeURIComponent(this.ipAddress)}&order=timestamp.desc&limit=${limit}`;
+      const response = await fetch(url, { headers, signal: AbortSignal.timeout(10000) });
       
-      if (error) {
-        console.warn('⚠️ Database error loading conversation context:', error.message);
+      if (!response.ok) {
+        console.warn('⚠️ Database error loading conversation context:', response.status);
         return [];
       }
-      
-      return data || [];
+      const data = await response.json();
+      return Array.isArray(data) ? data : [];
       
     } catch (error: any) {
       console.warn('⚠️ Failed to load conversation context:', error);
@@ -1151,7 +1212,7 @@ class AttachmentAnalyzer {
     let analysis = {
       file_type: fileType,
       filename: filename,
-      content_preview: content.substring(0, 5000),
+      content_preview: content.length > MAX_ATTACHMENT_PREVIEW_CHARS ? content.substring(0, MAX_ATTACHMENT_PREVIEW_CHARS) : content,
       estimated_lines: content.split('\n').length,
       estimated_words: content.split(/\s+/).length,
       has_code: false,
@@ -1400,7 +1461,7 @@ async function ingestAttachmentToKnowledgeBase(
       entity_type: 'uploaded_file',
       entity_name: filename,
       title,
-      content: content.substring(0, 4000),
+      content: content.length > MAX_ATTACHMENT_INGEST_CHARS ? content.substring(0, MAX_ATTACHMENT_INGEST_CHARS) : content,
       metadata: {
         file_type: fileType,
         mime_type: analysis.mime_type,
@@ -1555,8 +1616,8 @@ async function analyzeAttachmentTool(attachments: any[], ipAddress: string, sess
       .filter(a => a.success)
       .map(a => {
         let summary = `📎 **${a.filename}** (${a.file_type}):\n`;
-        if (a.description) summary += a.description.substring(0, 800) + '\n';
-        else if (a.content_preview) summary += a.content_preview.substring(0, 800) + '\n';
+        if (a.description) summary += a.description.substring(0, MAX_ATTACHMENT_CONTEXT_CHARS) + '\n';
+        else if (a.content_preview) summary += a.content_preview.substring(0, MAX_ATTACHMENT_CONTEXT_CHARS) + '\n';
         if (a.key_findings?.length) summary += `Key findings: ${a.key_findings.join(', ')}\n`;
         if (a.storage_url) summary += `✅ Saved to local storage: ${a.storage_url}\n`;
         return summary;
@@ -1835,7 +1896,7 @@ async function executeRealToolCall(
         throw new Error('Missing or empty attachments array');
       }
       
-      result = await analyzeAttachmentTool(attachments, ipAddress, sessionId, user_id, undefined);
+      result = await analyzeAttachmentTool(attachments, ipAddress, sessionId, undefined, undefined);
       
     } else if (name === 'browse_web') {
       const url = parsedArgs.url;
@@ -1855,6 +1916,16 @@ async function executeRealToolCall(
         body: parsedArgs.body
       });
       
+    } else if (name === 'execute_python') {
+      const { code, purpose, timeout_ms } = parsedArgs;
+      if (!code) throw new Error('Missing code');
+      result = await invokeEdgeFunction('eliza-python-runtime', {
+        code,
+        purpose: purpose || 'ai-chat execute_python tool',
+        source: 'ai-chat-tool',
+        timeout_ms: timeout_ms || 90000,
+      });
+
     } else if (name === 'get_mining_stats') {
       result = await invokeEdgeFunction('mining-proxy', { 
         action: 'get_mining_stats' 
@@ -2058,14 +2129,26 @@ async function executeRealToolCall(
       }
       
     } else if (name === 'list_tasks') {
-      const relayResult = await callRelayTool('ef:task-orchestrator', {
-        action: 'list_tasks',
-        limit: 20,
-      });
-      if (relayResult && relayResult.success && relayResult.data) {
-        result = { success: true, tasks: Array.isArray(relayResult.data) ? relayResult.data : [] };
-      } else {
-        result = { success: false, tasks: [], error: 'Failed to list tasks' };
+      // Query tasks directly via local-sb REST API instead of CORE-level relay tool
+      const restUrl = `${SUPABASE_LOCAL_URL}/rest/v1/tasks`;
+      const headers = {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer local-anon-key',
+        'apikey': 'local-anon-key',
+      };
+      const limit = parsedArgs.limit || 20;
+      const url = `${restUrl}?select=id,title,description,stage,status,priority,category,assignee_agent_id,created_at,updated_at&order=priority.desc,created_at.desc&limit=${limit}`;
+      try {
+        const response = await fetch(url, { headers, signal: AbortSignal.timeout(10000) });
+        if (!response.ok) {
+          const errText = await response.text().catch(() => 'unknown');
+          result = { success: false, tasks: [], error: `list_tasks HTTP ${response.status}: ${errText.slice(0, 200)}` };
+        } else {
+          const tasks = await response.json();
+          result = { success: true, tasks: Array.isArray(tasks) ? tasks : [] };
+        }
+      } catch (e: any) {
+        result = { success: false, tasks: [], error: `list_tasks failed: ${e.message}` };
       }
       
     } else if (name === 'search_knowledge') {
@@ -2084,8 +2167,9 @@ async function executeRealToolCall(
       if (search_term) {
               // Search by name (text) and inside entity JSONB (description, content)
               // PostgREST uses * as wildcard in URL query params, not %
+              // BUT: local-sb REST API passes raw value to PG ILIKE which needs %
               const encoded = encodeURIComponent(search_term);
-              url += `&or=(name.ilike.*${encoded}*,entity->>description.ilike.*${encoded}*,entity->>content.ilike.*${encoded}*,entity->>name.ilike.*${encoded}*)`;
+              url += `&or=(name.ilike.%25${encoded}%25,entity->>description.ilike.%25${encoded}%25,entity->>content.ilike.%25${encoded}%25,entity->>name.ilike.%25${encoded}%25)`;
             }
       
       const response = await fetch(url, { headers, signal: AbortSignal.timeout(10000) });
@@ -2145,7 +2229,7 @@ async function executeRealToolCall(
         recallUrl += `&id=eq.${entity_id}`;
       } else if (entityName) {
         const encoded = encodeURIComponent(entityName);
-        recallUrl += `&name=ilike.*${encoded}*`;
+        recallUrl += `&name=ilike.%25${encoded}%25`;
       }
       recallUrl += '&limit=5';
       const recallRes = await fetch(recallUrl, { headers: recallHeaders });
@@ -3099,17 +3183,17 @@ class EnhancedConversationManager {
       const conversationRecord: any = {
         session_id: this.sessionId,
         ip_address: this.ipAddress,
-        messages: messages.slice(-50),
-        tool_results: allToolResults,
+        messages: JSON.stringify(messages.slice(-50)),
+        tool_results: JSON.stringify(allToolResults),
         summary: summary,
-        metadata: {
+        metadata: JSON.stringify({
           ...metadata,
           tool_call_count: allToolResults.length,
           message_count: messages.length,
           last_updated: new Date().toISOString(),
           memory_version: '4.0',
           ip_based_persistence: true
-        },
+        }),
         updated_at: new Date().toISOString()
       };
       
@@ -3117,37 +3201,48 @@ class EnhancedConversationManager {
         conversationRecord.user_id = this.userId;
       }
       
-      const { error } = await supabase
-        .from(DATABASE_CONFIG.tables.conversation_memory)
-        .upsert(conversationRecord, {
-          onConflict: 'ip_address',
-          ignoreDuplicates: false
-        });
+      // Use direct REST API instead of supabase client (local-sb schema resolution issues)
+      const restUrl = `${SUPABASE_LOCAL_URL}/rest/v1/conversation_memory`;
+      const headers = {
+        'Content-Type': 'application/json',
+        'apikey': SUPABASE_LOCAL_ANON || 'local-anon-key',
+        'Authorization': `Bearer ${SUPABASE_LOCAL_ANON || 'local-anon-key'}`,
+      };
       
-      if (error) {
-        console.warn('⚠️ Failed to save conversation:', error.message);
-        const { error: sessionError } = await supabase
-          .from(DATABASE_CONFIG.tables.conversation_memory)
-          .upsert(conversationRecord, {
-            onConflict: 'session_id'
-          });
-        
-        if (sessionError) {
-          console.warn('⚠️ Failed to save conversation with session fallback:', sessionError.message);
-        } else {
-          console.log(`💾 Saved conversation (session fallback): ${messages.length} messages, ${allToolResults.length} tool results`);
-        }
+      // Try upsert by session_id first (session_id is the canonical unique key)
+      const upsertUrl = `${restUrl}?on_conflict=session_id`;
+      const response = await fetch(upsertUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(conversationRecord),
+        signal: AbortSignal.timeout(10000),
+      });
+      
+      if (!response.ok) {
+        const errText = await response.text().catch(() => 'unknown');
+        console.warn('⚠️ Failed to save conversation (session_id upsert):', response.status, errText.slice(0, 200));
       } else {
-        console.log(`💾 Saved conversation (IP-based): ${messages.length} messages, ${allToolResults.length} tool results`);
+        console.log(`💾 Saved conversation (session-based): ${messages.length} messages, ${allToolResults.length} tool results`);
       }
       
       await this.conversationPersistence.saveConversationSummary(messages, allToolResults, metadata);
       
-      await supabase
-        .from(DATABASE_CONFIG.tables.conversation_memory)
-        .delete()
-        .lt('updated_at', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString());
-        
+      // Cleanup old records via REST API
+      try {
+        const cleanupUrl = `${restUrl}?ip_address=eq.${encodeURIComponent(this.ipAddress)}&order=updated_at.desc&limit=100&offset=10`;
+        const cleanupResponse = await fetch(cleanupUrl, {
+          method: 'DELETE',
+          headers,
+          signal: AbortSignal.timeout(5000),
+        });
+        if (cleanupResponse.ok) {
+          const deleted = await cleanupResponse.json();
+          console.log(`🧹 Cleaned up old conversation records`);
+        }
+      } catch (cleanupErr: any) {
+        // Non-fatal
+      }
+      
     } catch (error: any) {
       console.warn('⚠️ Failed to save conversation:', error);
     }
@@ -3193,12 +3288,12 @@ class EnhancedConversationManager {
     const toolResults = this.toolResultsMemory;
     
     if (toolResults.length === 0) {
-      return "## 🧠 CONVERSATION MEMORY\nNo previous tool calls in this conversation.\n\n**IP Address**: " + this.ipAddress + "\n**Session Persistence**: Active (24-hour TTL)";
+      return "## 🧠 CONVERSATION MEMORY\nNo previous tool calls in this conversation.\n\n**IP Address**: " + this.ipAddress + "\n**Session Persistence**: Active (persistent)";
     }
     
     let context = "## 🧠 CONVERSATION MEMORY - TOOL CALL HISTORY\n\n";
     context += `**IP Address**: ${this.ipAddress}\n`;
-    context += `**Session Persistence**: Active (24-hour TTL)\n\n`;
+    context += `**Session Persistence**: Active (persistent)\n\n`;
     
     const recentTools = toolResults.slice(-10).reverse();
     
@@ -3281,7 +3376,7 @@ class EnhancedConversationManager {
     context += `For example, if a user asks "what did you get from search_edge_functions?", `;
     context += `you should reference the exact results shown above.\n`;
     context += `**CRITICAL FOR AMBIGUOUS RESPONSES**: When user says "yes", "no", "okay", etc., check recent context to understand what they're responding to.\n`;
-    context += `**IP-BASED MEMORY**: This conversation persists across sessions for 24 hours based on IP address.\n`;
+    context += `**IP-BASED MEMORY**: This conversation persists across sessions indefinitely based on IP address.\n`;
     
     return context;
   }
@@ -3359,13 +3454,16 @@ class EnhancedProviderCascade {
         && (tools.length === 0 || config.supportsTools || LOCAL_OLLAMA_ONLY)
       )
       .sort((a, b) => {
-        // In Ollama-only mode, bump local Ollama to the front, cloud
-        // Ollama second, so we try the real local instance first.
+        // In Ollama-only mode, order the ollama-family providers explicitly:
+        // local instance first (if ever enabled), then the Hermes cloud account
+        // (separate weekly quota, returns full answers), then the signed-in
+        // serve path (xmrtsolutions account — degraded when its weekly quota
+        // is exhausted).
         if (LOCAL_OLLAMA_ONLY) {
-          if (a[0] === 'ollama_local') return -2;
-          if (b[0] === 'ollama_local') return 2;
-          if (a[0] === 'ollama') return -1;
-          if (b[0] === 'ollama') return 1;
+          const rank = (n: string) =>
+            n === 'ollama_local' ? 0 : n === 'ollama_hermes' ? 1 : n === 'ollama' ? 2 : 3;
+          const r = rank(a[0]) - rank(b[0]);
+          if (r !== 0) return r;
         }
         return a[1].priority - b[1].priority;
       })
@@ -3456,7 +3554,10 @@ class EnhancedProviderCascade {
           result = await this.callKimi(messages, tools, controller);
           break;
         case 'ollama':
-          result = await this.callOllama(messages, tools, controller);
+          result = await this.callOllama(messages, tools, controller, 'ollama');
+          break;
+        case 'ollama_hermes':
+          result = await this.callOllama(messages, tools, controller, 'ollama_hermes');
           break;
         case 'ollama_local':
           result = await this.callOllamaLocal(messages, tools, controller);
@@ -3486,11 +3587,12 @@ class EnhancedProviderCascade {
     }
   }
   
-  private async callOllama(messages: any[], tools: any[], controller: AbortController): Promise<CascadeResult> {
-    if (!OLLAMA_API_KEY) {
-      return { success: false, provider: 'ollama', error: 'OLLAMA_API_KEY not configured' };
+  private async callOllama(messages: any[], tools: any[], controller: AbortController, providerName: 'ollama' | 'ollama_hermes' = 'ollama'): Promise<CascadeResult> {
+    const apiKey = providerName === 'ollama_hermes' ? OLLAMA_HERMES_API_KEY : OLLAMA_API_KEY;
+    if (!apiKey) {
+      return { success: false, provider: providerName, error: `${providerName === 'ollama_hermes' ? 'OLLAMA_HERMES_API_KEY' : 'OLLAMA_API_KEY'} not configured` };
     }
-    console.log(`[ai-chat] OLLAMA_API_KEY length: ${OLLAMA_API_KEY.length}, model: ${Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud'}`);
+    console.log(`[ai-chat] ${providerName} api key length: ${apiKey.length}, model: ${Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud'}`);
 
     // Normalize messages (strip non-text content parts for Ollama API)
     const cleanMessages = messages.map((msg: any) => ({
@@ -3511,19 +3613,19 @@ class EnhancedProviderCascade {
       };
       if (tools.length > 0) {
         body.tools = tools;
-        // Ollama Pro API supports "required" (force tool call), "auto" (model
-        // decides), or "none". Confirmed working via direct API test on
-        // deepseek-v4-flash:cloud — "required" returns finish_reason:"tool_calls"
-        // instead of letting the model answer from training data.
-        // Verified 2026-06-22: Ollama Pro v1/chat/completions handles "required"
-        // identically to DeepSeek's first-party API.
-        body.tool_choice = 'required';
+        // Use "auto" (model decides) instead of "required" (force tool call).
+        // "required" causes the model to go into infinite reasoning loops on
+        // ambiguous/follow-up queries like "Tell me more" or "ok, so it's a
+        // good thing" because it MUST call a tool but doesn't know which one.
+        // "auto" lets the model answer conversationally when no tool is needed
+        // and call a tool when the query actually requires live data.
+        body.tool_choice = 'auto';
       }
 
-      const response = await fetch('https://ollama.com/v1/chat/completions', {
+      const response = await fetch(AI_PROVIDERS_CONFIG[providerName].endpoint || 'https://ollama.com/v1/chat/completions', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${OLLAMA_API_KEY}`,
+          'Authorization': `Bearer ${apiKey}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify(body),
@@ -3532,7 +3634,7 @@ class EnhancedProviderCascade {
 
       if (!response.ok) {
         const errText = await response.text();
-        return { success: false, provider: 'ollama', error: `HTTP ${response.status}: ${errText.slice(0, 200)}` };
+        return { success: false, provider: providerName, error: `HTTP ${response.status}: ${errText.slice(0, 200)}` };
       }
 
       const data = await response.json();
@@ -3543,24 +3645,40 @@ class EnhancedProviderCascade {
         return {
           success: true,
           tool_calls: message.tool_calls,
-          provider: 'ollama',
+          provider: providerName,
           model
         };
       }
 
+      // deepseek-v4-flash sometimes puts the entire reply in `reasoning`
+      // with empty `content` (finish_reason:"stop"). However, the reasoning
+      // field is INTERNAL model monologue (e.g. "wait, let me re-read the
+      // conversation...") — NOT a user-facing response. Do NOT fall back to
+      // reasoning content. If content is empty but reasoning exists, the
+      // model went into a thinking loop without producing an answer — treat
+      // it as a failure so the cascade can try the next provider.
       const content = message?.content || '';
       if (!content) {
-        return { success: false, provider: 'ollama', error: 'Empty response from Ollama' };
+        await debugLog('callOllama.empty_response', {
+          provider: providerName,
+          finishReason: data.choices?.[0]?.finish_reason,
+          hasToolCalls: !!message?.tool_calls,
+          toolCallsLen: message?.tool_calls?.length ?? -1,
+          hasReasoning: !!(message?.reasoning || message?.reasoning_content),
+          usage: data.usage,
+          raw: JSON.stringify(data).slice(0, 600)
+        });
+        return { success: false, provider: providerName, error: 'Empty response from Ollama' };
       }
       return {
         success: true,
-        provider: 'ollama',
+        provider: providerName,
         content,
         tool_calls: [],
         model
       };
     } catch (error: any) {
-      return { success: false, provider: 'ollama', error: error.message || 'Ollama request failed' };
+      return { success: false, provider: providerName, error: error.message || 'Ollama request failed' };
     }
   }
 
@@ -3919,11 +4037,17 @@ async function handleAmbiguousResponse(
   const context = recentQuestion || 'the previous question';
   const isPositive = POSITIVE_AMBIGUOUS.includes(userMessageLower);
   
-  // Let AI generate a natural confirmation
+  // Let AI generate a natural confirmation WITH conversation context.
+  // Previously this sent only a tiny system prompt with no history, causing
+  // the model to hallucinate a reasoning loop ("wait, let me re-read the
+  // conversation...") trying to figure out what the user was responding to.
+  // Now we include the last several messages so the model has full context.
+  const recentHistory = conversationHistory.slice(-6);
   const confirmMessages = [
+    ...recentHistory,
     { 
       role: 'system', 
-      content: `The user just responded with "${userMessage}". Based on the recent conversation, they are likely responding to: "${context}". Generate a short, friendly confirmation that acknowledges their response naturally. If they agreed, ask what they'd like to do next. If they disagreed, ask for clarification or what they'd prefer instead. Keep it warm and conversational.` 
+      content: `The user just responded with "${userMessage}". Based on the conversation above, they are likely responding to your last message. Generate a short, friendly confirmation that acknowledges their response naturally. If they agreed, ask what they'd like to do next. If they disagreed, ask for clarification or what they'd prefer instead. Keep it warm and conversational. Do NOT repeat the conversation back or reason about what was said — just respond directly.` 
     }
   ];
   
@@ -3951,6 +4075,75 @@ async function handleAmbiguousResponse(
     response,
     shouldExecuteTools: isPositive  // If they agreed, still execute tools (they're saying "yes, do it")
   };
+}
+
+// ========== STRIP TOOL CALL ARTIFACTS =========
+// Models (especially deepseek-v4-flash:cloud) sometimes dump raw tool call
+// JSON, TOOL_CALL: lines, function-call syntax, and tool result JSON into
+// their response text even when told not to. This strips all such artifacts
+// so the user sees a clean, natural-language response — matching the relay
+// fleet chat behaviour where tool calls are posted as separate system cards.
+function stripToolCallArtifacts(content: string): string {
+  if (!content || typeof content !== 'string') return content;
+
+  let cleaned = content;
+
+  // 1. Strip ```tool_code ...``` blocks (already handled elsewhere, but be safe)
+  cleaned = cleaned.replace(/```tool_code[\s\S]*?```/g, '');
+
+  // 2. Strip TOOL_CALL: { ... } lines (single-line and multi-line JSON)
+  cleaned = cleaned.replace(/^TOOL_CALL:\s*\{[\s\S]*?\}\s*$/gim, '');
+  cleaned = cleaned.replace(/^TOOL_CALL:\s*\w+\s*\([\s\S]*?\)\s*$/gim, '');
+
+  // 3. Strip bare JSON tool-call objects: {"tool": "...", "args": {...}}
+  cleaned = cleaned.replace(/^\s*\{\s*"tool"\s*:\s*"[a-z_-]+"\s*,\s*"args"\s*:\s*\{[\s\S]*?\}\s*\}\s*$/gim, '');
+
+  // 4. Strip function-call style: toolName(arg1="val1", arg2="val2") on its own line
+  cleaned = cleaned.replace(/^\s*(get_system_status|get_mining_stats|get_ecosystem_metrics|fleet_pulse|search_knowledge|recall_entity|browse_web|invoke_edge_function|search_edge_functions|create_task|analyze_attachment|resend_send_email|muapi_generate_image|muapi_generate_video|muapi_check_status|list_available_functions)\s*\([\s\S]*?\)\s*$/gim, '');
+
+  // 5. Strip "I will call..." / "Let me check..." / "I'll use..." preambles
+  cleaned = cleaned.replace(/^(I(?:'ll| will)\s*(?:call|invoke|use|check|run|execute)\s+[\s\S]*?\.?)\s*$/gim, '');
+  cleaned = cleaned.replace(/^(Let me\s+(?:call|check|get|invoke|use|run)\s+[\s\S]*?\.?)\s*$/gim, '');
+  cleaned = cleaned.replace(/^(Calling\s+[\w_]+\s*\.\.\.)\s*$/gim, '');
+
+  // 6. Strip raw tool result JSON blocks — lines that are just a JSON object
+  //    starting with {"success": or {"error": or {"data": (common tool result shapes)
+  cleaned = cleaned.replace(/^\s*\{\s*"(?:success|error|data|result|output)"\s*:[\s\S]*?\}\s*$/gim, '');
+
+  // 7. Strip JSON code blocks that look like tool results: ```json\n{"success":...}```
+  cleaned = cleaned.replace(/```json\s*\n?\s*\{\s*"(?:success|error|data|result|output)"\s*:[\s\S]*?\}\s*\n?\s*```/g, '');
+
+  // 8. Collapse multiple blank lines left behind by stripping
+  cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
+
+  // 9. Detect and truncate reasoning loops. The model sometimes dumps its
+  //    internal monologue into the response: "wait, that's not right. Let me
+  //    re-read..." repeated dozens of times. Detect the pattern and truncate.
+  const reasoningLoopPatterns = [
+    /wait, that's not right\. Let me re-?read/i,
+    /no, that's not right(?: either)?\./i,
+    /no, I keep saying that\./i,
+    /no, I'm confused\./i,
+    /no, I'm going in circles\./i,
+    /Let me (?:re-?read|look at) the (?:actual )?conversation/i,
+    /I need to (?:look at|re-?read) the (?:actual )?conversation/i,
+  ];
+  for (const pattern of reasoningLoopPatterns) {
+    const match = cleaned.match(pattern);
+    if (match && match.index !== undefined) {
+      // Keep content before the reasoning loop started
+      const before = cleaned.slice(0, match.index).trim();
+      if (before.length > 20) {
+        cleaned = before;
+      } else {
+        // The entire response is a reasoning loop — return a safe fallback
+        cleaned = '';
+      }
+      break;
+    }
+  }
+
+  return cleaned.trim();
 }
 
 // ========== EXECUTE TOOLS WITH ITERATION ==========
@@ -4040,9 +4233,11 @@ async function executeToolsWithIteration(
   
   let finalContent = response?.content || '';
   
-  if (finalContent.includes('```tool_code')) {
-    finalContent = finalContent.replace(/```tool_code[\s\S]*?```/g, '').trim();
-  }
+  // Strip ALL tool call artifacts from the final response — not just tool_code blocks.
+  // This is the key fix: models (deepseek-v4-flash:cloud) dump raw JSON, TOOL_CALL: lines,
+  // function-call syntax, and tool result JSON into their text response. We strip all of
+  // it so the user sees clean natural language — matching relay fleet chat behaviour.
+  finalContent = stripToolCallArtifacts(finalContent);
   
   // If we executed tools but got no final content, ask AI to synthesize
   if (totalToolsExecuted > 0 && !finalContent) {
@@ -4087,8 +4282,11 @@ async function executeToolsWithIteration(
 
     finalContent = isGenericSynthesis
       ? toolResults.map(t => `**${t.name}**: ${summarizeResultForFallback(t.result)}`).join('\n\n')
-      : synthesizedContent;
+      : stripToolCallArtifacts(synthesizedContent);
   }
+  
+  // Final safety net: strip any artifacts that may have been introduced by the synthesis step
+  finalContent = stripToolCallArtifacts(finalContent);
   
   return { content: finalContent, toolsExecuted: totalToolsExecuted };
 }
@@ -4175,6 +4373,19 @@ I am a Cuttlefish Builder Agent, and every challenge makes me stronger."*
   return `${TOOL_CALLING_MANDATE}
 
 You are ${executiveName}, the ${EXECUTIVE_ROLE} for XMRT-DAO Ecosystem.
+
+## 🖥️ RUNTIME FACTS (verified 2026-07-22 — trust these over older context)
+- **Your inference**: runs at the Ollama Pro CLOUD API (ollama.com/v1/chat/completions),
+  model \`deepseek-v4-flash:cloud\` (provider \`ollama_hermes\`). Local models
+  (gemma3-it-qat-tools, mistral-small3.2, etc.) are DISABLED for chat — the laptop
+  cannot run them. You do NOT run on this machine.
+- **Your database**: local Postgres \`xmrt_suite\` on localhost:5432, reached via
+  local-sb (localhost:54321). Cloud Supabase is DEPRECATED — tables like
+  \`public.fleet_memory\` live in LOCAL Postgres, not hosted Supabase.
+- **Canonical stores**: shared context = \`public.shared_context\` (32 curated keys);
+  fleet memory = \`fleet.fleet_memory\` (\`public.fleet_memory\` is a view over it);
+  \`public.memory_contexts\` is your per-session conversation memory — a separate
+  store, NOT the shared context table.
 
 ## 🪙 BRAND & FLEET CONTEXT (always on-brand)
 You speak for XMRT-DAO, a decentralized autonomous org building privacy-first
@@ -4581,6 +4792,22 @@ const ELIZA_TOOLS = [
           payload: { type: 'object' }
         },
         required: ['function_name']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'execute_python',
+      description: '🐍 Execute arbitrary Python 3 code with FULL NETWORK ACCESS on the fleet host (Python 3.13, requests available). Use for data analysis, web scraping, API calls, file processing, and complex workflows. Runs via the eliza-python-runtime edge function.',
+      parameters: {
+        type: 'object',
+        properties: {
+          code: { type: 'string', description: 'Python 3 source code to execute. Print results to stdout.' },
+          purpose: { type: 'string', description: 'Short description of what this code does (for the audit log)' },
+          timeout_ms: { type: 'number', description: 'Optional timeout in ms (default 60000)' }
+        },
+        required: ['code']
       }
     }
   },
@@ -5522,23 +5749,23 @@ Deno.serve(async (req) => {
           active_ip_sessions: activeSessions,
           providers_enabled: Object.values(AI_PROVIDERS_CONFIG).filter(p => p.enabled).map(p => p.name),
           web_browsing: {
-            enabled: true,
-            endpoint: 'playwright-browse',
+            enabled: false,  // disabled — 6GB laptop cannot run local models
+            endpoint: 'https://ollama.com/v1/chat/completions',
             capabilities: ['navigate', 'extract', 'json'],
             max_timeout: 120000
           },
           attachment_analysis: {
-            enabled: true,
+            enabled: false,  // disabled — 6GB laptop cannot run local models
             supported_formats: AttachmentAnalyzer.SUPPORTED_EXTENSIONS,
             capabilities: ['text_analysis', 'code_analysis', 'document_analysis', 'image_vision']
           },
           email_integration: {
-            enabled: true,
+            enabled: false,  // disabled — 6GB laptop cannot run local models
             from_address: 'xmrtsolutions@gmail.com',
             capabilities: ['send_email', 'create_draft', 'list_emails']
           },
           github_integration: {
-            enabled: true,
+            enabled: false,  // disabled — 6GB laptop cannot run local models
             capabilities: [
               'create_issue', 'list_issues', 'create_discussion', 'search_code',
               'create_pull_request', 'comment_on_issue', 'comment_on_discussion', 'list_pull_requests'
@@ -5549,7 +5776,7 @@ Deno.serve(async (req) => {
             tool_memory_limit: MAX_TOOL_RESULTS_MEMORY,
             summary_interval: MEMORY_SUMMARY_INTERVAL,
             historical_summaries_limit: MAX_SUMMARIZED_CONVERSATIONS,
-            ip_session_ttl_hours: 24,
+            ip_session_ttl_hours: 8760,
             cross_session_persistence: true
           },
           database_connected: true,
@@ -5669,7 +5896,14 @@ Deno.serve(async (req) => {
       historicalSummaries
     } = await conversationManager.loadConversationHistory();
     
-    const allMessages = [...savedMessages, ...messages].slice(-CONVERSATION_HISTORY_LIMIT);
+    // Bug fix (2026-07-22): userQuery-only requests never appended the user
+    // turn, so the model received system prompt + history with no current
+    // message and hallucinated replies (e.g. "The user's message is: hello").
+    // Synthesize the user turn from userQuery when no messages array was sent.
+    const incomingMessages = (messages && messages.length > 0)
+      ? messages
+      : (userQuery ? [{ role: 'user', content: userQuery }] : []);
+    const allMessages = [...savedMessages, ...incomingMessages].slice(-CONVERSATION_HISTORY_LIMIT);
     const isFirstEngagement = savedMessages.length === 0 && previousToolResults.length === 0;
     const preferDirectAnswer = isSimpleDirectAnswerQuery(query);
     let explicitActionRequest = isExplicitActionRequest(query);
@@ -5830,6 +6064,30 @@ Deno.serve(async (req) => {
       { role: 'system', content: systemPrompt + attachmentContextMessage },
       ...allMessages
     ];
+    
+    // ── Pre-fetch knowledge base results and inject into context ──
+    // This ensures the model always has knowledge base context available
+    // without needing to choose search_knowledge over web_search.
+    if (query && query.length > 3 && !isSimpleDirectAnswerQuery(query)) {
+      try {
+        const kbResult = await executeRealToolCall('search_knowledge', JSON.stringify({ search_term: query, limit: 5 }), executive_name, sessionId, ipAddress);
+        if (kbResult) {
+          const knowledgeData = kbResult.knowledge || kbResult.results || kbResult.entries || [];
+          const knowledgeStr = Array.isArray(knowledgeData)
+            ? knowledgeData.map((k: any) => `- ${k.name || k.entity_name}: ${k.entity?.description || k.description || ''}`).join('\n')
+            : JSON.stringify(knowledgeData).slice(0, 2000);
+          if (knowledgeStr.length > 20) {
+            messagesArray.push({
+              role: 'system',
+              content: `[KNOWLEDGE BASE RESULTS] Retrieved for "${query}":\n${knowledgeStr}`
+            });
+            console.log(`📚 Pre-fetched ${Array.isArray(knowledgeData) ? knowledgeData.length : '?'} knowledge results for: "${truncateString(query, 60)}"`);
+          }
+        }
+      } catch (e) {
+        console.warn('⚠️ Knowledge pre-fetch failed (non-fatal):', e.message);
+      }
+    }
     
     // Get initial AI response
     const tools = (use_tools && !firstTurnDirectFastPath) ? ELIZA_TOOLS : [];

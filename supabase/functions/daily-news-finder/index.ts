@@ -39,6 +39,36 @@ serve(async (req) => {
 
         const supabase = createClient(supabaseUrl, supabaseKey);
 
+        // ── Duplicate Guard ──────────────────────────────────────────
+        // The cron engine runs every 30s and checks the same minute.
+        // If the state file is stale or two engines run, daily-news-finder
+        // can fire multiple times and spam paragraph.com with duplicate
+        // posts. Check the activity log: if we already published today,
+        // exit immediately.
+        const { data: recent, error: recentErr } = await supabase
+            .from('eliza_activity_log')
+            .select('id, created_at')
+            .eq('activity_type', 'daily_news_published')
+            .gte('created_at', new Date(Date.now() - 23 * 60 * 60 * 1000).toISOString())
+            .order('created_at', { ascending: false })
+            .limit(1);
+        if (recentErr) {
+            console.warn('Duplicate guard query failed:', recentErr.message);
+            // Don't block on query failure; continue cautiously
+        } else if (recent && recent.length > 0) {
+            console.log(`Duplicate guard: already published today (${recent[0].created_at}). Skipping.`);
+            await usageTracker.success({ result_summary: 'skipped_duplicate_guard' });
+            return new Response(JSON.stringify({
+                success: false,
+                skipped: true,
+                reason: 'daily_news_published already exists in last 23h',
+                last_publish: recent[0].created_at,
+            }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            });
+        }
+
         console.log(`📰 Fetching RSS Feed from: ${RSS_FEED_URL}`);
 
         // 1. Fetch RSS Feed

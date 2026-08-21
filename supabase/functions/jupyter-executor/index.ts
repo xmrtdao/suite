@@ -37,9 +37,9 @@ async function runCode(params: {
             files: [{ name: 'main.py', content: params.code }],
             stdin: params.stdin || '',
             session_id: params.sessionId || null,
-            run_timeout: params.timeoutMs || 30000,
+            run_timeout: params.timeoutMs || 90000,
         }),
-        signal: AbortSignal.timeout(params.timeoutMs || 35000),
+        signal: AbortSignal.timeout(params.timeoutMs || 95000),
     });
 
     if (!res.ok) {
@@ -169,7 +169,7 @@ async function logExecution(params: {
 
     await supabase.from('eliza_python_executions').insert({
         code: params.code,
-        output: params.stdout || null,
+        output: params.stdout ? JSON.stringify({ output: params.stdout }) : null,
         error_message: params.stderr || null,
         exit_code: params.exitCode,
         execution_time_ms: params.executionTimeMs,

@@ -281,7 +281,10 @@ Deno.serve(async (req) => {
       source = 'eliza',
       agent_id = null,
       task_id = null,
-      timeout_ms = 30000,
+      // Default 90s: the local python-exec service runs on an HDD laptop where
+      // heavy imports (pandas/numpy) take ~30s even warm. 30s was calibrated
+      // for the old Cloud Run backend.
+      timeout_ms = 90000,
       backend: forcedBackend,  // optional: "piston" | "cloud_run"
     } = body as Record<string, any>;
 
@@ -419,7 +422,7 @@ Deno.serve(async (req) => {
     Promise.all([
       supabase.from('eliza_python_executions').insert({
         code,
-        output: stdoutText || null,
+        output: stdoutText ? JSON.stringify({ output: stdoutText }) : null,
         error_message: stderrText || null,
         exit_code: exitCode,
         execution_time_ms: executionTime,

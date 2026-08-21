@@ -46,6 +46,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // Supabase auth would throw in local-sb mode — that's ok
       }
 
+      // Check URL query params for api_key (from GH Pages login redirect)
+      const params = new URLSearchParams(window.location.search);
+      const urlApiKey = params.get('api_key');
+      if (urlApiKey) {
+        const sessionData = { id: 'api-key-user', email: 'api@suite.local', apiKey: urlApiKey };
+        setUser(sessionData);
+        setSession(sessionData);
+        localStorage.setItem('local-dev-session', JSON.stringify(sessionData));
+        // Clean URL — remove query params so they don't persist on refresh
+        window.history.replaceState({}, '', window.location.pathname);
+        setIsLoading(false);
+        return;
+      }
+
       // Local-dev fallback: check for an existing local-dev session in localStorage
       const saved = localStorage.getItem('local-dev-session');
       if (saved) {

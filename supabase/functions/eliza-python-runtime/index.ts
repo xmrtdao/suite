@@ -26,7 +26,7 @@ Deno.serve(async (req) => {
       source = 'eliza',
       agent_id = null,
       task_id = null,
-      timeout_ms = 30000
+      timeout_ms = 90000
     } = await req.json();
 
     if (!code) {
@@ -56,9 +56,30 @@ ${code}
 
     await Deno.writeTextFile(tempFile, codeWithEnv);
 
+    // Resolve a Python interpreter. Bare 'python3' is not on PATH on Windows;
+    // honor PYTHON_PATH, then common launchers, then the known local installs.
+    async function resolvePython(): Promise<string> {
+      const candidates = [
+        Deno.env.get('PYTHON_PATH'),
+        'python3',
+        'python',
+        'C:\\Users\\PureTrek\\AppData\\Local\\Programs\\Python\\Python313\\python.exe',
+        'C:\\Users\\PureTrek\\AppData\\Local\\Programs\\Python\\Python312\\python.exe',
+      ].filter((c): c is string => !!c);
+      for (const c of candidates) {
+        try {
+          const check = new Deno.Command(c, { args: ['--version'], stdout: 'piped', stderr: 'piped' });
+          const out = await check.output();
+          if (out.code === 0) return c;
+        } catch { /* try next */ }
+      }
+      throw new Error('No Python interpreter found (tried python3, python, local installs)');
+    }
+    const pythonBin = await resolvePython();
+
     try {
       // Execute Python with network access
-      const command = new Deno.Command('python3', {
+      const command = new Deno.Command(pythonBin, {
         args: [tempFile],
         stdout: 'piped',
         stderr: 'piped',
@@ -81,7 +102,7 @@ ${code}
       // Log execution to eliza_python_executions
       await supabase.from('eliza_python_executions').insert({
         code,
-        output: output || null,
+        output: output ? JSON.stringify({ output }) : null,
         error_message: error || null,  // FIXED: use error_message not error
         exit_code: exitCode,
         execution_time_ms: executionTime,

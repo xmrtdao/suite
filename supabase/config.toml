@@ -1,4 +1,4 @@
-project_id = "vawouugtzwmejxqkeqqj"
+project_id = "local-dev"
 
 [functions.ai-chat]
 verify_jwt = false
@@ -570,4 +570,7 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.resend-webhook-proxy]
+verify_jwt = false
+
+[functions.shell-exec]
 verify_jwt = false

@@ -1,0 +1,8 @@
+name = "xmrt-dao-suite"
+pages_build_output_dir = "dist"
+compatibility_date = "2024-12-01"
+
+[env.production]
+routes = [
+  { pattern = "xmrtdao.com/*", zone_id = "8710927c035b113b585b1d09403f7034" }
+]

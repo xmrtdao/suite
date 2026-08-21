@@ -225,6 +225,37 @@ serve(async (req) => {
       );
     }
 
+    // ============================================================
+    // Miner control — proxy to the local relay's /api/miner/* endpoints
+    // (the supervised XMRig service on this machine; manual-only, paused
+    // in supervisor by design so it never competes with the fleet stack)
+    // ============================================================
+    if (path.includes('/miner-control') || url.searchParams.has('action')) {
+      const relayBase = Deno.env.get('RELAY_BASE_URL') || 'http://127.0.0.1:8080';
+      const relayKey = Deno.env.get('RELAY_API_KEY') || '';
+      const action = url.searchParams.get('action') || (req.method === 'GET' ? 'status' : '');
+      const target = action === 'start' ? '/api/miner/start'
+                   : action === 'stop' ? '/api/miner/stop'
+                   : '/api/miner/status';
+      const method = action === 'start' || action === 'stop' ? 'POST' : 'GET';
+      try {
+        const r = await fetch(relayBase + target, {
+          method,
+          headers: { 'Content-Type': 'application/json', 'x-api-key': relayKey },
+        });
+        const data = await r.json().catch(() => ({}));
+        return new Response(
+          JSON.stringify({ success: r.ok, action: action || 'status', relay: data }),
+          { status: r.ok ? 200 : r.status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      } catch (e: any) {
+        return new Response(
+          JSON.stringify({ success: false, error: 'relay unreachable: ' + (e?.message || String(e)) }),
+          { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+    }
+
     const minerAddress = Deno.env.get('MINER_WALLET_ADDRESS') || '46UxNFuGM2E3UwmZWWJicaRPoRwqwW4byQkaTHkX8yPcVihp91qAVtSFipWUGJJUyTXgzSqxzDQtNLf2bsp2DX2qCCgC5mg';
     const apiUrl = `https://www.supportxmr.com/api/miner/${minerAddress}/stats/`;
 

@@ -158,6 +158,11 @@ function getLoggingClient(): SupabaseClient | null {
       return null;
     }
 
+    // Skip if running against local-sb (not real Supabase)
+    if (supabaseUrl.includes('127.0.0.1') || supabaseUrl.includes('localhost')) {
+      return null;
+    }
+
     return createClient(supabaseUrl, serviceRoleKey, {
       auth: { autoRefreshToken: false, persistSession: false },
     });

@@ -26,6 +26,7 @@ export interface GatewayConfig {
 // Priority order: Vertex gemini-2.5-pro → Vertex gemini-2.5-flash → Gemini API → DeepSeek → OpenAI → Kimi
 const GATEWAY_CONFIG: GatewayConfig = {
   providers: [
+    // ── Ollama Pro Cloud (3 API keys in cascade) ─────────────
     {
       name: 'ollama-pro',
       get apiKey() { return Deno.env.get('OLLAMA_API_KEY') || '' },
@@ -34,7 +35,27 @@ const GATEWAY_CONFIG: GatewayConfig = {
       priority: 1,
       rateLimit: 1200,
       timeout: 60000,
-      available: true
+      available: !!Deno.env.get('OLLAMA_API_KEY')
+    },
+    {
+      name: 'ollama-pro-xmrt',
+      get apiKey() { return Deno.env.get('OLLAMA_XMRT_API_KEY') || '' },
+      endpoint: 'https://ollama.com/v1/chat/completions',
+      model: Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud',
+      priority: 2,
+      rateLimit: 1200,
+      timeout: 60000,
+      available: !!Deno.env.get('OLLAMA_XMRT_API_KEY')
+    },
+    {
+      name: 'ollama-pro-3rd',
+      get apiKey() { return Deno.env.get('OLLAMA_3RD_API_KEY') || '' },
+      endpoint: 'https://ollama.com/v1/chat/completions',
+      model: Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud',
+      priority: 3,
+      rateLimit: 1200,
+      timeout: 60000,
+      available: !!Deno.env.get('OLLAMA_3RD_API_KEY')
     },
     {
       name: 'vertex-pro',

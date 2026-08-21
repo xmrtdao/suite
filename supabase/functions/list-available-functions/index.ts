@@ -22,11 +22,19 @@ Deno.serve(async (req) => {
 
   try {
     const url = new URL(req.url);
-    const category = url.searchParams.get("category");
+    let category = url.searchParams.get("category");
+
+    // Also accept category from POST body (local-sb sends POST with JSON body)
+    if (!category && req.method === 'POST') {
+      try {
+        const body = await req.json();
+        category = body?.category || null;
+      } catch {}
+    }
 
     let functions = ALL_FUNCTIONS;
     
-    if (category) {
+    if (category && category !== 'all') {
       functions = ALL_FUNCTIONS.filter(f => f.category === category);
     }
 

@@ -212,6 +212,77 @@ export class UnifiedElizaService {
   }
 
   /**
+   * Invoke a Supabase edge function with a hard timeout + retry.
+   *
+   * WHY: supabase.functions.invoke() (functions-js v2.4.3) has NO timeout option
+   * AND does not forward an AbortSignal to the underlying fetch — it only passes
+   * method/headers/body, and it swallows fetch errors into { data: null, error }.
+   * On a slow mobile tunnel path the cloud-executive call can hang for a long time,
+   * and when it eventually fails ALL executives "fail" -> the code drops to Office
+   * Clerk even though Eliza is actually reachable. This wrapper:
+   *   1. Races the invoke against a timeout (Promise.race) so a hung call resolves
+   *      after EXEC_TIMEOUT_MS instead of blocking forever.
+   *   2. Retries once before giving up, so a single slow/transient response doesn't
+   *      count as "executives offline".
+   *   3. Returns { data, error } in the same shape as supabase.functions.invoke().
+   */
+  private static async invokeWithTimeoutAndRetry(
+    functionName: string,
+    payload: Record<string, any>
+  ): Promise<{ data: any; error: any }> {
+    const EXEC_TIMEOUT_MS = 45000; // 45s — generous for the mobile tunnel path
+    const MAX_ATTEMPTS = 2;
+
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        // Race the invoke against a timeout. The underlying fetch can't be aborted
+        // (functions-js doesn't forward a signal), so we resolve with a timeout
+        // error if the call doesn't complete in time.
+        const result = await Promise.race([
+          supabase.functions.invoke(functionName, {
+            body: payload,
+            headers: { 'x-suite-timeout-retry': String(attempt) },
+          }),
+          new Promise<{ data: null; error: Error }>((resolve) =>
+            setTimeout(() => resolve({
+              data: null,
+              error: new Error(`timeout after ${EXEC_TIMEOUT_MS}ms`),
+            }), EXEC_TIMEOUT_MS)
+          ),
+        ]);
+
+        // invoke() never throws — it resolves with { data, error }. A non-null
+        // error (real failure OR our timeout) means this attempt didn't produce a
+        // usable response. Retry once before giving up so a slow-but-alive mobile
+        // tunnel path doesn't immediately count as "executives offline".
+        if (result.error) {
+          if (attempt < MAX_ATTEMPTS) {
+            console.warn(
+              `⏱️ ${functionName} attempt ${attempt} failed (${result.error?.message || 'unknown'}) — retrying...`
+            );
+            await new Promise(r => setTimeout(r, 1500));
+            continue;
+          }
+          console.error(`❌ ${functionName} failed after ${MAX_ATTEMPTS} attempts:`, result.error?.message || result.error);
+          return { data: null, error: result.error };
+        }
+        return { data: result.data, error: null };
+      } catch (err: any) {
+        if (attempt < MAX_ATTEMPTS) {
+          console.warn(
+            `⏱️ ${functionName} attempt ${attempt} threw (${err?.message || 'unknown'}) — retrying...`
+          );
+          await new Promise(r => setTimeout(r, 1500));
+          continue;
+        }
+        console.error(`❌ ${functionName} threw after ${MAX_ATTEMPTS} attempts:`, err?.message || err);
+        return { data: null, error: err };
+      }
+    }
+    return { data: null, error: new Error('invokeWithTimeoutAndRetry exhausted attempts') };
+  }
+
+  /**
    * Route request to the best available executive
    * Production routing with response extraction
    *
@@ -285,11 +356,15 @@ export class UnifiedElizaService {
           payload.messages = [...historyMessages, { role: 'user', content: userInput || 'Hello' }];
         }
 
-        const response = await supabase.functions.invoke(executive, {
-          body: payload
-        });
-        data = response.data;
-        error = response.error;
+        // MOBILE FALLBACK FIX: supabase.functions.invoke() has NO timeout option
+        // (functions-js v2.4.3). On a slow mobile tunnel path (relay.mobilemonero.com
+        // -> tunnel -> localhost:8080) the cloud-executive call can hang for a long
+        // time, and when it eventually fails ALL executives "fail" -> the code drops
+        // to Office Clerk even though Eliza is actually reachable. Wrap the invoke in
+        // a timeout + retry so a slow-but-alive path doesn't immediately fall through.
+        const invokeResult = await this.invokeWithTimeoutAndRetry(executive, payload);
+        data = invokeResult.data;
+        error = invokeResult.error;
 
         if (error) {
           console.error(`❌ ${executive} error:`, error);

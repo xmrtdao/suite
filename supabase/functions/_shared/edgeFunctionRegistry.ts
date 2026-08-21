@@ -613,6 +613,14 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
     example_use: 'Analyze function usage, track performance, identify patterns'
   },
   {
+    name: 'gemini-agent-creator',
+    url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/gemini-agent-creator',
+    description: 'Auto-detected function: gemini-agent-creator',
+    capabilities: ['gemini agent creator'],
+    category: 'task-management',
+    example_use: 'Invoke gemini-agent-creator'
+  },
+  {
     name: 'gemini-chat',
     url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/gemini-chat',
     description: 'AI chat via Google Gemini model',
@@ -1963,5 +1971,61 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
     capabilities: ['xmrt workflow templates'],
     category: 'task-management',
     example_use: 'Invoke xmrt-workflow-templates'
+  },
+  {
+    name: 'schema-introspect',
+    url: 'http://127.0.0.1:54321/functions/v1/schema-introspect',
+    description: 'Introspect database schema: list_schemas, list_tables, describe_table, list_relationships, search_schema. PUBLIC level — any agent can use.',
+    capabilities: ['schema introspection', 'list schemas', 'list tables', 'describe table', 'list relationships', 'search schema'],
+    category: 'infra',
+    example_use: 'Call with action=list_schemas to list all schemas, or action=describe_table params={schema:"app",table:"tasks"} to describe a table'
+  },
+  {
+    name: 'mesh-publish',
+    url: 'http://127.0.0.1:54321/functions/v1/mesh-publish',
+    description: 'Publish a message to the mesh network (gossip-hub). Topics: agent-heartbeat, agent-tasks, agent-discovery, fleet-broadcast.',
+    capabilities: ['mesh publish', 'gossip', 'agent communication', 'fleet broadcast'],
+    category: 'infra',
+    example_use: 'POST with {topic:"fleet-broadcast", payload:{text:"hello"}, agent:"eliza"}'
+  },
+  {
+    name: 'shell-exec',
+    url: 'http://127.0.0.1:54321/functions/v1/shell-exec',
+    description: 'Run a bash/curl command in a git-bash POSIX shell and return stdout/stderr/exitCode. Proxies to the relay shell-exec handler. CORE-gated. Pass command (string, required), optional timeout (max 120s) and workdir.',
+    capabilities: ['shell execution', 'bash', 'curl', 'command execution', 'file inspection', 'git commands'],
+    category: 'system',
+    example_use: 'POST with {command:"curl -s http://localhost:8080/health"} or {command:"ls /c/Users/PureTrek/Desktop/xmrtdao/relay/functions/"}'
+  },
+  {
+    name: 'trust-trajectory',
+    url: 'http://127.0.0.1:54321/functions/v1/trust-trajectory',
+    description: 'Get the full TrustGraph trajectory — per-agent trust score series over time, token usage, and ecosystem summary. Args: agent (optional, single agent name e.g. "eliza"), action (optional, "summary" for compact per-agent current score). No args returns full series for all agents.',
+    capabilities: ['trust trajectory', 'trust score trend', 'trust graph', 'trustgraph', 'score history', 'token usage', 'ecosystem summary'],
+    category: 'governance',
+    example_use: 'POST with {} for full series, {agent:"eliza"} for one agent, {action:"summary"} for compact per-agent current scores'
+  },
+  {
+    name: 'cuttlefishclaws-cac-verifier',
+    url: 'http://127.0.0.1:54321/functions/v1/cuttlefishclaws-cac-verifier',
+    description: 'Verify CAC credential status by credential ID or agent DID. Returns {valid, tier, usdcPrepaid, tokenBalance, status, expiresAt, daysRemaining}. Args: did (agent DID) or cacId (credential ID).',
+    capabilities: ['cac verify', 'cac credential', 'credential status', 'cac validity', 'tier check'],
+    category: 'governance',
+    example_use: 'POST with {did:"did:ethr:arch-v1"} or {cacId:2} to verify a CAC credential'
+  },
+  {
+    name: 'cuttlefishclaws-constitutional-router',
+    url: 'http://127.0.0.1:54321/functions/v1/cuttlefishclaws-constitutional-router',
+    description: 'Route a governance/activity request through the constitutional standing gate. Returns {allowed, reasons, trustgraph, standing, cac_tier, ial}. Args: agent_did, activity_type, domain, purpose (optional, default write).',
+    capabilities: ['constitutional router', 'gate evaluate', 'governance gate', 'standing gate', 'action permission', 'constitution check'],
+    category: 'governance',
+    example_use: 'POST with {agent_did:"did:ethr:arch-v1", activity_type:"VALIDATION_COMPLETED", domain:"engineering_review"} to check if the action is permitted'
+  },
+  {
+    name: 'cuttlefishclaws-trustgraph-scorer',
+    url: 'http://127.0.0.1:54321/functions/v1/cuttlefishclaws-trustgraph-scorer',
+    description: 'Score an agent TrustGraph (or all agents if no agent provided). Batch scorer — returns all agents with trustScore/trustBand, or a single agent if {agent} given. Args: agent (optional).',
+    capabilities: ['trustgraph scorer', 'batch trust score', 'all agents score', 'trust score list', 'trust band'],
+    category: 'governance',
+    example_use: 'POST with {} for all agents, or {agent:"eliza"} for one agent score'
   },
 ];

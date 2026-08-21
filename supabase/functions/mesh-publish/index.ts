@@ -23,8 +23,8 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-// Relay tunnel URL — the public endpoint for Vex's relay
-const RELAY_TUNNEL_URL = "https://relay.mobilemonero.com";
+// Relay tunnel URL — use local relay since both are on the same machine
+const RELAY_TUNNEL_URL = Deno.env.get('RELAY_BASE_URL') || 'http://127.0.0.1:8080';
 
 serve(async (req) => {
   // Handle CORS preflight

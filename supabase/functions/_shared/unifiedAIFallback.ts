@@ -20,6 +20,7 @@ const PROVIDER_TIMEOUTS = {
   vertexai: 8000,     // Vertex AI Express Mode
   deepseek: 10000,    // Slightly longer for reasoning
   kimi: 8000,
+  lovable: 10000,     // Lovable API
   ollamaPro: 15000,   // Ollama Pro cloud (OpenAI-compatible)
   embedding: 10000,
 };
@@ -142,7 +143,7 @@ async function getServiceAccountAccessToken(): Promise<string | null> {
     console.log('✅ Service Account access token obtained');
     return tokenData.access_token || null;
   } catch (err) {
-    console.warn('⚠️ SA JWT signing error:', err?.message || err);
+    console.warn('⚠️ SA JWT signing error:', err instanceof Error ? err.message : String(err));
     return null;
   }
 }
@@ -258,8 +259,9 @@ async function callVertexWithServiceAccount(
     const content = parts.find((p: any) => p.text)?.text || '';
     return { success: true, provider: 'vertex-sa', content };
   } catch (error) {
-    console.warn('⚠️ Vertex SA error:', error?.message || error);
-    return { success: false, provider: 'vertex-sa', error: error?.message || 'Unknown error' };
+    const errMsg = error instanceof Error ? error.message : String(error);
+    console.warn('⚠️ Vertex SA error:', errMsg);
+    return { success: false, provider: 'vertex-sa', error: errMsg };
   }
 }
 
@@ -280,10 +282,11 @@ async function fetchWithTimeout(
     return response;
   } catch (error) {
     clearTimeout(timeoutId);
-    if (error.name === 'AbortError') {
+    const err = error instanceof Error ? error : new Error(String(error));
+    if (err.name === 'AbortError') {
       throw new Error(`Request timeout after ${timeoutMs}ms`);
     }
-    throw error;
+    throw err;
   }
 }
 
@@ -505,8 +508,9 @@ async function callGemini(
     const content = parts.find((p: any) => p.text)?.text || '';
     return { success: true, provider: 'gemini', content };
   } catch (error) {
-    console.warn('⚠️ Gemini error:', error.message);
-    return { success: false, provider: 'gemini', error: error.message };
+    const errMsg = error instanceof Error ? error.message : String(error);
+    console.warn('⚠️ Gemini error:', errMsg);
+    return { success: false, provider: 'gemini', error: errMsg };
   }
 }
 
@@ -614,8 +618,9 @@ async function callLovable(
 
     return { success: true, provider: 'lovable', content: message.content || '' };
   } catch (error) {
-    console.warn('⚠️ Lovable error:', error.message);
-    return { success: false, provider: 'lovable', error: error.message };
+    const errMsg = error instanceof Error ? error.message : String(error);
+    console.warn('⚠️ Lovable error:', errMsg);
+    return { success: false, provider: 'lovable', error: errMsg };
   }
 }
 
@@ -703,8 +708,9 @@ async function callDeepSeek(
 
     return { success: true, provider: 'deepseek', content: message.content || '' };
   } catch (error) {
-    console.warn('⚠️ DeepSeek error:', error.message);
-    return { success: false, provider: 'deepseek', error: error.message };
+    const errMsg = error instanceof Error ? error.message : String(error);
+    console.warn('⚠️ DeepSeek error:', errMsg);
+    return { success: false, provider: 'deepseek', error: errMsg };
   }
 }
 
@@ -791,8 +797,9 @@ async function callKimi(
 
     return { success: true, provider: 'kimi', content: message.content || '' };
   } catch (error) {
-    console.warn('⚠️ Kimi error:', error.message);
-    return { success: false, provider: 'kimi', error: error.message };
+    const errMsg = error instanceof Error ? error.message : String(error);
+    console.warn('⚠️ Kimi error:', errMsg);
+    return { success: false, provider: 'kimi', error: errMsg };
   }
 }
 
@@ -806,65 +813,79 @@ async function callOllamaPro(
   messages: AIMessage[],
   options: UnifiedAIOptions = {}
 ): Promise<ProviderResult> {
-  const OLLAMA_API_KEY = Deno.env.get('OLLAMA_API_KEY');
+  // Try up to 3 Ollama API keys in cascade
+  const keys = [
+    { key: Deno.env.get('OLLAMA_API_KEY'), label: 'primary' },
+    { key: Deno.env.get('OLLAMA_XMRT_API_KEY'), label: 'xmrt' },
+    { key: Deno.env.get('OLLAMA_3RD_API_KEY'), label: '3rd' },
+  ].filter(k => k.key);
 
-  if (!OLLAMA_API_KEY) {
-    return { success: false, provider: 'ollama-pro', error: 'OLLAMA_API_KEY not configured' };
+  if (keys.length === 0) {
+    return { success: false, provider: 'ollama-pro', error: 'No OLLAMA_API_KEY configured' };
   }
 
-  try {
-    const ollamaModel = Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud';
-    console.log(`🔮 PRIMARY: Attempting Ollama Pro Cloud (${ollamaModel})...`);
+  for (const { key: OLLAMA_API_KEY, label } of keys) {
+    try {
+      const ollamaModel = Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud';
+      console.log(`🔮 Attempting Ollama Pro Cloud (${ollamaModel}) with ${label} key...`);
 
-    const effectiveSystemPrompt = getEffectiveSystemPrompt(options);
-    const effectiveTools = getEffectiveTools(options);
+      const effectiveSystemPrompt = getEffectiveSystemPrompt(options);
+      const effectiveTools = getEffectiveTools(options);
 
-    const requestMessages = [
-      { role: 'system', content: effectiveSystemPrompt },
-      ...messages.filter(m => m.role !== 'system')
-    ];
+      const requestMessages = [
+        { role: 'system', content: effectiveSystemPrompt },
+        ...messages.filter(m => m.role !== 'system')
+      ];
 
-    const maxTokens = options.maxTokens || options.max_tokens || RESPONSE_MAX_TOKENS;
+      const maxTokens = options.maxTokens || options.max_tokens || RESPONSE_MAX_TOKENS;
 
-    const requestBody: any = {
-      model: ollamaModel,
-      messages: requestMessages,
-      temperature: options.temperature || 0.7,
-      max_tokens: maxTokens,
-    };
+      const requestBody: any = {
+        model: ollamaModel,
+        messages: requestMessages,
+        temperature: options.temperature || 0.7,
+        max_tokens: maxTokens,
+      };
 
-    // Include tools if available
-    if (effectiveTools.length > 0) {
-      console.log(`🔧 Ollama Pro: Passing ${effectiveTools.length} tools`);
-      requestBody.tools = effectiveTools;
-      requestBody.tool_choice = 'auto';
-    }
+      // Include tools if available
+      if (effectiveTools.length > 0) {
+        console.log(`🔧 Ollama Pro: Passing ${effectiveTools.length} tools`);
+        requestBody.tools = effectiveTools;
+        requestBody.tool_choice = 'auto';
+      }
 
-    const response = await fetchWithTimeout(
-      'https://ollama.com/v1/chat/completions',
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${OLLAMA_API_KEY}`,
-          'Content-Type': 'application/json',
+      const response = await fetchWithTimeout(
+        'https://ollama.com/v1/chat/completions',
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${OLLAMA_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(requestBody),
         },
-        body: JSON.stringify(requestBody),
-      },
-      PROVIDER_TIMEOUTS.ollamaPro
-    );
+        PROVIDER_TIMEOUTS.ollamaPro
+      );
 
-    // Fast-fail check
-    const fastFailError = checkFastFail(response, 'ollama-pro');
-    if (fastFailError) {
-      return { success: false, provider: 'ollama-pro', error: fastFailError };
+      // Fast-fail check
+      const fastFailError = checkFastFail(response, 'ollama-pro');
+      if (fastFailError) {
+        console.warn(`⚠️ Ollama Pro (${label}) fast-fail: ${fastFailError}, trying next key...`);
+        continue;  // Try the next key
+      }
+
+      return await handleOllamaResponse(response, ollamaModel);
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.warn(`⚠️ Ollama Pro (${label}) error: ${errMsg}, trying next key...`);
+      continue;  // Try the next key
     }
+  }
+  return { success: false, provider: 'ollama-pro', error: 'All 3 Ollama API keys failed' };
+}
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.warn(`⚠️ Ollama Pro failed (${response.status}):`, errorText);
-      return { success: false, provider: 'ollama-pro', error: `${response.status}: ${errorText}` };
-    }
-
+/** Parse the Ollama Cloud API response into standard format */
+async function handleOllamaResponse(response: Response, model: string): Promise<ProviderResult> {
+  try {
     const data = await response.json();
     const message = data.choices?.[0]?.message;
 
@@ -881,8 +902,8 @@ async function callOllamaPro(
 
     return { success: true, provider: 'ollama-pro', content: message.content || '' };
   } catch (error) {
-    console.warn('⚠️ Ollama Cloud error:', error.message);
-    return { success: false, provider: 'ollama-pro', error: error.message };
+    console.warn('⚠️ Ollama Cloud response parse error:', (error as Error).message);
+    return { success: false, provider: 'ollama-pro', error: (error as Error).message };
   }
 }
 
@@ -990,7 +1011,8 @@ export async function generateEmbedding(text: string): Promise<number[]> {
       console.warn('⚠️ Supabase AI returned invalid format, falling back to Ollama...');
     }
   } catch (error) {
-    console.warn('⚠️ Supabase Native AI unavailable, falling back to local Ollama:', error.message);
+    const errMsg = error instanceof Error ? error.message : String(error);
+    console.warn('⚠️ Supabase Native AI unavailable, falling back to local Ollama:', errMsg);
     embeddingSession = null;
   }
 
@@ -1025,7 +1047,8 @@ export async function generateEmbedding(text: string): Promise<number[]> {
     console.log(`✅ Local Ollama embedding: ${embedding.length} dims (model=${data.model || embedModel})`);
     return embedding;
   } catch (error) {
-    console.error('❌ Both embedding providers failed:', error.message);
+    const errMsg = error instanceof Error ? error.message : String(error);
+    console.error('❌ Both embedding providers failed:', errMsg);
     throw error;
   }
 }

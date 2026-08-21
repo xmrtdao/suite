@@ -23,6 +23,16 @@ function isUuid(value: string): boolean {
   return UUID_REGEX.test(value);
 }
 
+interface Agent {
+  id: string;
+  name: string;
+  status: string;
+  current_workload: number;
+  max_concurrent_tasks: number;
+  skills: any;
+  [key: string]: any;
+}
+
 function normalizeTaskId(rawTaskId: unknown): { normalizedTaskId: string; normalizedFromLegacyPrefix: boolean } {
   if (typeof rawTaskId !== 'string' || rawTaskId.trim() === '') {
     throw new HttpError('task_id is required', 400);

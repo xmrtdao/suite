@@ -1,393 +1,341 @@
+// conversation-access — Local-sb Deno edge function
+// Provides session-based conversation persistence for the suite's UnifiedChat
+// and fleet chat context recall for agents.
+//
+// Uses the local-sb REST API (PostgREST-compatible) instead of native pg,
+// since the pg npm module's native bindings don't work in Deno.
+//
+// Tables (via REST API at http://127.0.0.1:54321/rest/v1):
+//   public.conversation_sessions, public.conversation_messages,
+//   public.conversation_summaries, public.fleet_messages, app.fleet_memory
+//
+// Env vars (injected by local-sb):
+//   SUPABASE_URL — local-sb base URL (http://127.0.0.1:54321)
+//   SUPABASE_SERVICE_ROLE_KEY — service role key
+
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.58.0';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers':
-    'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Helper function to check if a string is a valid UUID
-function isValidUUID(str: string): boolean {
-  const uuidRegex =
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  return uuidRegex.test(str);
+const SB_URL = Deno.env.get('SUPABASE_URL') || 'http://127.0.0.1:54321';
+const SB_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || 'eyJhbG...MMpM';
+
+// ── REST API helper (PostgREST-compatible) ──
+async function restGet(table: string, query: Record<string, string> = {}) {
+  const params = new URLSearchParams(query);
+  const url = `${SB_URL}/rest/v1/${table}?${params}`;
+  const r = await fetch(url, {
+    headers: {
+      'apikey': SB_KEY,
+      'Authorization': `Bearer ${SB_KEY}`,
+    },
+  });
+  if (!r.ok) return [];
+  return await r.json();
 }
 
-function formatHashAsUuid(bytes: Uint8Array): string {
-  const uuidBytes = bytes.slice(0, 16);
-  uuidBytes[6] = (uuidBytes[6] & 0x0f) | 0x40; // version 4
-  uuidBytes[8] = (uuidBytes[8] & 0x3f) | 0x80; // RFC 4122 variant
-
-  const hex = Array.from(uuidBytes, (b) =>
-    b.toString(16).padStart(2, '0')
-  ).join('');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+async function restPost(table: string, body: Record<string, any>) {
+  const url = `${SB_URL}/rest/v1/${table}`;
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'apikey': SB_KEY,
+      'Authorization': `Bearer ${SB_KEY}`,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=representation',
+    },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) return null;
+  return await r.json();
 }
 
-async function sessionIdToUUID(sessionId: string): Promise<string> {
-  const normalized = sessionId.trim().toLowerCase();
-  const data = new TextEncoder().encode(`conversation-access:${normalized}`);
-  const digest = await crypto.subtle.digest('SHA-256', data);
-  return formatHashAsUuid(new Uint8Array(digest));
+async function restPatch(table: string, body: Record<string, any>, filter: string) {
+  const url = `${SB_URL}/rest/v1/${table}?${filter}`;
+  const r = await fetch(url, {
+    method: 'PATCH',
+    headers: {
+      'apikey': SB_KEY,
+      'Authorization': `Bearer ${SB_KEY}`,
+      'Content-Type': 'application/json',
+      'Prefer': 'return=representation',
+    },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) return null;
+  return await r.json();
 }
 
-async function resolveSession(
-  supabase: ReturnType<typeof createClient>,
-  sessionIdentifier: string
-): Promise<{ id: string; session_key: string } | null> {
-  const normalizedIdentifier = sessionIdentifier.trim();
+function jsonResponse(body: any, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  });
+}
 
-  // Check UUID first
-  if (isValidUUID(normalizedIdentifier)) {
-    const { data, error } = await supabase
-      .from('conversation_sessions')
-      .select('id, session_key')
-      .eq('id', normalizedIdentifier)
-      .maybeSingle();
+// ── Generate deterministic session key from request context ──
+async function generateSessionKey(req: Request): Promise<string> {
+  // Get client IP from headers
+  const forwarded = req.headers.get('x-forwarded-for') || '';
+  const ip = forwarded.split(',')[0]?.trim() || req.headers.get('cf-connecting-ip') || req.headers.get('x-real-ip') || 'unknown';
+  // Hash IP to create a stable session key
+  const payload = new TextEncoder().encode(`suite-session:${ip}`);
+  const digest = await crypto.subtle.digest('SHA-256', payload);
+  const hash = Array.from(new Uint8Array(digest.slice(0, 16)), b => b.toString(16).padStart(2, '0')).join('');
+  return `ip-${hash}`;
+}
 
-    if (error) {
-      console.error('Error fetching session by UUID:', error);
-    }
-
-    if (data) return data;
-  } else {
-    // Deterministically hash non-UUID session IDs into valid UUIDs.
-    const hashedSessionId = await sessionIdToUUID(normalizedIdentifier);
-    const { data, error } = await supabase
-      .from('conversation_sessions')
-      .select('id, session_key')
-      .eq('id', hashedSessionId)
-      .maybeSingle();
-
-    if (error) {
-      console.error('Error fetching session by hashed UUID:', error);
-    }
-
-    if (data) return data;
+// ── Session resolution ──
+async function resolveSession(sessionId?: string, resolvedSessionKey?: string, channel?: string, agentId?: string) {
+  // Try by session_key first (deterministic key from IP + API key)
+  if (resolvedSessionKey) {
+    const rows = await restGet('conversation_sessions', {
+      'session_key': `eq.${resolvedSessionKey}`,
+      'status': 'eq.active',
+      'limit': '1',
+    });
+    if (rows.length > 0) return rows[0];
   }
 
-  // Fallback: treat as session_key
-  const { data, error } = await supabase
-    .from('conversation_sessions')
-    .select('id, session_key')
-    .eq('session_key', sessionIdentifier)
-    .maybeSingle();
-
-  if (error) {
-    console.error('Error fetching session by session_key:', error);
+  // Try by session UUID second (legacy)
+  if (sessionId) {
+    const rows = await restGet('conversation_sessions', {
+      'id': `eq.${sessionId}`,
+      'status': 'eq.active',
+      'limit': '1',
+    });
+    if (rows.length > 0) return rows[0];
   }
 
-  return data;
+  // Try by agent_id + channel (fleet chat pattern) — most common for fleet
+  if (agentId && channel) {
+    const rows = await restGet('conversation_sessions', {
+      'agent_id': `eq.${agentId}`,
+      'channel': `eq.${channel}`,
+      'status': 'eq.active',
+      'order': 'updated_at.desc',
+      'limit': '1',
+    });
+    if (rows.length > 0) return rows[0];
+  }
+
+  // Try by agent_id only
+  if (agentId) {
+    const rows = await restGet('conversation_sessions', {
+      'agent_id': `eq.${agentId}`,
+      'status': 'eq.active',
+      'order': 'updated_at.desc',
+      'limit': '1',
+    });
+    if (rows.length > 0) return rows[0];
+  }
+
+  return null;
 }
 
+// ── Fleet chat context — grounded recall for agents ──
+async function getFleetContext(agentId: string, limit: number = 20) {
+  const [messages, memories] = await Promise.all([
+    restGet('fleet_messages', {
+      'order': 'created_at.desc',
+      'limit': String(limit),
+    }),
+    restGet('fleet_memory', {
+      'agent_id': `eq.${agentId}`,
+      'order': 'created_at.desc',
+      'limit': '10',
+    }),
+  ]);
+
+  return { messages, memories };
+}
+
+// ── Main handler ──
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const requestBody = await req.json();
+    // Support both GET (query params) and POST (JSON body)
+    let body: any = {};
+    if (req.method === 'GET') {
+      const url = new URL(req.url);
+      body = Object.fromEntries(url.searchParams.entries());
+      // GET requests without explicit action default to get_messages
+      if (!body.action) body.action = 'get_messages';
+    } else {
+      body = await req.json();
+    }
     const {
       action,
       sessionKey,
       sessionId: rawSessionId,
+      session_id,
       messageData,
       limit,
       offset,
       sessionData,
-    } = requestBody;
-    const supabaseUrl = Deno.env.get('SUPABASE_URL');
-    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+      channel,
+      agentId,
+      agent_id,
+    } = body;
 
-    if (!supabaseUrl || !supabaseServiceKey) {
-      return new Response(
-        JSON.stringify({
-          error:
-            'Missing required environment variables: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY',
-        }),
-        {
-          status: 500,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        }
-      );
-    }
+    const sessionId = rawSessionId || sessionKey || session_id;
+    const resolvedAgentId = agentId || agent_id || null;
 
-    // Create admin client with service role (full read/write access)
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
-    console.log('Conversation access request:', {
-      action,
-      sessionKey,
-      sessionId: rawSessionId,
-      isValidUUID: rawSessionId ? isValidUUID(rawSessionId) : null,
-    });
-
-    if (!rawSessionId && !sessionKey) {
-      return new Response(
-        JSON.stringify({
-          error: 'Either sessionId or sessionKey is required',
-        }),
-        {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        }
-      );
-    }
-
-    // Backward-compatible fallback: if frontend forgot sessionId, use sessionKey.
-    const sessionId = rawSessionId || sessionKey;
+    // Auto-generate session key from IP (deterministic, survives page refresh)
+    const resolvedSessionKey = await generateSessionKey(req);
 
     switch (action) {
+      // ── Get or create a session ──
       case 'get_session': {
-        let sessionQuery = supabase
-          .from('conversation_sessions')
-          .select('*')
-          .eq('is_active', true)
-          .order('updated_at', { ascending: false })
-          .limit(1);
-
-        if (sessionKey) {
-          sessionQuery = sessionQuery.eq('session_key', sessionKey);
+        if (sessionId || resolvedSessionKey || resolvedAgentId) {
+          const session = await resolveSession(sessionId, resolvedSessionKey, channel, resolvedAgentId);
+          if (session) return jsonResponse({ success: true, session });
         }
-
-        const { data: sessions, error } = await sessionQuery;
-
-        if (error) throw error;
-
-        return new Response(
-          JSON.stringify({ success: true, session: sessions?.[0] || null }),
-          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
+        // No active session — create one
+        const rows = await restPost('conversation_sessions', {
+          agent_id: resolvedAgentId || 'anonymous',
+          channel: channel || 'suite',
+          status: 'active',
+          started_at: new Date().toISOString(),
+          message_count: 0,
+          session_key: resolvedSessionKey || null,
+          metadata: JSON.stringify(sessionData?.metadata || {}),
+        });
+        return jsonResponse({ success: true, session: rows?.[0] || null });
       }
 
+      // ── Create a new session explicitly ──
       case 'create_session': {
-        const sessionPayload = {
-          ...sessionData,
-          session_key:
-            sessionData?.session_key || sessionKey || `anon-${crypto.randomUUID()}`,
-          user_profile_id: sessionData?.user_profile_id || null,
-          metadata: {
-            ...(sessionData?.metadata || {}),
-            auth_context: 'service_role',
-          },
-        };
-
-        // Create new session
-        const { data, error } = await supabase
-          .from('conversation_sessions')
-          .insert(sessionPayload)
-          .select()
-          .single();
-
-        if (error) throw error;
-
-        return new Response(JSON.stringify({ success: true, session: data }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        const rows = await restPost('conversation_sessions', {
+          agent_id: resolvedAgentId || sessionData?.agent_id || 'anonymous',
+          channel: channel || sessionData?.channel || 'suite',
+          status: 'active',
+          started_at: new Date().toISOString(),
+          message_count: 0,
+          session_key: resolvedSessionKey || null,
+          metadata: JSON.stringify(sessionData?.metadata || {}),
         });
+        return jsonResponse({ success: true, session: rows?.[0] || null });
       }
 
+      // ── Get messages for a session ──
       case 'get_messages': {
-        if (!sessionId) {
-          return new Response(
-            JSON.stringify({ error: 'Session ID required' }),
-            {
-              status: 400,
-              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            }
-          );
+        if (!sessionId && !resolvedAgentId) {
+          return jsonResponse({ error: 'Session ID or agentId required' }, 400);
         }
-
-        // Verify session ownership - handle both UUID and session_key formats
-        const session = await resolveSession(supabase, sessionId);
-
+        const session = await resolveSession(sessionId, resolvedSessionKey, channel, resolvedAgentId);
         if (!session) {
-          return new Response(
-            JSON.stringify({ success: true, messages: [] }),
-            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          );
+          return jsonResponse({ success: true, messages: [] });
         }
-
-        // Get messages for this session - use the actual UUID
-        const actualSessionId = session.id;
-        const { data: messages, error } = await supabase
-          .from('conversation_messages')
-          .select('*')
-          .eq('session_id', actualSessionId)
-          .order('timestamp', { ascending: false })
-          .range(offset || 0, (offset || 0) + (limit || 49));
-
-        if (error) throw error;
-
-        return new Response(
-          JSON.stringify({ success: true, messages: messages || [] }),
-          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        );
+        const messages = await restGet('conversation_messages', {
+          'session_id': `eq.${session.id}`,
+          'order': 'timestamp.desc',
+          'limit': String(limit || 50),
+          'offset': String(offset || 0),
+        });
+        return jsonResponse({ success: true, messages, session });
       }
 
+      // ── Get summaries for a session ──
       case 'get_summaries': {
-        if (!sessionId) {
-          return new Response(
-            JSON.stringify({ error: 'Session ID required' }),
-            {
-              status: 400,
-              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            }
-          );
+        if (!sessionId && !resolvedAgentId) {
+          return jsonResponse({ error: 'Session ID or agentId required' }, 400);
+        }
+        const session = await resolveSession(sessionId, resolvedSessionKey, channel, resolvedAgentId);
+        if (!session) {
+          return jsonResponse({ success: true, summaries: [] });
+        }
+        const summaries = await restGet('conversation_summaries', {
+          'session_id': `eq.${session.id}`,
+          'order': 'created_at.asc',
+        });
+        return jsonResponse({ success: true, summaries });
+      }
+
+      // ── Add a message to a session ──
+      case 'add_message': {
+        if (!messageData?.message_type || !messageData?.content?.trim()) {
+          return jsonResponse({
+            error: 'message_type and non-empty content are required',
+          }, 400);
         }
 
-        // Verify session ownership - handle both UUID and session_key formats
-        const session = await resolveSession(supabase, sessionId);
+        // Resolve or create session
+        let session = sessionId || resolvedAgentId ? await resolveSession(sessionId, resolvedSessionKey, channel, resolvedAgentId) : null;
+        if (!session) {
+          const rows = await restPost('conversation_sessions', {
+            agent_id: resolvedAgentId || 'anonymous',
+            channel: channel || 'suite',
+            status: 'active',
+            started_at: new Date().toISOString(),
+            message_count: 0,
+            session_key: resolvedSessionKey || null,
+            metadata: JSON.stringify({ auto_created: true }),
+          });
+          session = rows?.[0] || null;
+        }
 
         if (!session) {
-          return new Response(
-            JSON.stringify({ success: true, summaries: [] }),
-            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          );
+          return jsonResponse({ error: 'Failed to create session' }, 500);
         }
 
-        // Get summaries for this session - use the actual UUID
-        const actualSessionId = session.id;
-        const { data: summaries, error } = await supabase
-          .from('conversation_summaries')
-          .select('summary_text, message_count, created_at')
-          .eq('session_id', actualSessionId)
-          .order('created_at', { ascending: true });
+        // Insert message
+        const rows = await restPost('conversation_messages', {
+          session_id: session.id,
+          message_type: messageData.message_type,
+          content: messageData.content,
+          metadata: JSON.stringify(messageData.metadata || {}),
+          timestamp: new Date().toISOString(),
+        });
 
-        if (error) throw error;
-
-        return new Response(
-          JSON.stringify({ success: true, summaries: summaries || [] }),
-          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        // Update session message count
+        await restPatch('conversation_sessions',
+          { message_count: (session.message_count || 0) + 1, updated_at: new Date().toISOString() },
+          `id=eq.${session.id}`
         );
+
+        return jsonResponse({ success: true, message: rows?.[0] || null });
       }
 
-      case 'add_message': {
-        const hasMessageType = Boolean(messageData?.message_type);
-        const hasContent =
-          typeof messageData?.content === 'string' &&
-          messageData.content.trim().length > 0;
-
-        if (!sessionId || !messageData || !hasMessageType || !hasContent) {
-          return new Response(
-            JSON.stringify({
-              error:
-                'Session ID, message_type, and non-empty content are required',
-              details: {
-                sessionIdProvided: Boolean(sessionId),
-                messageTypeProvided: hasMessageType,
-                contentProvided: hasContent,
-              },
-            }),
-            {
-              status: 400,
-              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            }
-          );
-        }
-
-        // Verify session ownership - handle both UUID and session_key formats
-        const session = await resolveSession(supabase, sessionId);
-
-        let targetSession = session;
-
-        if (!targetSession) {
-          const newSessionKey = sessionKey || sessionId;
-          const { data: createdSession, error: createError } = await supabase
-            .from('conversation_sessions')
-            .insert({
-              session_key: newSessionKey,
-              is_active: true,
-              metadata: { auth_context: 'service_role_auto_create' },
-            })
-            .select('id, session_key')
-            .single();
-
-          if (createError) throw createError;
-          targetSession = createdSession;
-        }
-
-        // Insert message - use the actual UUID
-        const actualSessionId = targetSession.id;
-        const { data, error } = await supabase
-          .from('conversation_messages')
-          .insert({
-            session_id: actualSessionId,
-            ...messageData,
-          })
-          .select()
-          .single();
-
-        if (error) throw error;
-
-        return new Response(JSON.stringify({ success: true, message: data }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
-      }
-
+      // ── Update session metadata/status ──
       case 'update_session': {
-        if (!sessionId) {
-          return new Response(
-            JSON.stringify({ error: 'Session ID required' }),
-            {
-              status: 400,
-              headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-            }
-          );
+        if (!sessionId && !agentId) {
+          return jsonResponse({ error: 'Session ID or agentId required' }, 400);
+        }
+        const session = await resolveSession(sessionId, resolvedSessionKey, channel, agentId);
+        if (!session) {
+          return jsonResponse({ error: 'Session not found' }, 404);
         }
 
-        // Verify session ownership - handle both UUID and session_key formats
-        const session = await resolveSession(supabase, sessionId);
+        const updates: Record<string, any> = { updated_at: new Date().toISOString() };
+        if (messageData?.status) updates.status = messageData.status;
+        if (messageData?.title) updates.title = messageData.title;
+        if (messageData?.metadata) updates.metadata = JSON.stringify(messageData.metadata);
 
-        let targetSession = session;
-        if (!targetSession) {
-          const newSessionKey = sessionKey || sessionId;
-          const { data: createdSession, error: createError } = await supabase
-            .from('conversation_sessions')
-            .insert({
-              session_key: newSessionKey,
-              is_active: true,
-              metadata: { auth_context: 'service_role_auto_create' },
-            })
-            .select('id, session_key')
-            .single();
+        await restPatch('conversation_sessions', updates, `id=eq.${session.id}`);
+        return jsonResponse({ success: true, sessionId: session.id });
+      }
 
-          if (createError) throw createError;
-          targetSession = createdSession;
-        }
-
-        // Update session - use the actual UUID
-        const actualSessionId = targetSession.id;
-        const { data, error } = await supabase
-          .from('conversation_sessions')
-          .update(messageData)
-          .eq('id', actualSessionId)
-          .select()
-          .single();
-
-        if (error) throw error;
-
-        return new Response(JSON.stringify({ success: true, session: data }), {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
+      // ── Fleet chat context — grounded recall for agents ──
+      case 'get_fleet_context': {
+        const targetAgent = agentId || 'fleet';
+        const ctx = await getFleetContext(targetAgent, limit || 20);
+        return jsonResponse({ success: true, ...ctx });
       }
 
       default:
-        return new Response(JSON.stringify({ error: 'Invalid action' }), {
-          status: 400,
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-        });
+        return jsonResponse({ error: 'Invalid action' }, 400);
     }
   } catch (error) {
     console.error('Conversation access error:', error);
-    return new Response(
-      JSON.stringify({
-        error: error instanceof Error ? error.message : 'Unknown error',
-      }),
-      {
-        status: 500,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      }
-    );
+    return jsonResponse({
+      error: error instanceof Error ? error.message : 'Unknown error',
+    }, 500);
   }
 });

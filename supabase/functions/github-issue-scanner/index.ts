@@ -5,8 +5,8 @@ import { getGitHubCredential } from "../_shared/credentialCascade.ts";
 import { startUsageTracking } from '../_shared/functionUsageLogger.ts';
 
 const FUNCTION_NAME = 'github-issue-scanner';
-const DEFAULT_REPOS = ['XMRT-Ecosystem']; // Default repo to scan if not configured
-const GITHUB_OWNER = Deno.env.get('GITHUB_OWNER') || 'DevGruGold';
+const DEFAULT_REPOS = ['mobilemonero']; // Default repo to scan if not configured
+const GITHUB_OWNER = Deno.env.get('GITHUB_OWNER') || 'xmrtdao';
 
 serve(async (req) => {
     if (req.method === 'OPTIONS') {

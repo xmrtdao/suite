@@ -70,15 +70,9 @@ export class ConversationPersistenceService {
   }
 
   private getAnonymousSessionKey(): string {
-    const storageKey = 'xmrt-anon-session-key';
-    const existingKey = localStorage.getItem(storageKey);
-    if (existingKey && existingKey.trim()) {
-      return existingKey;
-    }
-
-    const newKey = `anon-${crypto.randomUUID()}`;
-    localStorage.setItem(storageKey, newKey);
-    return newKey;
+    // Use a stable key so the server can resolve by IP
+    // The server auto-generates a deterministic session_key from x-forwarded-for
+    return 'suite-web';
   }
 
   private async resolveAuthContext(): Promise<{
@@ -189,7 +183,7 @@ export class ConversationPersistenceService {
       console.error('Failed to initialize session:', error);
       // Fallback to deterministic UUID derived from local session identifier
       this.currentSessionId = await this.sessionIdToUUID(
-        `local-${sessionKey}-${Date.now()}`
+        `local-${sessionKey}`
       );
       return this.currentSessionId;
     }

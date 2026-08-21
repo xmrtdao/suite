@@ -11,6 +11,7 @@ const corsHeaders = {
 
 // Stage thresholds in hours
 const STAGE_THRESHOLDS: Record<string, number> = {
+  PENDING: 48,
   DISCUSS: 2,
   PLAN: 4,
   EXECUTE: 8,
@@ -18,7 +19,7 @@ const STAGE_THRESHOLDS: Record<string, number> = {
   INTEGRATE: 4,
 };
 
-const STAGE_ORDER = ['DISCUSS', 'PLAN', 'EXECUTE', 'VERIFY', 'INTEGRATE'];
+const STAGE_ORDER = ['PENDING', 'DISCUSS', 'PLAN', 'EXECUTE', 'VERIFY', 'INTEGRATE'];
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -390,9 +391,10 @@ serve(async (req) => {
 
   } catch (error) {
     console.error('[task-auto-advance] Error:', error);
-    await usageTracker.failure(error.message, 500);
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    await usageTracker.failure(errorMsg, 500);
     return new Response(
-      JSON.stringify({ ok: false, error: error.message }),
+      JSON.stringify({ ok: false, error: errorMsg }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }

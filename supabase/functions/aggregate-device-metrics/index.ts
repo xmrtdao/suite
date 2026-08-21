@@ -4,7 +4,7 @@ import { corsHeaders } from "../_shared/cors.ts";
 import { startUsageTracking } from "../_shared/functionUsageLogger.ts";
 
 const FUNCTION_NAME = 'aggregate-device-metrics';
-const QUERY_TIMEOUT_MS = 6000; // 6 second timeout per query
+const QUERY_TIMEOUT_MS = 30000; // 30 second timeout per query
 
 // Timeout wrapper for database queries
 async function withTimeout<T>(promise: Promise<T>, ms: number, operation: string): Promise<T | null> {

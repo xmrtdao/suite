@@ -179,10 +179,10 @@ const sectionStickyNotes = [
 
 export default function Landing() {
   const navigate = useNavigate();
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, signInWithEmail } = useAuth();
   const { t } = useLanguage();
   const [demoOpen, setDemoOpen] = useState(false);
-  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [apiKeyInput, setApiKeyInput] = useState('');
 
   // Redirect authenticated users to dashboard
   useEffect(() => {
@@ -191,11 +191,16 @@ export default function Landing() {
     }
   }, [isAuthenticated, isLoading, navigate]);
 
+  const handleApiKeyLogin = async () => {
+    const key = apiKeyInput.trim();
+    if (!key) return;
+    // Redirect with api_key as query param — AuthContext reads this on mount
+    window.location.href = `/suite/dashboard?api_key=${encodeURIComponent(key)}`;
+  };
+
   const handleGetStarted = async () => {
     if (isAuthenticated) {
       navigate('/dashboard');
-    } else {
-      setAuthModalOpen(true);
     }
   };
 
@@ -311,63 +316,45 @@ export default function Landing() {
             </div>
 
             <div className="mx-auto max-w-sm px-8 pb-12 pt-44">
-              <div className="flex flex-col items-center justify-center gap-4 sm:flex-row">
+              <div className="flex flex-col items-center gap-3">
+                <input
+                  type="text"
+                  placeholder="Enter your API key"
+                  value={apiKeyInput}
+                  onChange={(e) => setApiKeyInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleApiKeyLogin()}
+                  className="w-full px-4 py-3 text-base bg-card/80 border border-border/50 rounded-lg text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-primary/50 text-center font-mono tracking-wider"
+                />
                 <Button
                   size="lg"
-                  onClick={handleGetStarted}
-                  className="text-lg px-8 py-6 bg-primary hover:bg-primary/90"
+                  onClick={handleApiKeyLogin}
+                  className="w-full text-lg px-8 py-6 bg-primary hover:bg-primary/90"
+                  disabled={!apiKeyInput.trim()}
                 >
-                  {t('landing.hero.start.trial')}
+                  Sign In with API Key
                   <ArrowRight className="ml-2 w-5 h-5" />
-                </Button>
-                <Button
-                  size="lg"
-                  variant="outline"
-                  className="text-lg px-8 py-6 border-primary/30 hover:border-primary/60 hover:bg-primary/5"
-                  onClick={() => setDemoOpen(true)}
-                >
-                  <Play className="mr-2 w-5 h-5" />
-                  {t('landing.hero.watch.demo')}
-                </Button>
-                <Button
-                  size="lg"
-                  variant="outline"
-                  className="text-lg px-8 py-6 border-emerald-500/30 text-emerald-400 hover:border-emerald-500/60 hover:bg-emerald-500/10"
-                  onClick={() => window.location.href = '/executives'}
-                >
-                  <Layers className="mr-2 w-5 h-5" />
-                  Executive Dashboard
                 </Button>
               </div>
             </div>
           </div>
 
-          <div className="hidden xl:flex flex-col sm:flex-row items-center justify-center gap-4 mb-16">
+          <div className="hidden xl:flex flex-col items-center gap-3 mb-16 max-w-sm mx-auto">
+            <input
+              type="text"
+              placeholder="Enter your API key"
+              value={apiKeyInput}
+              onChange={(e) => setApiKeyInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleApiKeyLogin()}
+              className="w-full px-4 py-3 text-base bg-card/80 border border-border/50 rounded-lg text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-primary/50 text-center font-mono tracking-wider"
+            />
             <Button
               size="lg"
-              onClick={handleGetStarted}
-              className="text-lg px-8 py-6 bg-primary hover:bg-primary/90"
+              onClick={handleApiKeyLogin}
+              className="w-full text-lg px-8 py-6 bg-primary hover:bg-primary/90"
+              disabled={!apiKeyInput.trim()}
             >
-              {t('landing.hero.start.trial')}
+              Sign In with API Key
               <ArrowRight className="ml-2 w-5 h-5" />
-            </Button>
-            <Button
-              size="lg"
-              variant="outline"
-              className="text-lg px-8 py-6 border-primary/30 hover:border-primary/60 hover:bg-primary/5"
-              onClick={() => setDemoOpen(true)}
-            >
-              <Play className="mr-2 w-5 h-5" />
-              {t('landing.hero.watch.demo')}
-            </Button>
-            <Button
-              size="lg"
-              variant="outline"
-              className="text-lg px-8 py-6 border-emerald-500/30 text-emerald-400 hover:border-emerald-500/60 hover:bg-emerald-500/10"
-              onClick={() => window.location.href = '/executives'}
-            >
-              <Layers className="mr-2 w-5 h-5" />
-              Executive Dashboard
             </Button>
           </div>
 

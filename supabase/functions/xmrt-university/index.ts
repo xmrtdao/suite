@@ -1084,6 +1084,39 @@ serve(async (req) => {
         })
         .eq('id', enrollment.id)
 
+      // Auto-register the graduated agent in the fleet
+      // This calls the relay's agent-onboard endpoint so the new agent
+      // gets a DID, trust score, and is recognized as TRUSTED by the tools.
+      let autoRegistered = false
+      let registrationError = null
+      try {
+        const relayUrl = Deno.env.get('RELAY_URL') || 'http://127.0.0.1:8080'
+        const regRes = await fetch(`${relayUrl}/api/cuttlefishclaws/agent-onboard`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            did: `did:xmrt:${agent_id}`,
+            agentType: 'constitutional',
+            prepaidUsdcAmount: 0,
+            metadata: {
+              name: enrollment.agent_name,
+              university_cert_id: certId,
+              graduated_at: new Date().toISOString(),
+              permissions,
+            },
+          }),
+          signal: AbortSignal.timeout(10000),
+        })
+        const regData = await regRes.json()
+        autoRegistered = regData.success === true
+        if (!autoRegistered) {
+          registrationError = regData.error || 'unknown registration error'
+        }
+      } catch (regErr) {
+        registrationError = regErr.message
+        // Non-fatal — the certificate was still issued
+      }
+
       return new Response(
         JSON.stringify({
           success: true,
@@ -1098,6 +1131,8 @@ serve(async (req) => {
             expires_at: expiresAt.toISOString(),
           },
           jwt_token: jwtToken,
+          auto_registered: autoRegistered,
+          registration_error: registrationError,
           message: `Congratulations, ${enrollment.agent_name}! You are now a certified XMRT DAO agent. Your certificate ID: ${certId}`,
           next_steps: [
             'Use your JWT token to authenticate with the mesh fleet',

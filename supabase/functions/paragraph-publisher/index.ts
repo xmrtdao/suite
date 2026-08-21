@@ -114,7 +114,8 @@ serve(async (req) => {
 
   } catch (error) {
     console.error('[paragraph-publisher] Edge Function Error:', error);
-    return new Response(JSON.stringify({ error: error.message }), {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    return new Response(JSON.stringify({ error: errorMsg }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
     });
