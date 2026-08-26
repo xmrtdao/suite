@@ -873,6 +873,14 @@ async function callOllamaPro(
         continue;  // Try the next key
       }
 
+      // Treat any non-2xx as a failure for THIS key and try the next one.
+      // (A 403 "requires a subscription" on one key must NOT stop the cascade —
+      // the xmrt key may still work. checkFastFail only catches 402/429.)
+      if (!response.ok) {
+        console.warn(`⚠️ Ollama Pro (${label}) HTTP ${response.status}, trying next key...`);
+        continue;
+      }
+
       return await handleOllamaResponse(response, ollamaModel);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
