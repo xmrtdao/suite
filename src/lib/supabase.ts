@@ -8,8 +8,15 @@
 import { createClient } from '@supabase/supabase-js'
 
 // Supabase Configuration
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'http://127.0.0.1:54321'
-const supabaseKey = 'sb_publishable_yIaroctFhoYStx0f9XajBg_zhpuVulw'
+// The Suite SPA is ALWAYS served by the relay (localhost:8080 locally,
+// suite.mobilemonero.com through the tunnel). The relay proxies /functions/v1
+// and /rest/v1, so the relay origin is the correct base everywhere. Prefer
+// window.location.origin over VITE_SUPABASE_URL — a hardcoded 127.0.0.1:54321
+// breaks on phones/other machines (127.0.0.1 is the device).
+const supabaseUrl = typeof window !== 'undefined'
+  ? window.location.origin
+  : (import.meta.env.VITE_SUPABASE_URL || 'http://127.0.0.1:8080')
+const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || 'local-anon-key'
 
 // Create Supabase client
 export const supabase = createClient(supabaseUrl, supabaseKey, {

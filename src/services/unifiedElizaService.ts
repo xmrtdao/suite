@@ -232,6 +232,8 @@ export class UnifiedElizaService {
   ): Promise<{ data: any; error: any }> {
     const EXEC_TIMEOUT_MS = 45000; // 45s — generous for the mobile tunnel path
     const MAX_ATTEMPTS = 2;
+    const POLL_TIMEOUT_MS = 60000; // total budget to wait for a background result
+    const POLL_INTERVAL_MS = 2000;
 
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       try {
@@ -250,6 +252,53 @@ export class UnifiedElizaService {
             }), EXEC_TIMEOUT_MS)
           ),
         ]);
+
+        // If a background (async) request was accepted, poll for the result.
+        // ai-chat now returns { success:true, status:'processing', request_id } and
+        // completes asynchronously. Poll GET /functions/v1/<fn>?request_id= until
+        // status is 'done' or 'error', so the frontend never drops to Office Clerk
+        // just because the LLM call takes longer than the invoke timeout.
+        if (!result.error && result.data &&
+            (result.data.status === 'processing' || result.data.status === 'started') &&
+            result.data.request_id) {
+          const rid = result.data.request_id;
+          const pollStart = Date.now();
+          // functions-js invoke() v2.4.3 doesn't forward a `query` option, so
+          // poll via a raw fetch to the relay origin (which now preserves the
+          // ?request_id= query string and proxies it to local-sb). This matches
+          // the SPA's client.ts base (window.location.origin = relay origin).
+          const base = (typeof window !== 'undefined' && window.location?.origin)
+            ? window.location.origin
+            : (import.meta.env.VITE_SUPABASE_URL || 'http://127.0.0.1:8080');
+          while (Date.now() - pollStart < POLL_TIMEOUT_MS) {
+            await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+            try {
+              const pollUrl = `${base}/functions/v1/${functionName}?request_id=${encodeURIComponent(rid)}`;
+              const pollRes = await fetch(pollUrl, {
+                method: 'GET',
+                headers: { 'apikey': 'local-anon-key' },
+              });
+              const pollData = await pollRes.json().catch(() => ({}));
+              const status = pollData?.status;
+              if (status === 'done') {
+                // Unwrap the background result so the rest of the pipeline sees
+                // the same shape as a synchronous success response.
+                return { data: pollData.result, error: null };
+              }
+              if (status === 'error' || pollData?.error) {
+                return { data: null, error: pollData.error || new Error('background request failed') };
+              }
+              if (status === 'not_found') {
+                // Pool may have restarted (in-memory store lost). Treat as retryable.
+                throw new Error('request status not found (pool restart)');
+              }
+            } catch (pollErr: any) {
+              // Polling hiccup — keep polling until total budget expires.
+              console.warn(`⏳ ${functionName} poll error (${pollErr?.message || 'unknown'}), continuing...`);
+            }
+          }
+          return { data: null, error: new Error(`poll timeout after ${POLL_TIMEOUT_MS}ms for ${rid}`) };
+        }
 
         // invoke() never throws — it resolves with { data, error }. A non-null
         // error (real failure OR our timeout) means this attempt didn't produce a

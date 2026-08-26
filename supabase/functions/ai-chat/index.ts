@@ -5941,6 +5941,14 @@ Deno.serve(async (req) => {
       );
     }
     
+    // ====== ASYNC-BACKGROUND EXECUTION ======
+    // The LLM call (deepseek-v4-flash:cloud) can take ~40-120s and was blocking the
+    // POST response, tripping the frontend's 45s invokeWithTimeoutAndRetry and dropping
+    // to Office Clerk ("due to system capacity"). Run the work detached and return the
+    // request_id immediately; the frontend polls GET /ai-chat?request_id= for the result.
+    let bgBody = body;
+    // Reuse the already-parsed body + req via closure; run detached.
+    void (async () => {
     const query = userQuery || messages[messages.length - 1]?.content || '';
     
     const ipAddress = IPSessionManager.extractIP(req);
@@ -6019,6 +6027,14 @@ Deno.serve(async (req) => {
           previousToolResults
         );
         
+        completeRequest(requestId, {
+          success: true,
+          content: ambiguousResponse,
+          provider: 'context_aware',
+          hasToolCalls: false,
+          session_id: sessionId
+        });
+        
         return new Response(
           JSON.stringify({
             success: true,
@@ -6059,6 +6075,7 @@ Deno.serve(async (req) => {
     
     if (!shouldExecuteTools) {
       clearTimeout(timeoutId);
+      completeRequest(requestId, { success: true, content: "How can I help you?", provider: 'context_aware', hasToolCalls: false, session_id: sessionId });
       return new Response(
         JSON.stringify({
           success: true,
@@ -6279,6 +6296,20 @@ Deno.serve(async (req) => {
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
     
+    })();
+    
+    clearTimeout(timeoutId);
+    // Return immediately — the result will be stored and pollable via request_id.
+    return new Response(
+      JSON.stringify({
+        success: true,
+        status: 'processing',
+        request_id: requestId,
+        message: 'AI request accepted. Poll GET /functions/v1/ai-chat?request_id=' + requestId + ' for the result.'
+      }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+    );
+
   } catch (error: any) {
     clearTimeout(timeoutId);
     

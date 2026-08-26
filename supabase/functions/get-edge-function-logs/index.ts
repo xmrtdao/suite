@@ -78,6 +78,9 @@ const KNOWN_FUNCTIONS = [
   
   // Self-Optimizing
   'self-optimizing-agent-architecture',
+
+  // Elze Contract Suite (relay-local functions)
+  'lease-analyzer', 'lease_analyzer', 'lease-builder', 'lease-writer', 'docx-redline',
 ];
 
 interface LogQueryParams {
@@ -245,12 +248,48 @@ serve(async (req) => {
         console.log(`📋 Found ${apiCallLogs.length} api_call_logs entries for ${funcName}`);
       }
 
+      // SOURCE 4: eliza_activity_log (authoritative edge-function activity feed).
+      // This is where the relay writes invocations via logEdgeFunctionCall ->
+      // logToDb (activity_type='edge_function', metadata->'function_name').
+      // The other tables (eliza_function_usage, system_logs, api_call_logs) are
+      // often EMPTY for relay-local functions like lease-analyzer, so this is the
+      // source that actually has the data. Use the GIN jsonb containment index
+      // (idx_eliza_activity_metadata_gin) to avoid a full-table scan.
+      let activityLogs: any[] = [];
+      const activityQuery = supabase
+        .from('eliza_activity_log')
+        .select('*')
+        .eq('activity_type', 'edge_function')
+        .contains('metadata', { function_name: funcName })
+        .gte('created_at', timeThreshold.toISOString())
+        .order('created_at', { ascending: false })
+        .limit(limit);
+      const { data: actLogs, error: activityError } = await activityQuery;
+      if (!activityError && actLogs) {
+        activityLogs = actLogs.map(log => ({
+          id: log.id,
+          function_name: log.metadata?.function_name || funcName,
+          success: log.description === 'completed',
+          execution_time_ms: log.metadata?.duration_ms || null,
+          error_message: log.description === 'failed' ? (log.metadata?.error || log.status) : null,
+          invoked_at: log.created_at,
+          source: 'eliza_activity_log',
+          status: log.status,
+          metadata: log.metadata,
+          agent_id: log.agent_id
+        }));
+        console.log(`📋 Found ${activityLogs.length} eliza_activity_log entries for ${funcName}`);
+      } else if (activityError) {
+        console.error(`❌ Error fetching eliza_activity_log for ${funcName}:`, activityError);
+      }
+
       if (usageError) {
         console.error(`❌ Error fetching logs for ${funcName}:`, usageError);
         functionResults[funcName] = { 
           error: usageError.message,
           system_logs: systemLogs,
-          api_call_logs: apiCallLogs
+          api_call_logs: apiCallLogs,
+          eliza_activity_log: activityLogs
         };
         continue;
       }
@@ -259,7 +298,8 @@ serve(async (req) => {
       const allLogs = [
         ...(usageLogs || []).map(l => ({ ...l, source: 'eliza_function_usage' })),
         ...systemLogs,
-        ...apiCallLogs
+        ...apiCallLogs,
+        ...activityLogs
       ].sort((a, b) => new Date(b.invoked_at).getTime() - new Date(a.invoked_at).getTime());
 
       functionResults[funcName] = {
@@ -268,6 +308,7 @@ serve(async (req) => {
           eliza_function_usage: usageLogs?.length || 0,
           system_logs: systemLogs.length,
           api_call_logs: apiCallLogs.length,
+          eliza_activity_log: activityLogs.length,
           total_merged: allLogs.length
         }
       };

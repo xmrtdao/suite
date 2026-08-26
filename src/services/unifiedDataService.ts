@@ -174,8 +174,14 @@ class UnifiedDataService {
     try {
       console.log('📊 UnifiedData: Fetching mining statistics...');
       
-      // Use Supabase proxy endpoint which handles CORS
-      const base = import.meta.env.VITE_SUPABASE_URL || 'http://127.0.0.1:54321';
+      // Use Supabase proxy endpoint which handles CORS.
+      // The Suite SPA is ALWAYS served by the relay (localhost:8080 locally,
+      // suite.mobilemonero.com through the tunnel). The relay proxies /functions/v1,
+      // so the relay origin is the correct base everywhere. Prefer window.location.origin
+      // over VITE_SUPABASE_URL — a hardcoded 127.0.0.1:54321 breaks on the tunnel.
+      const base = typeof window !== 'undefined'
+        ? window.location.origin
+        : (import.meta.env.VITE_SUPABASE_URL || 'http://127.0.0.1:8080');
       const response = await fetch(`${base}/functions/v1/mining-proxy`);
       
       if (!response.ok) {

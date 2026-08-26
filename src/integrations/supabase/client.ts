@@ -2,8 +2,17 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+// The Suite SPA is ALWAYS served by the relay (localhost:8080 locally,
+// suite.mobilemonero.com through the tunnel). The relay proxies BOTH
+// /functions/v1 and /rest/v1 to local-sb (54321), so the relay origin is the
+// correct Supabase base in every environment. Prefer window.location.origin
+// over VITE_SUPABASE_URL — a hardcoded 127.0.0.1:54321 breaks on the tunnel
+// (127.0.0.1 is the device itself, so the ai-chat edge function call fails
+// and the chat falls back to Office Clerk).
+const SUPABASE_URL = typeof window !== 'undefined'
+  ? window.location.origin
+  : (import.meta.env.VITE_SUPABASE_URL || 'http://127.0.0.1:8080');
+const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || 'local-anon-key';
 
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
