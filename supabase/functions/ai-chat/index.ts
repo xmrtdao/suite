@@ -1,8 +1,29 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.46.2";
 
+// ========== ASYNC REQUEST STATUS STORE ==========
+// Added by Eliza async-wrap: lets the handler return request_id immediately
+// and lets the frontend poll for the result, avoiding the 120s ceiling 502.
+const requestStatusStore = new Map();
+function registerRequest(requestId) {
+  requestStatusStore.set(requestId, { status: 'processing', startedAt: Date.now(), result: null, error: null });
+}
+function completeRequest(requestId, result) {
+  const entry = requestStatusStore.get(requestId);
+  if (entry) { entry.status = 'done'; entry.result = result; entry.completedAt = Date.now(); }
+}
+function failRequest(requestId, error) {
+  const entry = requestStatusStore.get(requestId);
+  if (entry) { entry.status = 'error'; entry.error = error; entry.completedAt = Date.now(); }
+}
+function getRequestStatus(requestId) {
+  const entry = requestStatusStore.get(requestId);
+  if (!entry) return { status: 'not_found', request_id: requestId };
+  return { status: entry.status, request_id: requestId, started_at: entry.startedAt, completed_at: entry.completedAt || null, result: entry.result, error: entry.error };
+}
+
 // ========== ENVIRONMENT CONFIGURATION ==========
-const SUPABASE_URL = Deno.env.get('NEXT_PUBLIC_SUPABASE_URL') || Deno.env.get('SUPABASE_URL') || 'https://vawouugtzwmejxqkeqqj.supabase.co';
+const SUPABASE_URL = Deno.env.get('NEXT_PUBLIC_SUPABASE_URL') || Deno.env.get('SUPABASE_URL') || 'http://127.0.0.1:54321';
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
 // API Keys
@@ -11,7 +32,9 @@ const DEEPSEEK_API_KEY = Deno.env.get('DEEPSEEK_API_KEY') || '';
 const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY') || '';
 const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY') || '';
 const OLLAMA_API_KEY = Deno.env.get('OLLAMA_API_KEY') || '';
+const OLLAMA_XMRT_API_KEY = Deno.env.get('OLLAMA_XMRT_API_KEY') || '';  // XMRT account — the WORKING key (matches relay ollama-chat.mjs getOllamaXmrtKey); primary OLLAMA_API_KEY is past-due/403
 const OLLAMA_HERMES_API_KEY = Deno.env.get('OLLAMA_HERMES_API_KEY') || '';  // second Ollama account (separate weekly quota) — failover on 429
+const OLLAMA_3RD_API_KEY = Deno.env.get('OLLAMA_3RD_API_KEY') || '';  // third Ollama account — matches relay ollama-chat.mjs cascade
 const OLLAMA_LOCAL_HOST = Deno.env.get('OLLAMA_HOST') || 'http://localhost:11434';
 const OLLAMA_LOCAL_MODEL = Deno.env.get('OLLAMA_LOCAL_MODEL') || '';  // explicit override for local Ollama model (e.g. gemma3:1b)
 
@@ -317,7 +340,7 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     name: 'Ollama Pro Cloud',
     enabled: true,
     apiKey: OLLAMA_API_KEY,
-    endpoint: `${OLLAMA_LOCAL_HOST}/v1/chat/completions`,
+    endpoint: 'https://ollama.com/v1/chat/completions',
     models: [Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud'],
     // deepseek-v4-flash:cloud supports native function calling (tools capability
     // confirmed in Ollama model manifest). callOllama() sends tools to the model
@@ -355,8 +378,8 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
   ollama_local: {
     name: 'Ollama Local',
     enabled: false,  // disabled — 6GB laptop cannot run local models
-    apiKey: '',
-    endpoint: 'https://ollama.com/v1/chat/completions',
+    apiKey: OLLAMA_API_KEY,
+    endpoint: `${OLLAMA_LOCAL_HOST}/v1/chat/completions`,
     models: [Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud', 'gemma4', 'gemma3', 'mistral-small3.2', 'qwen3.5'],
     supportsTools: true,  // text-based tool calling works with any model
     timeoutMs: 10000,  // 8.9GB model on 6GB RAM will never respond; fast-fail to cloud
@@ -369,7 +392,7 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     name: 'OpenAI',
     enabled: !!OPENAI_API_KEY,
     apiKey: OPENAI_API_KEY,
-    endpoint: 'https://ollama.com/v1/chat/completions',
+    endpoint: 'https://api.openai.com/v1/chat/completions',
     models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'],
     supportsTools: true,
     timeoutMs: 90000,
@@ -382,7 +405,7 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     name: 'DeepSeek',
     enabled: !!DEEPSEEK_API_KEY,
     apiKey: DEEPSEEK_API_KEY,
-    endpoint: 'https://ollama.com/v1/chat/completions',
+    endpoint: 'https://api.deepseek.com/v1/chat/completions',
     models: ['deepseek-chat', 'deepseek-coder'],
     supportsTools: true,
     timeoutMs: 90000,
@@ -395,7 +418,7 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     name: 'Anthropic Claude',
     enabled: !!ANTHROPIC_API_KEY,
     apiKey: ANTHROPIC_API_KEY,
-    endpoint: 'https://ollama.com/v1/chat/completions',
+    endpoint: 'https://api.anthropic.com/v1/messages',
     models: ['claude-3-5-haiku-20241022', 'claude-3-opus-20240229', 'claude-3-sonnet-20240229'],
     supportsTools: false,
     timeoutMs: 90000,
@@ -408,8 +431,8 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     name: 'Kimi K2 (OpenRouter)',
     enabled: !!OPENROUTER_API_KEY,
     apiKey: OPENROUTER_API_KEY,
-    endpoint: 'https://ollama.com/v1/chat/completions',
-    models: ['moonshotai/kimi-k2'],
+    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    models: ['deepseek/deepseek-v4-flash'],
     supportsTools: true,
     timeoutMs: 90000,
     priority: 5,
@@ -3034,7 +3057,7 @@ async function callKimiFallback(messages: any[], tools?: any[]): Promise<any> {
         'X-Title': 'XMRT Eliza'
       },
       body: JSON.stringify({
-        model: 'moonshotai/kimi-k2',
+        model: 'deepseek/deepseek-v4-flash',
         messages: enhancedMessages,
         tools,
         tool_choice: tools ? (forceTools ? 'required' : 'auto') : undefined,
@@ -3053,7 +3076,7 @@ async function callKimiFallback(messages: any[], tools?: any[]): Promise<any> {
         content: data.choices?.[0]?.message?.content || '',
         tool_calls: data.choices?.[0]?.message?.tool_calls || [],
         provider: 'openrouter',
-        model: 'moonshotai/kimi-k2'
+        model: 'deepseek/deepseek-v4-flash'
       };
     } else {
       const errorText = await response.text();
@@ -3588,11 +3611,19 @@ class EnhancedProviderCascade {
   }
   
   private async callOllama(messages: any[], tools: any[], controller: AbortController, providerName: 'ollama' | 'ollama_hermes' = 'ollama'): Promise<CascadeResult> {
-    const apiKey = providerName === 'ollama_hermes' ? OLLAMA_HERMES_API_KEY : OLLAMA_API_KEY;
-    if (!apiKey) {
-      return { success: false, provider: providerName, error: `${providerName === 'ollama_hermes' ? 'OLLAMA_HERMES_API_KEY' : 'OLLAMA_API_KEY'} not configured` };
+    // Cascade through all configured Ollama keys (primary, hermes, 3rd) —
+    // mirrors the relay's tryOllamaCloud() in relay/tools/ollama-chat.mjs so
+    // the suite chat uses the SAME Ollama Cloud sources and fallbacks as the
+    // relay fleet chat. Each key is a separate weekly quota; try them in order.
+    const keys = [
+      { key: OLLAMA_API_KEY, label: 'primary' },
+      { key: OLLAMA_XMRT_API_KEY, label: 'xmrt' },
+      { key: OLLAMA_HERMES_API_KEY, label: 'hermes' },
+      { key: OLLAMA_3RD_API_KEY, label: '3rd' },
+    ].filter(k => k.key);
+    if (keys.length === 0) {
+      return { success: false, provider: providerName, error: 'No OLLAMA_API_KEY configured' };
     }
-    console.log(`[ai-chat] ${providerName} api key length: ${apiKey.length}, model: ${Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud'}`);
 
     // Normalize messages (strip non-text content parts for Ollama API)
     const cleanMessages = messages.map((msg: any) => ({
@@ -3603,83 +3634,90 @@ class EnhancedProviderCascade {
 
     const model = Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud';
     const needsTools = tools.length > 0 && needsDataRetrieval(messages);
-    try {
-      const body: Record<string, any> = {
-        model,
-        messages: cleanMessages,
-        max_tokens: 4096,
-        temperature: 0.7,
-        stream: false,
-      };
-      if (tools.length > 0) {
-        body.tools = tools;
-        // Use "auto" (model decides) instead of "required" (force tool call).
-        // "required" causes the model to go into infinite reasoning loops on
-        // ambiguous/follow-up queries like "Tell me more" or "ok, so it's a
-        // good thing" because it MUST call a tool but doesn't know which one.
-        // "auto" lets the model answer conversationally when no tool is needed
-        // and call a tool when the query actually requires live data.
-        body.tool_choice = 'auto';
-      }
+    let lastError: string | null = null;
+    for (const { key, label } of keys) {
+      try {
+        const body: Record<string, any> = {
+          model,
+          messages: cleanMessages,
+          max_tokens: 4096,
+          temperature: 0.7,
+          stream: false,
+        };
+        if (tools.length > 0) {
+          body.tools = tools;
+          // Use "auto" (model decides) instead of "required" (force tool call).
+          // "required" causes the model to go into infinite reasoning loops on
+          // ambiguous/follow-up queries like "Tell me more" or "ok, so it's a
+          // good thing" because it MUST call a tool but doesn't know which one.
+          // "auto" lets the model answer conversationally when no tool is needed
+          // and call a tool when the query actually requires live data.
+          body.tool_choice = 'auto';
+        }
 
-      const response = await fetch(AI_PROVIDERS_CONFIG[providerName].endpoint || 'https://ollama.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(body),
-        signal: controller.signal
-      });
+        const response = await fetch('https://ollama.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${key}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(body),
+          signal: controller.signal
+        });
 
-      if (!response.ok) {
-        const errText = await response.text();
-        return { success: false, provider: providerName, error: `HTTP ${response.status}: ${errText.slice(0, 200)}` };
-      }
+        if (!response.ok) {
+          const errText = await response.text();
+          lastError = `HTTP ${response.status} (${label}): ${errText.slice(0, 200)}`;
+          continue; // try next key
+        }
 
-      const data = await response.json();
-      console.log(`[callOllama] finish_reason=${data.choices?.[0]?.finish_reason}, hasToolCalls=${!!data.choices?.[0]?.message?.tool_calls}`);
-      const message = data.choices?.[0]?.message;
+        const data = await response.json();
+        console.log(`[callOllama] finish_reason=${data.choices?.[0]?.finish_reason}, hasToolCalls=${!!data.choices?.[0]?.message?.tool_calls}`);
+        const message = data.choices?.[0]?.message;
 
-      if (message?.tool_calls?.length > 0) {
+        if (message?.tool_calls?.length > 0) {
+          return {
+            success: true,
+            tool_calls: message.tool_calls,
+            provider: providerName,
+            model
+          };
+        }
+
+        // deepseek-v4-flash sometimes puts the entire reply in `reasoning`
+        // with empty `content` (finish_reason:"stop"). However, the reasoning
+        // field is INTERNAL model monologue (e.g. "wait, let me re-read the
+        // conversation...") — NOT a user-facing response. Do NOT fall back to
+        // reasoning content. If content is empty but reasoning exists, the
+        // model went into a thinking loop without producing an answer — treat
+        // it as a failure so the cascade can try the next provider.
+        const content = message?.content || '';
+        if (!content) {
+          await debugLog('callOllama.empty_response', {
+            provider: providerName,
+            finishReason: data.choices?.[0]?.finish_reason,
+            hasToolCalls: !!message?.tool_calls,
+            toolCallsLen: message?.tool_calls?.length ?? -1,
+            hasReasoning: !!(message?.reasoning || message?.reasoning_content),
+            usage: data.usage,
+            raw: JSON.stringify(data).slice(0, 600)
+          });
+          lastError = 'Empty response from Ollama';
+          continue; // try next key
+        }
         return {
           success: true,
-          tool_calls: message.tool_calls,
           provider: providerName,
+          content,
+          tool_calls: [],
           model
         };
+      } catch (error: any) {
+        lastError = error.message || 'Ollama request failed';
+        continue; // try next key
       }
-
-      // deepseek-v4-flash sometimes puts the entire reply in `reasoning`
-      // with empty `content` (finish_reason:"stop"). However, the reasoning
-      // field is INTERNAL model monologue (e.g. "wait, let me re-read the
-      // conversation...") — NOT a user-facing response. Do NOT fall back to
-      // reasoning content. If content is empty but reasoning exists, the
-      // model went into a thinking loop without producing an answer — treat
-      // it as a failure so the cascade can try the next provider.
-      const content = message?.content || '';
-      if (!content) {
-        await debugLog('callOllama.empty_response', {
-          provider: providerName,
-          finishReason: data.choices?.[0]?.finish_reason,
-          hasToolCalls: !!message?.tool_calls,
-          toolCallsLen: message?.tool_calls?.length ?? -1,
-          hasReasoning: !!(message?.reasoning || message?.reasoning_content),
-          usage: data.usage,
-          raw: JSON.stringify(data).slice(0, 600)
-        });
-        return { success: false, provider: providerName, error: 'Empty response from Ollama' };
-      }
-      return {
-        success: true,
-        provider: providerName,
-        content,
-        tool_calls: [],
-        model
-      };
-    } catch (error: any) {
-      return { success: false, provider: providerName, error: error.message || 'Ollama request failed' };
     }
+    return { success: false, provider: providerName, error: lastError || 'All Ollama keys failed' };
   }
 
   /**
@@ -3913,7 +3951,7 @@ IMPORTANT: When the user asks about fleet state, mining data, system status, tas
         'X-Title': 'XMRT Eliza'
       },
       body: JSON.stringify({
-        model: 'moonshotai/kimi-k2',
+        model: 'deepseek/deepseek-v4-flash',
         messages: messages,
         temperature: 0.9,
         max_tokens: RESPONSE_MAX_TOKENS,
@@ -3942,7 +3980,7 @@ IMPORTANT: When the user asks about fleet state, mining data, system status, tas
         success: true,
         tool_calls: message.tool_calls,
         provider: 'kimi',
-        model: 'moonshotai/kimi-k2'
+        model: 'deepseek/deepseek-v4-flash'
       };
     }
     
@@ -3950,7 +3988,7 @@ IMPORTANT: When the user asks about fleet state, mining data, system status, tas
       success: true,
       content: message.content || '',
       provider: 'kimi',
-      model: 'moonshotai/kimi-k2'
+      model: 'deepseek/deepseek-v4-flash'
     };
   }
   
@@ -4594,59 +4632,70 @@ You may call MULTIPLE functions in a single response.`
   // Fall back to cloud Ollama Pro if local fails
   console.log('Local Ollama failed, trying Ollama Pro fallback...');
 
-  if (!OLLAMA_API_KEY) {
+  // Cascade through all configured Ollama keys (primary, hermes, 3rd) —
+  // mirrors the relay's tryOllamaCloud() so the suite uses the SAME sources.
+  const keys = [
+    { key: OLLAMA_API_KEY, label: 'primary' },
+    { key: OLLAMA_XMRT_API_KEY, label: 'xmrt' },
+    { key: OLLAMA_HERMES_API_KEY, label: 'hermes' },
+    { key: OLLAMA_3RD_API_KEY, label: '3rd' },
+  ].filter(k => k.key);
+  if (keys.length === 0) {
     console.warn('OLLAMA_API_KEY not configured');
     return null;
   }
 
-  try {
-    const cleanMessages = messages.map((msg: any) => ({
-      role: msg.role,
-      content: typeof msg.content === 'string' ? msg.content :
-               (msg.content?.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n') || '')
-    }));
+  for (const { key, label } of keys) {
+    try {
+      const cleanMessages = messages.map((msg: any) => ({
+        role: msg.role,
+        content: typeof msg.content === 'string' ? msg.content :
+                 (msg.content?.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n') || '')
+      }));
 
-    const response = await fetch('https://ollama.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${OLLAMA_API_KEY}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        model: Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud',
-        messages: cleanMessages,
-        max_tokens: 4096,
-        temperature: 0.7,
-        stream: false
-      }),
-      signal: AbortSignal.timeout(60000)
-    });
+      const response = await fetch('https://ollama.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${key}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model: Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud',
+          messages: cleanMessages,
+          max_tokens: 4096,
+          temperature: 0.7,
+          stream: false
+        }),
+        signal: AbortSignal.timeout(60000)
+      });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.warn('Ollama Pro fallback HTTP ' + response.status + ': ' + errorText.slice(0, 100));
-      return null;
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.warn(`Ollama Pro fallback HTTP ${response.status} (${label}): ` + errorText.slice(0, 100));
+        continue; // try next key
+      }
+
+      const data = await response.json();
+      const content = data.choices?.[0]?.message?.content || '';
+
+      if (!content) {
+        console.warn(`Ollama Pro fallback returned empty content (${label})`);
+        continue; // try next key
+      }
+
+      console.log('Ollama Pro fallback successful');
+      return {
+        content,
+        tool_calls: [],
+        provider: 'ollama-pro',
+        model: Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud'
+      };
+    } catch (error: any) {
+      console.warn(`Ollama Pro fallback failed (${label}): ` + (error.message || error));
+      continue; // try next key
     }
-
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || '';
-
-    if (!content) {
-      console.warn('Ollama Pro fallback returned empty content');
-      return null;
-    }
-
-    console.log('Ollama Pro fallback successful');
-    return {
-      content,
-      tool_calls: [],
-      provider: 'ollama-pro',
-      model: Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud'
-    };
-  } catch (error: any) {
-    console.warn('Ollama Pro fallback failed: ' + (error.message || error));
-    return null;
   }
+  return null;
 }
 
 // ========== EMERGENCY STATIC FALLBACK ==========
@@ -5685,6 +5734,7 @@ const ELIZA_TOOLS = [
 Deno.serve(async (req) => {
   const startTime = Date.now();
   const requestId = generateRequestId();
+  registerRequest(requestId);
   
   const timeoutController = new AbortController();
   const timeoutId = setTimeout(() => timeoutController.abort(), REQUEST_TIMEOUT_MS);
@@ -5697,6 +5747,17 @@ Deno.serve(async (req) => {
     
     if (req.method === 'GET') {
       clearTimeout(timeoutId);
+      
+      // ASYNC WRAP: if a request_id is provided, return its status instead of
+      // the operational snapshot. Lets the frontend poll a long-running request.
+      const url = new URL(req.url);
+      const rid = url.searchParams.get('request_id');
+      if (rid) {
+        return new Response(
+          JSON.stringify(getRequestStatus(rid)),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
       
       const { count: toolCount } = await supabase
         .from(DATABASE_CONFIG.tables.ai_tools)
@@ -6134,6 +6195,14 @@ Deno.serve(async (req) => {
         []
       );
       
+      completeRequest(requestId, {
+        success: true,
+        content: emergencyResult.content,
+        provider: 'fallback',
+        hasToolCalls: false,
+        session_id: sessionId
+      });
+      
       return new Response(
         JSON.stringify({
           success: true,
@@ -6179,6 +6248,15 @@ Deno.serve(async (req) => {
     
     clearTimeout(timeoutId);
     
+    completeRequest(requestId, {
+      success: true,
+      content: finalContent,
+      provider: initialResult.provider,
+      model: initialResult.model,
+      toolsExecuted,
+      session_id: sessionId
+    });
+    
     return new Response(
       JSON.stringify({
         success: true,
@@ -6207,6 +6285,7 @@ Deno.serve(async (req) => {
     console.error(`💥 Critical error for request ${requestId}:`, error);
     
     if (error.name === 'AbortError') {
+      failRequest(requestId, 'Request timeout');
       return new Response(
         JSON.stringify({
           success: false,
@@ -6220,6 +6299,7 @@ Deno.serve(async (req) => {
       );
     }
     
+    failRequest(requestId, error.message || 'Internal server error');
     return new Response(
       JSON.stringify({
         success: false,
