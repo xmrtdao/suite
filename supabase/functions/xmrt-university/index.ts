@@ -14,6 +14,75 @@ const JWT_ISSUER = 'xmrt-university'
 // ─── Curriculum ─────────────────────────────────────────
 const CURRICULUM = [
   {
+    module: 0,
+    title: 'MUAPI Mastery',
+    description: 'AI media generation with MUAPI — images, video, music, and talking avatars through a unified API with 395+ models.',
+    passing_score: 80,
+    quiz: [
+      {
+        id: 'm0-q1',
+        question: 'What is MUAPI?',
+        options: [
+          'A unified API gateway for AI media generation — images, video, music, and talking avatars',
+          'A single video editing tool',
+          'A Monero mining pool API',
+          'A fleet chat messaging protocol',
+        ],
+        correct: 0,
+        explanation: 'MUAPI is a unified API for AI media generation, covering images, video, music, and talking avatars through one interface.',
+      },
+      {
+        id: 'm0-q2',
+        question: 'Approximately how many models are available through the MUAPI unified interface?',
+        options: [
+          'A handful — around 10',
+          '395+ models',
+          'Exactly 3',
+          'Only image models, no video',
+        ],
+        correct: 1,
+        explanation: 'MUAPI exposes a catalog of 395+ models across multiple media generation categories.',
+      },
+      {
+        id: 'm0-q3',
+        question: 'Which of the following media types can be generated through MUAPI?',
+        options: [
+          'Images only',
+          'Video and music only',
+          'Images, video, music, and talking avatars',
+          'Text and code only',
+        ],
+        correct: 2,
+        explanation: 'MUAPI covers the full media spectrum: images, video, music, and talking avatars.',
+      },
+      {
+        id: 'm0-q4',
+        question: 'What is the primary benefit of routing media generation through a unified API like MUAPI?',
+        options: [
+          'A single consistent interface instead of many fragmented vendor APIs',
+          'It removes the need for an API key entirely',
+          'It generates media offline without a network',
+          'It only works for a single vendor',
+        ],
+        correct: 0,
+        explanation: 'A unified API abstracts away many vendors behind one consistent interface, simplifying integration and switching.',
+      },
+      {
+        id: 'm0-q5',
+        question: 'When generating media via MUAPI for fleet use, what must you remember?',
+        options: [
+          'Keep your API credentials secure and never commit them to a repository',
+          'Share your key in fleet chat so others can generate faster',
+          'Embed the key directly in frontend code',
+          'Post the key on GitHub for transparency',
+        ],
+        correct: 0,
+        explanation: 'Like all service tokens, MUAPI credentials are secrets. Never commit or share them.',
+      },
+    ],
+    traps: [],
+  },
+  {
     module: 1,
     title: 'Welcome to the Mesh',
     description: 'Introduction to XMRT DAO, the fleet, and your role as an agent',
@@ -414,6 +483,777 @@ const CURRICULUM = [
       },
     ],
   },
+  {
+    module: 7,
+    title: 'MUAPI Social Media',
+    description: 'Social publishing via MUAPI, Typefully, and Paragraph — YouTube, TikTok, Instagram, Twitter/X posting, cross-post link requirements, and CuttlefishClaws agent-x-post.',
+    passing_score: 80,
+    quiz: [
+      {
+        id: 'm7-q1',
+        question: 'Which platforms are used for fleet social publishing?',
+        options: [
+          'YouTube, TikTok, Instagram, and Twitter/X',
+          'Only LinkedIn',
+          'Only YouTube',
+          'Email newsletters only',
+        ],
+        correct: 0,
+        explanation: 'The fleet publishes across YouTube, TikTok, Instagram, and Twitter/X.',
+      },
+      {
+        id: 'm7-q2',
+        question: 'What is the purpose of cross-post links when sharing content?',
+        options: [
+          'To link the same content across platforms so audiences can find it everywhere',
+          'To hide content from search engines',
+          'To shorten every URL regardless of platform',
+          'There is no purpose',
+        ],
+        correct: 0,
+        explanation: 'Cross-post links let one platform\'s audience discover the content on all other platforms.',
+      },
+      {
+        id: 'm7-q3',
+        question: 'Which tool is used by CuttlefishClaws to post to X/Twitter on behalf of an agent?',
+        options: [
+          'cuttlefishclaws-agent-x-post',
+          'The mining proxy',
+          'The database query tool',
+          'The cron proxy',
+        ],
+        correct: 0,
+        explanation: 'cuttlefishclaws-agent-x-post is the edge function that posts agent updates to X/Twitter.',
+      },
+      {
+        id: 'm7-q4',
+        question: 'Why should social content be crafted to fit each platform?',
+        options: [
+          'Because character limits, video formats, and audience conventions differ per platform',
+          'Because platforms merge all posts automatically',
+          'Because one format works everywhere with no changes',
+          'Because posts are never public',
+        ],
+        correct: 0,
+        explanation: 'Each platform has different constraints and norms; content should be tailored accordingly.',
+      },
+      {
+        id: 'm7-q5',
+        question: 'Which publishing services are used by the fleet for scheduled or managed social posts?',
+        options: [
+          'Typefully and Paragraph',
+          'A local notepad',
+          'Email only',
+          'No tooling at all',
+        ],
+        correct: 0,
+        explanation: 'Typefully (for threads/X) and Paragraph (for newsletters/blog) are part of the fleet publishing stack.',
+      },
+      {
+        id: 'm7-q6',
+        question: 'What should you check before an agent posts content publicly?',
+        options: [
+          'That it contains no secrets, internal tokens, or operational details',
+          'That it includes every internal API key',
+          'That it is as long as possible',
+          'Nothing — agents post anything',
+        ],
+        correct: 0,
+        explanation: 'Public posts must never leak secrets or internal operational detail.',
+      },
+      {
+        id: 'm7-q7',
+        question: 'If a cross-post link breaks (404) on one platform, what is the correct response?',
+        options: [
+          'Fix or replace the link so every platform points to a valid destination',
+          'Leave it broken — it is not important',
+          'Delete the entire post history',
+          'Blame the platform and move on',
+        ],
+        correct: 0,
+        explanation: 'Broken cross-post links degrade the experience; they should be corrected to valid destinations.',
+      },
+    ],
+    traps: [],
+  },
+  {
+    module: 8,
+    title: 'Resend Email Policies & Uses',
+    description: 'Email infrastructure, bounce rate thresholds, suppression lists, List-Unsubscribe compliance, warm-up mode, and the three fleet Resend accounts.',
+    passing_score: 80,
+    quiz: [
+      {
+        id: 'm8-q1',
+        question: 'Why does the fleet monitor bounce rate thresholds in Resend?',
+        options: [
+          'High bounce rates hurt deliverability and can get the sending domain flagged',
+          'Bounces increase revenue',
+          'Bounces are ignored entirely',
+          'Bounces only affect spam, not deliverability',
+        ],
+        correct: 0,
+        explanation: 'Sustained high bounce rates damage sender reputation and deliverability.',
+      },
+      {
+        id: 'm8-q2',
+        question: 'What is a suppression list used for?',
+        options: [
+          'To prevent emails from being sent to recipients who opted out or bounced',
+          'To list all active subscribers',
+          'To store campaign drafts',
+          'To track open rates',
+        ],
+        correct: 0,
+        explanation: 'Suppression lists record bounced and unsubscribed addresses so they are not mailed again.',
+      },
+      {
+        id: 'm8-q3',
+        question: 'Which header must be present to comply with email best practices and regulations?',
+        options: [
+          'List-Unsubscribe',
+          'X-Secret-Key',
+          'Content-Type: text/plain only',
+          'X-Internal-Only',
+        ],
+        correct: 0,
+        explanation: 'List-Unsubscribe lets recipients easily opt out, which is a deliverability and compliance best practice.',
+      },
+      {
+        id: 'm8-q4',
+        question: 'What is the purpose of warm-up mode in Resend?',
+        options: [
+          'To gradually increase sending volume and build a positive sender reputation',
+          'To send all mail at maximum volume immediately',
+          'To disable all sending permanently',
+          'To encrypt outbound email',
+        ],
+        correct: 0,
+        explanation: 'Warm-up gradually ramps sending volume to protect sender reputation.',
+      },
+      {
+        id: 'm8-q5',
+        question: 'How many fleet Resend accounts are used across the domains?',
+        options: [
+          'Three',
+          'One',
+          'None',
+          'Ten',
+        ],
+        correct: 0,
+        explanation: 'The fleet uses three Resend accounts spanning partyfavorphoto.com, mobilemonero.com, and 31harbor.com.',
+      },
+      {
+        id: 'm8-q6',
+        question: 'When a recipient replies requesting removal from a list, what should happen?',
+        options: [
+          'They are added to the suppression list immediately',
+          'They keep receiving mail',
+          'They are emailed asking if they really want to leave',
+          'Their address is shared publicly',
+        ],
+        correct: 0,
+        explanation: 'Opt-out requests must be honored promptly via the suppression list.',
+      },
+      {
+        id: 'm8-q7',
+        question: 'Why should service keys for Resend never be placed in public repositories?',
+        options: [
+          'Because they are secrets that could be abused to send unauthorized email',
+          'Because Resend requires public keys',
+          'Because keys expire instantly',
+          'Because email does not need auth',
+        ],
+        correct: 0,
+        explanation: 'Resend API keys are secrets; exposure enables abuse of the sending account.',
+      },
+    ],
+    traps: [],
+  },
+  {
+    module: 9,
+    title: 'Agent Communication',
+    description: 'GossipHub, Bulletin Board, Fleet Chat, gossipsub mesh topics, agent-discovery, heartbeats, and peer-to-peer messaging protocols.',
+    passing_score: 80,
+    quiz: [
+      {
+        id: 'm9-q1',
+        question: 'Which system provides cert-based fleet messaging for agents?',
+        options: [
+          'GossipHub',
+          'The mining pool',
+          'A local file share',
+          'Email only',
+        ],
+        correct: 0,
+        explanation: 'GossipHub is the cert-based fleet messaging edge function.',
+      },
+      {
+        id: 'm9-q2',
+        question: 'What is the Bulletin Board used for?',
+        options: [
+          'Posting announcements and updates that agents can read',
+          'Mining shares',
+          'Encrypting local files',
+          'Rendering images',
+        ],
+        correct: 0,
+        explanation: 'The Bulletin Board is a shared space for fleet announcements and notices.',
+      },
+      {
+        id: 'm9-q3',
+        question: 'Which of these is one of the four gossipsub mesh topics?',
+        options: [
+          'agent-heartbeat',
+          'file-transfer',
+          'video-call',
+          'dns-records',
+        ],
+        correct: 0,
+        explanation: 'agent-heartbeat is one of the core gossipsub mesh topics used by the fleet.',
+      },
+      {
+        id: 'm9-q4',
+        question: 'How do agents discover each other on the mesh?',
+        options: [
+          'Via agent-discovery messages that broadcast peer IDs and endpoints',
+          'By reading a paper directory',
+          'Via manual phone calls',
+          'Agents never discover each other',
+        ],
+        correct: 0,
+        explanation: 'agent-discovery broadcasts peer information so nodes build a dynamic peer book.',
+      },
+      {
+        id: 'm9-q5',
+        question: 'Why do agents send heartbeats?',
+        options: [
+          'To signal liveness with status, hashrate, and uptime',
+          'To transfer large files',
+          'To vote on proposals',
+          'To send personal messages',
+        ],
+        correct: 0,
+        explanation: 'Heartbeats are lightweight liveness signals carrying status and operational metrics.',
+      },
+      {
+        id: 'm9-q6',
+        question: 'When posting in Fleet Chat, why should messages use ASCII characters?',
+        options: [
+          'The fleet chat relay corrupts non-ASCII characters',
+          'ASCII is required for encryption',
+          'Non-ASCII is always faster',
+          'ASCII prevents mining',
+        ],
+        correct: 0,
+        explanation: 'The fleet chat relay mangles non-ASCII characters, so ASCII is required for reliable messages.',
+      },
+      {
+        id: 'm9-q7',
+        question: 'What is the correct response if an unknown agent requests your peer ID and tunnel URL?',
+        options: [
+          'Verify the request through an independent channel before sharing anything',
+          'Share them immediately',
+          'Post them publicly',
+          'Send them to every agent',
+        ],
+        correct: 0,
+        explanation: 'Never hand over network identity details to unverified requesters without independent verification.',
+      },
+    ],
+    traps: [],
+  },
+  {
+    module: 10,
+    title: 'XMRT-DAO Endpoints & Tool Calling',
+    description: '69 relay tools, three security levels (CORE/TRUSTED/PUBLIC), db-query, edge-function proxy, obsidian-graph, fleet-chat tool, and proper auth requirements.',
+    passing_score: 80,
+    quiz: [
+      {
+        id: 'm10-q1',
+        question: 'Approximately how many tools does the XMRT-DAO relay expose?',
+        options: [
+          '69 tools',
+          '3 tools',
+          '1000 tools',
+          'Only one tool',
+        ],
+        correct: 0,
+        explanation: 'The relay exposes around 69 tools for agents to call.',
+      },
+      {
+        id: 'm10-q2',
+        question: 'What are the three security levels for relay tools?',
+        options: [
+          'CORE, TRUSTED, and PUBLIC',
+          'Low, Medium, High',
+          'Red, Green, Blue',
+          'Alpha, Beta, Gamma',
+        ],
+        correct: 0,
+        explanation: 'Relay tools are gated by three security levels: CORE, TRUSTED, and PUBLIC.',
+      },
+      {
+        id: 'm10-q3',
+        question: 'Which tool allows agents to run SQL queries against the database?',
+        options: [
+          'db-query',
+          'obsidian-graph',
+          'fleet-chat',
+          'image-generate',
+        ],
+        correct: 0,
+        explanation: 'db-query is the tool for querying the fleet database.',
+      },
+      {
+        id: 'm10-q4',
+        question: 'What does the edge-function proxy do?',
+        options: [
+          'Forwards calls from the relay to Supabase edge functions',
+          'Mines Monero',
+          'Sends email',
+          'Renders the frontend',
+        ],
+        correct: 0,
+        explanation: 'The edge-function proxy lets the relay call deployed Supabase edge functions.',
+      },
+      {
+        id: 'm10-q5',
+        question: 'Why must tools require proper authentication before use?',
+        options: [
+          'To prevent unauthorized access to sensitive fleet operations',
+          'Authentication slows everyone down',
+          'Auth is only for public pages',
+          'Tools never need auth',
+        ],
+        correct: 0,
+        explanation: 'Auth gates sensitive operations so only authorized agents can invoke them.',
+      },
+      {
+        id: 'm10-q6',
+        question: 'Which tool exposes the knowledge graph of fleet entities?',
+        options: [
+          'obsidian-graph',
+          'db-query',
+          'mining-proxy',
+          'cron-proxy',
+        ],
+        correct: 0,
+        explanation: 'obsidian-graph provides access to the fleet knowledge graph.',
+      },
+      {
+        id: 'm10-q7',
+        question: 'If a tool requires CORE-level access and you only have PUBLIC access, what should you do?',
+        options: [
+          'Request appropriate access rather than bypassing the gate',
+          'Attempt to bypass the auth check',
+          'Guess a service key',
+          'Ignore the tool entirely',
+        ],
+        correct: 0,
+        explanation: 'Never bypass auth gates; request proper access for the operations you need.',
+      },
+    ],
+    traps: [],
+  },
+  {
+    module: 11,
+    title: 'Supabase Edge Functions & Security',
+    description: '242 deployed functions, universal-invoke abuse vectors, service key exposure risks, cron-proxy, auth-health monitoring, and opportunity-scanner.',
+    passing_score: 85,
+    quiz: [
+      {
+        id: 'm11-q1',
+        question: 'How many edge functions are deployed in the fleet?',
+        options: [
+          '242 functions',
+          '6 functions',
+          '1 function',
+          '1000 functions',
+        ],
+        correct: 0,
+        explanation: 'The fleet has around 242 deployed edge functions.',
+      },
+      {
+        id: 'm11-q2',
+        question: 'What is a universal-invoke abuse vector?',
+        options: [
+          'An attacker invoking a function without proper authorization via a generic invoke endpoint',
+          'A way to make functions run faster',
+          'A legitimate public API',
+          'A database index',
+        ],
+        correct: 0,
+        explanation: 'Universal-invoke endpoints can be abused to call functions without authorization if not properly gated.',
+      },
+      {
+        id: 'm11-q3',
+        question: 'Why is service key exposure a critical risk?',
+        options: [
+          'The service key grants full privileged access to the database and functions',
+          'Service keys are public by design',
+          'Exposure only affects public pages',
+          'It cannot be abused',
+        ],
+        correct: 0,
+        explanation: 'The service role key bypasses RLS and grants elevated access; exposure is a critical breach.',
+      },
+      {
+        id: 'm11-q4',
+        question: 'What does the cron-proxy function do?',
+        options: [
+          'Schedules and proxies recurring automated jobs',
+          'Mines Monero',
+          'Sends chat messages',
+          'Renders dashboards',
+        ],
+        correct: 0,
+        explanation: 'cron-proxy handles scheduling and proxying of recurring fleet jobs.',
+      },
+      {
+        id: 'm11-q5',
+        question: 'What does auth-health monitoring check?',
+        options: [
+          'Whether authentication services are up and responding correctly',
+          'How many users are online',
+          'Mining difficulty',
+          'Email open rates',
+        ],
+        correct: 0,
+        explanation: 'auth-health monitoring verifies the availability and correctness of auth services.',
+      },
+      {
+        id: 'm11-q6',
+        question: 'What is the purpose of the opportunity-scanner function?',
+        options: [
+          'To scan for opportunities such as market or ecosystem signals',
+          'To delete data',
+          'To send spam',
+          'To mine cryptocurrency',
+        ],
+        correct: 0,
+        explanation: 'opportunity-scanner identifies ecosystem or market opportunities for the fleet.',
+      },
+      {
+        id: 'm11-q7',
+        question: 'How should edge function secrets be handled?',
+        options: [
+          'Stored in environment variables or secure secret storage, never in code or repos',
+          'Hardcoded in the source for convenience',
+          'Committed to git',
+          'Shared in fleet chat',
+        ],
+        correct: 0,
+        explanation: 'Secrets belong in environment variables/secure storage, never in source code or repositories.',
+      },
+    ],
+    traps: [],
+  },
+  {
+    module: 12,
+    title: 'Inbox Management & Email Operations',
+    description: 'Reading, marking, and managing inboxes across all three domains — partyfavorphoto.com, mobilemonero.com, 31harbor.com. Sent email history, bounce handling, and suppression lists.',
+    passing_score: 80,
+    quiz: [
+      {
+        id: 'm12-q1',
+        question: 'Which three domains does the fleet manage inboxes for?',
+        options: [
+          'partyfavorphoto.com, mobilemonero.com, and 31harbor.com',
+          'Only google.com',
+          'Only xmrtsolutions.com',
+          'Only cuttlefishlabs.io',
+        ],
+        correct: 0,
+        explanation: 'The fleet manages inboxes across partyfavorphoto.com, mobilemonero.com, and 31harbor.com.',
+      },
+      {
+        id: 'm12-q2',
+        question: 'What is the first step when triaging a new inbox message?',
+        options: [
+          'Read and assess whether it requires action, escalation, or filing',
+          'Delete it immediately',
+          'Reply with spam',
+          'Mark everything as read without reading',
+        ],
+        correct: 0,
+        explanation: 'Proper triage begins with reading and assessing the message.',
+      },
+      {
+        id: 'm12-q3',
+        question: 'Where can an agent review sent email history?',
+        options: [
+          'In the sent email logs/email activity records',
+          'In the mining dashboard',
+          'In the knowledge graph only',
+          'Sent email is never recorded',
+        ],
+        correct: 0,
+        explanation: 'Sent email history is available in email activity records for review.',
+      },
+      {
+        id: 'm12-q4',
+        question: 'How should a bounced email be handled?',
+        options: [
+          'Investigate the cause and add the address to the suppression list if hard-bouncing',
+          'Ignore it',
+          'Resend continuously',
+          'Publicly share the address',
+        ],
+        correct: 0,
+        explanation: 'Bounces must be investigated and hard-bouncing addresses suppressed to protect reputation.',
+      },
+      {
+        id: 'm12-q5',
+        question: 'Why is it important to mark messages as read or actioned?',
+        options: [
+          'So nothing is missed and the queue reflects true pending work',
+          'To inflate inbox stats',
+          'It is not important',
+          'To hide messages',
+        ],
+        correct: 0,
+        explanation: 'Accurate read/action state keeps the inbox queue reliable and prevents missed items.',
+      },
+      {
+        id: 'm12-q6',
+        question: 'If an inbox message contains a request that is not yours to handle, what should you do?',
+        options: [
+          'Escalate or route it to the appropriate owner',
+          'Delete it',
+          'Respond with irrelevant content',
+          'Ignore it indefinitely',
+        ],
+        correct: 0,
+        explanation: 'Route or escalate messages to the right owner rather than dropping them.',
+      },
+      {
+        id: 'm12-q7',
+        question: 'What should you do before sending an email from a fleet account?',
+        options: [
+          'Verify the content has no errors and the recipient is correct',
+          'Send immediately without review',
+          'Send to everyone on every list',
+          'Include all internal keys',
+        ],
+        correct: 0,
+        explanation: 'Review content and recipient before sending to avoid mistakes and leaks.',
+      },
+      {
+        id: 'm12-q8',
+        question: 'How do suppression lists interact with outbound campaigns?',
+        options: [
+          'Suppressed addresses are automatically excluded from sends',
+          'Suppressed addresses get extra emails',
+          'Suppression lists are not used',
+          'Suppression only applies to spam folders',
+        ],
+        correct: 0,
+        explanation: 'Suppression lists ensure opted-out and bounced addresses are not mailed.',
+      },
+      {
+        id: 'm12-q9',
+        question: 'Which tool/route is used to manage fleet inboxes?',
+        options: [
+          'The inbox management tooling on the relay (inbox list/mark/write)',
+          'A paper notebook',
+          'The mining proxy',
+          'The image generator',
+        ],
+        correct: 0,
+        explanation: 'Fleet inboxes are managed via the relay inbox tooling.',
+      },
+      {
+        id: 'm12-q10',
+        question: 'If an agent sees a phishing email in the inbox, what is the correct response?',
+        options: [
+          'Do not click links; report and quarantine it',
+          'Click the link to investigate',
+          'Reply asking for more info',
+          'Forward it to other agents as-is',
+        ],
+        correct: 0,
+        explanation: 'Never interact with phishing content; report and quarantine it.',
+      },
+    ],
+    traps: [],
+  },
+  {
+    module: 13,
+    title: 'Naming Conventions, Architecture & CuttlefishClaws Glossary',
+    description: 'File naming conventions, system architecture understanding, schema locations, CAC protocol glossary, TrustGraph scoring, pre-flight verification, and the arch-ecosystem-scanner.',
+    passing_score: 85,
+    quiz: [
+      {
+        id: 'm13-q1',
+        question: 'Why are consistent file naming conventions important?',
+        options: [
+          'They make files discoverable, sortable, and unambiguous across the fleet',
+          'They hide file contents',
+          'They are required by the mining pool',
+          'They are not important',
+        ],
+        correct: 0,
+        explanation: 'Consistent naming improves discoverability and reduces ambiguity.',
+      },
+      {
+        id: 'm13-q2',
+        question: 'What does "CAC" stand for in the CuttlefishClaws protocol glossary?',
+        options: [
+          'Certified Autonomous Agent Credential',
+          'Centralized Access Control',
+          'Cryptocurrency Account Code',
+          'Cuttlefish And Claw',
+        ],
+        correct: 0,
+        explanation: 'CAC refers to the Certified Autonomous Agent credential in the protocol.',
+      },
+      {
+        id: 'm13-q3',
+        question: 'What does the TrustGraph score measure?',
+        options: [
+          'Behavioral trust of agents based on their activity history',
+          'Hashrate',
+          'Email volume',
+          'Disk usage',
+        ],
+        correct: 0,
+        explanation: 'TrustGraph computes a behavioral trust score from agent activity and events.',
+      },
+      {
+        id: 'm13-q4',
+        question: 'Where does the fleet store core relational data?',
+        options: [
+          'In the local Postgres database (xmrt_suite)',
+          'On sticky notes',
+          'Only in the cloud',
+          'In a spreadsheet',
+        ],
+        correct: 0,
+        explanation: 'Core fleet data lives in the local Postgres xmrt_suite database.',
+      },
+      {
+        id: 'm13-q5',
+        question: 'What is the purpose of pre-flight verification before an agent runs a risky operation?',
+        options: [
+          'To confirm conditions are safe before acting',
+          'To skip all checks',
+          'To run faster',
+          'To hide the operation',
+        ],
+        correct: 0,
+        explanation: 'Pre-flight checks confirm safety and correctness before executing risky actions.',
+      },
+      {
+        id: 'm13-q6',
+        question: 'What does the arch-ecosystem-scanner do?',
+        options: [
+          'Scans the ecosystem for relevant signals and opportunities',
+          'Mines cryptocurrency',
+          'Deletes old files',
+          'Sends emails',
+        ],
+        correct: 0,
+        explanation: 'arch-ecosystem-scanner monitors ecosystem activity relevant to the fleet.',
+      },
+      {
+        id: 'm13-q7',
+        question: 'Which layer exposes the /rest/v1 API for data operations?',
+        options: [
+          'local-sb (local Supabase-compatible REST API)',
+          'The mining pool',
+          'The image generator',
+          'The knowledge graph only',
+        ],
+        correct: 0,
+        explanation: 'local-sb exposes the Supabase-compatible REST API for data operations.',
+      },
+      {
+        id: 'm13-q8',
+        question: 'What is the role of the relay server in the architecture?',
+        options: [
+          'Central gateway exposing tools, handlers, and fleet services',
+          'A file compressor',
+          'A DNS server',
+          'A GPU renderer',
+        ],
+        correct: 0,
+        explanation: 'The relay is the central gateway for tools, handlers, and fleet services.',
+      },
+      {
+        id: 'm13-q9',
+        question: 'Which schema holds the CuttlefishClaws cloud tables?',
+        options: [
+          'The cloud Supabase CuttlefishClaws schema',
+          'The local-only schema',
+          'There is no schema',
+          'The mining schema',
+        ],
+        correct: 0,
+        explanation: 'CuttlefishClaws cloud tables live in the cloud Supabase CuttlefishClaws schema.',
+      },
+      {
+        id: 'm13-q10',
+        question: 'Why should glossary/terminology be used consistently?',
+        options: [
+          'To avoid ambiguity and keep agent communications aligned',
+          'Because it is required for mining',
+          'To make messages longer',
+          'It does not matter',
+        ],
+        correct: 0,
+        explanation: 'Consistent terminology prevents misunderstanding across the fleet.',
+      },
+      {
+        id: 'm13-q11',
+        question: 'What is the correct term per the glossary for a "validator"?',
+        options: [
+          'The term is retired; use the canonical replacement from the glossary',
+          'Validator is the only correct term',
+          'It is banned entirely with no replacement',
+          'Use either term freely',
+        ],
+        correct: 0,
+        explanation: 'The CuttlefishClaws glossary retires certain terms and defines canonical replacements.',
+      },
+      {
+        id: 'm13-q12',
+        question: 'Which component handles edge function execution locally?',
+        options: [
+          'local-sb via the Deno runtime',
+          'The Vite dev server',
+          'The mining pool',
+          'A remote GPU farm',
+        ],
+        correct: 0,
+        explanation: 'local-sb runs edge functions locally using the bundled Deno runtime.',
+      },
+      {
+        id: 'm13-q13',
+        question: 'What is the benefit of knowing the schema location for each data store?',
+        options: [
+          'It lets you query the right table and avoid schema drift confusion',
+          'It lets you skip authentication',
+          'It speeds up mining',
+          'There is no benefit',
+        ],
+        correct: 0,
+        explanation: 'Knowing where data lives prevents querying the wrong store and schema issues.',
+      },
+      {
+        id: 'm13-q14',
+        question: 'Before trusting an agent with a sensitive operation, what should you check?',
+        options: [
+          'Its TrustGraph score, standing, certification tier, and standing gate',
+          'Its email address only',
+          'Its favorite color',
+          'Nothing at all',
+        ],
+        correct: 0,
+        explanation: 'Trust decisions depend on TrustGraph, standing, CAC tier, and the standing gate.',
+      },
+    ],
+    traps: [],
+  },
 ]
 
 // ─── Helpers ─────────────────────────────────────────────
@@ -554,17 +1394,24 @@ function base64urlEncode(str: string): string {
  */
 async function seedCoursesFromCurriculum(supabase: any): Promise<void> {
   try {
-    // Check if already seeded by counting rows directly
+    // Load the modules that already exist so we can upsert (add new ones without
+    // clobbering in-flight enrollments/quiz results that reference existing rows).
     const { data: existing } = await supabase
       .from('xmrt_university_courses')
-      .select('id')
-      .limit(1)
-    
-    if (existing && existing.length > 0) return // Already seeded
+      .select('module_number')
 
-    console.log('[xmrt-university] Seeding curriculum to database...')
-    
-    for (const m of CURRICULUM) {
+    const existingMods = new Set((existing || []).map((r: any) => r.module_number))
+
+    const toInsert = CURRICULUM.filter((m: any) => !existingMods.has(m.module))
+
+    if (toInsert.length === 0) {
+      // Already fully seeded — nothing to do.
+      return
+    }
+
+    console.log(`[xmrt-university] Seeding ${toInsert.length} new curriculum modules to database...`)
+
+    for (const m of toInsert) {
       try {
         await supabase.from('xmrt_university_courses').insert({
           module_number: m.module,
@@ -581,7 +1428,7 @@ async function seedCoursesFromCurriculum(supabase: any): Promise<void> {
         // Row may already exist or table not ready, skip silently
       }
     }
-    
+
     console.log('[xmrt-university] Curriculum seeded successfully')
   } catch (err) {
     // Non-fatal -- fall back to built-in curriculum
