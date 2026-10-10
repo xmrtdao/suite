@@ -478,6 +478,11 @@ const ChatMessage = React.memo(({ message }: { message: UnifiedMessage }) => {
                     ⚡ Office Clerk
                   </span>
                 )}
+                {message.provenance === 'local' && (
+                  <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200" title="Answered by the Office Clerk's small-model layer — local Ollama when offline, free hosted fallback otherwise">
+                    🏢 Local Model
+                  </span>
+                )}
               </span>
               {message.sender === 'assistant' && message.providerUsed && (
                 <span className="text-[10px] text-muted-foreground/70 font-medium">
@@ -1968,7 +1973,10 @@ const [messages, setMessages] = useState<UnifiedMessage[]>([]);
         const clerkRes = await fetch('/api/clerk/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: trimmedInput }),
+          // l1:false keeps this call millisecond-fast (deterministic table
+          // only). The slow local-model path is reserved for when the cloud
+          // cascade fails — see the catch block below.
+          body: JSON.stringify({ message: trimmedInput, l1: false }),
           signal: AbortSignal.timeout(8000),
         });
         if (clerkRes.ok) {
@@ -1979,7 +1987,7 @@ const [messages, setMessages] = useState<UnifiedMessage[]>([]);
               content: clerkOut.text,
               sender: 'assistant',
               timestamp: new Date(),
-              provenance: 'deterministic',
+              provenance: clerkOut.provenance === 'local' ? 'local' : 'deterministic',
             };
             setMessages(prev => [...prev, clerkMessage]);
             setIsProcessing(false);
@@ -2349,6 +2357,33 @@ const [messages, setMessages] = useState<UnifiedMessage[]>([]);
 
     } catch (error) {
       console.error('❌ Chat error:', error);
+
+      // 🏢 Cloud cascade failed — give the Office Clerk's tiny local model a
+      // shot before showing an error. Slow (CPU inference, up to ~75s) but
+      // fully offline, which is exactly the situation we're in when the
+      // cascade is unreachable.
+      try {
+        const l1Res = await fetch('/api/clerk/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: trimmedInput, l1: true }),
+          signal: AbortSignal.timeout(75000),
+        });
+        if (l1Res.ok) {
+          const l1Out = await l1Res.json();
+          if (l1Out && !l1Out.miss && l1Out.text) {
+            const l1Message: UnifiedMessage = {
+              id: `clerk-l1-${Date.now()}`,
+              content: l1Out.text,
+              sender: 'assistant',
+              timestamp: new Date(),
+              provenance: l1Out.provenance === 'local' ? 'local' : 'deterministic',
+            };
+            setMessages(prev => [...prev, l1Message]);
+            return;
+          }
+        }
+      } catch { /* local model also unavailable — fall through to the error */ }
 
       // Import intelligent error handler
       const { IntelligentErrorHandler } = await import('@/services/intelligentErrorHandler');
