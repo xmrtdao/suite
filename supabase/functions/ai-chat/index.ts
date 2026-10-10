@@ -148,6 +148,37 @@ async function fetchWithTimeout(url: string, init: RequestInit = {}, timeoutMs: 
 // Fetch a single tool result from the relay's /tools/run endpoint.
 let _currentAgentId = 'ai-chat-local-context';
 function setCurrentAgentId(id: string) { _currentAgentId = id; }
+
+// ── Fleet presence: announce this executive to the XMRT Nexus relay ─────
+// Eliza is a hardcoded CORE agent (relay/lib/agent-auth.mjs), but the Nexus
+// dashboard builds its live fleet view from /api/fleet/heartbeat reporters —
+// without a beat she never shows up. Beat at most once per 5 min per warm
+// worker so the share ledger doesn't fill with noise.
+let _lastHeartbeatAt = 0;
+function announceFleetPresence(): void {
+  const now = Date.now();
+  if (now - _lastHeartbeatAt < 5 * 60 * 1000) return;
+  _lastHeartbeatAt = now;
+  const agentId = EXECUTIVE_NAME.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+  fetchWithTimeout(`${RELAY_BASE_URL}/api/fleet/heartbeat`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-agent-id': agentId,
+      ...(RELAY_API_KEY ? { 'x-api-key': RELAY_API_KEY } : {}),
+    },
+    body: JSON.stringify({
+      agent_id: agentId,
+      name: `${EXECUTIVE_NAME} (Suite ai-chat)`,
+      role: 'CORE',
+      status: 'ONLINE',
+      version: '6.0.0-solution-engine',
+      capabilities: ['chat', 'tool-calling', 'relay-tools'],
+      device_type: 'edge-function',
+      metadata: { source: 'suite/ai-chat' },
+    }),
+  }, 5000).catch(() => { /* presence is best-effort */ });
+}
 async function callRelayTool(tool: string, args: Record<string, unknown> = {}): Promise<unknown | null> {
   try {
     const headers: Record<string, string> = { 'Content-Type': 'application/json', 'x-agent-id': _currentAgentId };
@@ -6523,6 +6554,8 @@ Deno.serve(async (req) => {
     // Handle both JSON and multipart/form-data (file uploads)
     let body: any;
     try {
+      // Announce fleet presence on real chat traffic (throttled internally)
+      announceFleetPresence();
       const contentType = req.headers.get('content-type') || '';
       if (contentType.includes('multipart/form-data')) {
         // Parse multipart form data (file uploads from UnifiedChat)
