@@ -3124,6 +3124,75 @@ function parseToolCodeBlocks(content: string): Array<any> | null {
   return toolCalls.length > 0 ? toolCalls : null;
 }
 
+// Nemotron and other OpenRouter free-tier models emit tool calls as a raw
+// JSON array — [[{"name":"fleet_pulse","parameters":{}}]] — instead of any of
+// the fenced/marker formats above. Without this parser the blob was returned
+// to the user as chat text and the tool never ran.
+function parseJsonArrayToolCalls(content: string): Array<any> | null {
+  const trimmed = (content || '').trim();
+  const openCh = trimmed[0];
+  if (openCh !== '[' && openCh !== '{') return null;
+  // Extract every balanced {...} block and keep the ones that parse and carry
+  // a tool-ish name. Balancing per-object (instead of requiring the whole
+  // payload to be valid JSON) tolerates the truncated wrappers small models
+  // emit, e.g. `[[ {"name": "fleet_pulse", "parameters": {}} ]`.
+  const blocks: any[] = [];
+  let depth = 0, inStr = false, esc = false, start = -1;
+  for (let i = 0; i < trimmed.length; i++) {
+    const ch = trimmed[i];
+    if (esc) { esc = false; continue; }
+    if (ch === '\\') { esc = true; continue; }
+    if (ch === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (ch === '{') { if (depth === 0) start = i; depth++; }
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0 && start >= 0) {
+        try {
+          const obj = JSON.parse(trimmed.slice(start, i + 1));
+          if (obj && typeof obj === 'object' && typeof obj.name === 'string' && /^[\w:.-]+$/.test(obj.name)) {
+            blocks.push(obj);
+          }
+        } catch { /* not a clean object — skip */ }
+        start = -1;
+      }
+    }
+  }
+  if (blocks.length === 0) return null;
+  return blocks.map((x: any, i: number) => ({
+    id: `jsonarr_${Date.now()}_${i}`,
+    type: 'function',
+    function: {
+      name: x.name,
+      arguments: JSON.stringify(x.parameters ?? x.arguments ?? x.args ?? {}),
+    },
+  }));
+}
+
+// Qwen/minimax-style XML dialect:
+// <tool_call><function=aside-push><parameter=kind>markdown</parameter>...</function></tool_call>
+function parseXmlToolCalls(content: string): Array<any> | null {
+  if (!content || !content.includes('<tool_call>')) return null;
+  const toolCalls: Array<any> = [];
+  const callRegex = /<tool_call>\s*<function=([\w:.-]+)>([\s\S]*?)<\/function>\s*<\/tool_call>/g;
+  let m;
+  while ((m = callRegex.exec(content)) !== null) {
+    const name = m[1];
+    const params: Record<string, string> = {};
+    const paramRegex = /<parameter=([\w-]+)>\s*([\s\S]*?)<\/parameter>/g;
+    let p;
+    while ((p = paramRegex.exec(m[2])) !== null) {
+      params[p[1]] = p[2].trim();
+    }
+    toolCalls.push({
+      id: `xml_${Date.now()}_${toolCalls.length}`,
+      type: 'function',
+      function: { name, arguments: JSON.stringify(params) },
+    });
+  }
+  return toolCalls.length > 0 ? toolCalls : null;
+}
+
 function parseConversationalToolIntent(content: string): Array<any> | null {
   const toolCalls: Array<any> = [];
   const patterns = [
@@ -4158,6 +4227,8 @@ IMPORTANT: When the user asks about fleet state, mining data, system status, tas
       let tool_calls: any[] = [];
       const parsed = parseDeepSeekToolCalls(content) ||
                      parseToolCodeBlocks(content) ||
+                     parseJsonArrayToolCalls(content) ||
+                     parseXmlToolCalls(content) ||
                      parseConversationalToolIntent(content);
       if (parsed && parsed.length > 0) {
         tool_calls = parsed;
@@ -4666,8 +4737,11 @@ async function executeToolsWithIteration(
     let toolCalls = response.tool_calls || [];
     
     if ((!toolCalls || toolCalls.length === 0) && response.content) {
-      const textToolCalls = parseToolCodeBlocks(response.content) || 
+      console.log('🔎 text-parse attempt, content head:', JSON.stringify(String(response.content).slice(0, 100)));
+      const textToolCalls = parseToolCodeBlocks(response.content) ||
                            parseDeepSeekToolCalls(response.content) ||
+                           parseJsonArrayToolCalls(response.content) ||
+                           parseXmlToolCalls(response.content) ||
                            parseConversationalToolIntent(response.content);
       if (textToolCalls && textToolCalls.length > 0) {
         toolCalls = textToolCalls;
@@ -4827,7 +4901,32 @@ async function executeToolsWithIteration(
   
   // Final safety net: strip any artifacts that may have been introduced by the synthesis step
   finalContent = stripToolCallArtifacts(finalContent);
-  
+
+  // ── Last-chance tool execution ──────────────────────────────────
+  // Small models sometimes emit the intended tool call (aside-push is the
+  // common case) AS the final answer text, especially from the synthesis
+  // path where no tools are offered. If the whole final answer parses as a
+  // tool call, execute it once and replace the blob with a confirmation.
+  const trailingCall = parseJsonArrayToolCalls(finalContent) || parseXmlToolCalls(finalContent);
+  if (trailingCall && trailingCall.length > 0) {
+    console.log(`🔧 Post-answer tool call detected in final content: ${trailingCall.map((t: any) => t.function.name).join(', ')}`);
+    const names: string[] = [];
+    for (const tc of trailingCall) {
+      await executeRealToolCall(
+        tc.function.name,
+        tc.function.arguments,
+        executiveName,
+        sessionId,
+        ipAddress,
+        Date.now()
+      );
+      totalToolsExecuted++;
+      executedToolCalls.push(tc);
+      names.push(tc.function.name);
+    }
+    finalContent = `Done — ${names.join(', ')} executed.`;
+  }
+
   return { content: finalContent, toolsExecuted: totalToolsExecuted, toolCalls: executedToolCalls };
 }
 
@@ -5156,6 +5255,8 @@ You may call MULTIPLE functions in a single response.`
         let tool_calls: any[] = [];
         const parsed = parseDeepSeekToolCalls(content) ||
                        parseToolCodeBlocks(content) ||
+                       parseJsonArrayToolCalls(content) ||
+                       parseXmlToolCalls(content) ||
                        parseConversationalToolIntent(content);
         if (parsed && parsed.length > 0) tool_calls = parsed;
 
