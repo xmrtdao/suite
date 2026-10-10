@@ -1263,7 +1263,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   {
     name: 'query-edge-analytics',
     url: 'https://vawouugtzwmejxqkeqqj.supabase.co/functions/v1/query-edge-analytics',
-    description: '🔍 Query Edge Analytics - Query Supabase Analytics',
+    description: '🔍 Query Edge Analytics - Query Edge Function Analytics',
     capabilities: ['Analytics queries', 'Performance data', 'Usage patterns'],
     category: 'monitoring',
     example_use: '{"function_name":"github-integration","time_range":"24h"}'
