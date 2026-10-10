@@ -57,6 +57,8 @@ interface UnifiedMessage {
   id: string;
   content: string;
   sender: 'user' | 'assistant';
+  // Where the answer came from: deterministic clerk / local model / cloud cascade
+  provenance?: 'deterministic' | 'local' | 'cloud';
   timestamp: Date;
   attachments?: {
     images?: string[];
@@ -469,7 +471,14 @@ const ChatMessage = React.memo(({ message }: { message: UnifiedMessage }) => {
             )}
 
             <div className="text-xs opacity-60 mt-2 flex items-center justify-between gap-2">
-              <span>{formatTime(message.timestamp)}</span>
+              <span className="flex items-center gap-2">
+                {formatTime(message.timestamp)}
+                {message.provenance === 'deterministic' && (
+                  <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200" title="Answered by the Office Clerk — deterministic, zero-AI, works offline">
+                    ⚡ Office Clerk
+                  </span>
+                )}
+              </span>
               {message.sender === 'assistant' && message.providerUsed && (
                 <span className="text-[10px] text-muted-foreground/70 font-medium">
                   via {message.providerUsed}
@@ -1947,6 +1956,40 @@ const [messages, setMessages] = useState<UnifiedMessage[]>([]);
       console.log('Conversation persistence error:', error);
     }
 
+    // ⚡ Office Clerk — deterministic first responder (zero-AI, offline-capable).
+    // The relay's clerk router matches the message against its wired intent
+    // table (status, tasks, mining, resources, remember/recall, aside, …).
+    // A confident match renders instantly and skips the cloud cascade — this
+    // is what keeps the chat useful with no internet. On a miss we keep the
+    // clerk's offline menu and surface it only if Eliza also fails below.
+    let clerkOfflineMenu: string | null = null;
+    if (currentAttachments.length === 0) {
+      try {
+        const clerkRes = await fetch('/api/clerk/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: trimmedInput }),
+          signal: AbortSignal.timeout(8000),
+        });
+        if (clerkRes.ok) {
+          const clerkOut = await clerkRes.json();
+          if (clerkOut && !clerkOut.miss && clerkOut.text) {
+            const clerkMessage: UnifiedMessage = {
+              id: `clerk-${Date.now()}`,
+              content: clerkOut.text,
+              sender: 'assistant',
+              timestamp: new Date(),
+              provenance: 'deterministic',
+            };
+            setMessages(prev => [...prev, clerkMessage]);
+            setIsProcessing(false);
+            return;
+          }
+          clerkOfflineMenu = clerkOut?.text || null;
+        }
+      } catch { /* relay unreachable — Eliza path below handles it */ }
+    }
+
     try {
       console.log('💬 Starting message processing:', messageText);
       console.log('🔧 Context:', { miningStats: !!miningStats, userContext: !!userContext });
@@ -2331,7 +2374,9 @@ const [messages, setMessages] = useState<UnifiedMessage[]>([]);
 
       const errorMessageObj: UnifiedMessage = {
         id: `error-${Date.now()}`,
-        content: errorContent,
+        content: clerkOfflineMenu
+          ? `${errorContent}\n\n---\n\n${clerkOfflineMenu}`
+          : errorContent,
         sender: 'assistant',
         timestamp: new Date()
       };
