@@ -3,6 +3,12 @@ import { supabase } from '@/integrations/supabase/client';
 
 type AppRole = 'user' | 'contributor' | 'moderator' | 'admin' | 'superadmin';
 
+interface ApiKeySession {
+  id: string;
+  email: string;
+  apiKey: string;
+}
+
 interface AuthContextType {
   user: { id: string; email: string } | null;
   session: any;
@@ -12,16 +18,61 @@ interface AuthContextType {
   isAuthenticated: boolean;
   isAdmin: boolean;
   isSuperadmin: boolean;
-  hasGoogleCloudConnection: boolean;
-  signInWithGoogle: (email?: string) => Promise<void>;
-  connectGoogleCloud: () => Promise<void>;
-  signInWithEmail: (email: string, password: string) => Promise<{ error: any }>;
-  signUpWithEmail: (email: string, password: string, fullName?: string) => Promise<{ error: any }>;
+  signInWithApiKey: (apiKey: string) => void;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+
+// Stable pseudo-user id for API-key sessions. Must be a syntactically valid
+// UUID: it gets compared against uuid columns (inbox_messages.user_id), and
+// Postgres rejects anything else with "invalid input syntax for type uuid".
+const API_KEY_USER_ID = '00000000-0000-4000-8000-000000000001';
+
+const isUuidLike = (value: unknown): boolean =>
+  typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+
+// API key is the only way in, so the store is named for that rather than for
+// the local-dev scaffold it replaced.
+const SESSION_KEY = 'suite-api-session';
+// Sessions issued under the old name. Read once and migrated on restore, so
+// shipping the rename does not sign every existing user out.
+const LEGACY_SESSION_KEY = 'local-dev-session';
+
+function persistSession(session: ApiKeySession): void {
+  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+}
+
+function readStoredSession(): ApiKeySession | null {
+  const raw = localStorage.getItem(SESSION_KEY) ?? localStorage.getItem(LEGACY_SESSION_KEY);
+  localStorage.removeItem(LEGACY_SESSION_KEY);
+  if (!raw) return null;
+
+  let parsed: any;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    localStorage.removeItem(SESSION_KEY);
+    return null;
+  }
+
+  // Both fields are load-bearing. An id that is not a uuid 500s every query
+  // that filters a uuid column; a session with no key cannot call anything.
+  // Drop the whole thing rather than half-use it.
+  if (!isUuidLike(parsed?.id) || typeof parsed?.apiKey !== 'string' || !parsed.apiKey) {
+    localStorage.removeItem(SESSION_KEY);
+    return null;
+  }
+
+  const session: ApiKeySession = {
+    id: parsed.id,
+    email: parsed.email ?? '',
+    apiKey: parsed.apiKey,
+  };
+  persistSession(session);
+  return session;
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<{ id: string; email: string } | null>(null);
@@ -30,83 +81,66 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [roles] = useState<AppRole[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Restore session from localStorage on mount (critical for page reloads)
+  // Restore the session on mount (critical for page reloads).
   useEffect(() => {
     const restoreSession = async () => {
+      // Try Supabase auth session first.
       try {
-        // Try Supabase auth session first
-        const { data: { session: sbSession }, error } = await supabase.auth.getSession();
+        const { data: { session: sbSession } } = await supabase.auth.getSession();
         if (sbSession?.user) {
           setUser({ id: sbSession.user.id, email: sbSession.user.email || '' });
           setSession(sbSession);
-          setIsLoading(false);
           return;
         }
       } catch {
-        // Supabase auth would throw in local-sb mode — that's ok
+        // Supabase auth throws in local-sb mode — that's ok.
       }
 
-      // Check URL query params for api_key (from GH Pages login redirect)
-      const params = new URLSearchParams(window.location.search);
-      const urlApiKey = params.get('api_key');
+      // ?api_key=... arrives from the login redirect.
+      const urlApiKey = new URLSearchParams(window.location.search).get('api_key')?.trim();
       if (urlApiKey) {
-        const sessionData = { id: 'api-key-user', email: 'api@suite.local', apiKey: urlApiKey };
-        setUser(sessionData);
-        setSession(sessionData);
-        localStorage.setItem('local-dev-session', JSON.stringify(sessionData));
-        // Clean URL — remove query params so they don't persist on refresh
+        // Strip the key from the URL so it does not survive in history or in a
+        // shared link.
         window.history.replaceState({}, '', window.location.pathname);
-        setIsLoading(false);
+        const fresh: ApiKeySession = { id: API_KEY_USER_ID, email: 'api@suite.local', apiKey: urlApiKey };
+        persistSession(fresh);
+        setUser(fresh);
+        setSession(fresh);
         return;
       }
 
-      // Local-dev fallback: check for an existing local-dev session in localStorage
-      const saved = localStorage.getItem('local-dev-session');
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          setUser(parsed);
-          setSession(parsed);
-        } catch {
-          localStorage.removeItem('local-dev-session');
-        }
+      const stored = readStoredSession();
+      if (stored) {
+        setUser(stored);
+        setSession(stored);
       }
-
-      setIsLoading(false);
     };
 
-    restoreSession();
+    // Every exit above — including a thrown one — has to clear isLoading.
+    // ProtectedLayout renders a spinner for as long as it is true, so an early
+    // return that skips this hangs the app on every route with no way out but
+    // clearing storage by hand.
+    restoreSession().finally(() => setIsLoading(false));
   }, []);
 
-  const signInWithGoogle = useCallback(async (_email?: string) => {
-    console.log('[Auth] Google sign-in bypassed for local dev');
-  }, []);
-
-  const connectGoogleCloud = useCallback(async () => {
-    console.log('[Auth] Google Cloud connect bypassed for local dev');
-  }, []);
-
-  const signInWithEmail = useCallback(async (_email: string, _password: string) => {
-    const sessionData = { id: 'local-dev', email: _email };
-    setUser(sessionData);
-    setSession(sessionData);
-    localStorage.setItem('local-dev-session', JSON.stringify(sessionData));
-    return { error: null };
-  }, []);
-
-  const signUpWithEmail = useCallback(async (_email: string, _password: string, _fullName?: string) => {
-    setUser({ id: 'local-dev', email: _email });
-    return { error: null };
+  const signInWithApiKey = useCallback((apiKey: string) => {
+    const key = apiKey.trim();
+    if (!key) throw new Error('Enter your API key');
+    const fresh: ApiKeySession = { id: API_KEY_USER_ID, email: 'api@suite.local', apiKey: key };
+    persistSession(fresh);
+    setUser(fresh);
+    setSession(fresh);
   }, []);
 
   const signOut = useCallback(async () => {
     setUser(null);
     setSession(null);
-    localStorage.removeItem('local-dev-session');
+    localStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(LEGACY_SESSION_KEY);
   }, []);
 
   const refreshProfile = useCallback(async () => {
-    // no-op for local dev
+    // no-op: API-key sessions carry no profile
   }, []);
 
   const value: AuthContextType = {
@@ -118,11 +152,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     isAuthenticated: !!user,
     isAdmin: roles.includes('admin') || roles.includes('superadmin'),
     isSuperadmin: roles.includes('superadmin'),
-    hasGoogleCloudConnection: false,
-    signInWithGoogle,
-    connectGoogleCloud,
-    signInWithEmail,
-    signUpWithEmail,
+    signInWithApiKey,
     signOut,
     refreshProfile,
   };

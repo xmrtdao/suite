@@ -12,7 +12,9 @@ import { ReasoningSteps, type ReasoningStep } from './ReasoningSteps';
 import { GitHubPATInput } from './GitHubContributorRegistration';
 import { mobilePermissionService } from '@/services/mobilePermissionService';
 import { formatTime } from '@/utils/dateFormatter';
-import { Send, Volume2, VolumeX, Trash2, Wifi, Users, Vote, Paperclip, X, Mic, MicOff, Video, VideoOff, Copy, Check } from 'lucide-react';
+import { Send, Volume2, VolumeX, Trash2, Wifi, Users, Vote, Paperclip, Mic, MicOff, Video, VideoOff, Copy, Check, Zap } from 'lucide-react';
+import { DocViewer } from './DocViewer';
+import { FileText } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
@@ -160,7 +162,7 @@ const ProcessingStickyNotes = React.memo(({ notes }: { notes: ProcessingStickyNo
 
           return (
           <div
-            key={note.id}
+            key={`${note.id}-${note.createdAt}`}
             className={`absolute right-0 w-[88px] rounded-[2px] border bg-gradient-to-br p-2 shadow-[0_14px_32px_rgba(120,93,10,0.18)] transition-all duration-700 sm:w-[116px] sm:p-2.5 ${note.rotationClassName} ${
               note.variant === 'error'
                 ? 'border-rose-400/80 from-rose-200/95 via-red-100 to-rose-50 shadow-[0_14px_32px_rgba(127,29,29,0.22)]'
@@ -542,7 +544,9 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   // Core state
   const { language } = useLanguage();
   const { profile } = useAuth();
-  const [messages, setMessages] = useState<UnifiedMessage[]>([]);
+  
+  const [activeDocAudit, setActiveDocAudit] = useState<{text: string, audit: any} | null>(null);
+const [messages, setMessages] = useState<UnifiedMessage[]>([]);
   const [conversationSummaries, setConversationSummaries] = useState<Array<{ summaryText: string; messageCount: number; createdAt: Date }>>([]);
   const [hasMoreMessages, setHasMoreMessages] = useState(false);
   const [loadingMoreMessages, setLoadingMoreMessages] = useState(false);
@@ -554,6 +558,19 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   const [hasUserEngaged, setHasUserEngaged] = useState(false); // Track if user has sent first message
   const [processingNotes, setProcessingNotes] = useState<ProcessingStickyNote[]>([]);
   const pendingNoteTimeoutsRef = useRef<number[]>([]);
+  // Tool calls observed for the in-flight request, keyed by tool name so the
+  // tool_pending → tool_running → tool_success transitions collapse into one
+  // entry. Fed by the eliza_activity_log realtime subscription (ai-chat writes
+  // activity_type tool_pending/tool_running/tool_success/tool_failed there with
+  // metadata.tool_name) and drained when the assistant message is built.
+  // Previously the sticky notes could never show tool activity because
+  // window.__lastElizaToolCalls was read but never written anywhere.
+  const toolCallsForTurnRef = useRef<Array<{
+    id: string;
+    function_name: string;
+    status: 'pending' | 'success' | 'failed';
+    execution_time_ms?: number;
+  }>>([]);
 
   // Office Clerk loading progress
   const [officeClerkProgress, setOfficeClerkProgress] = useState<{
@@ -613,6 +630,59 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   // Updated BEFORE the interval fires via assignment in component body below
   const handleSendMessageRef = useRef<((msg?: string) => void) | undefined>(undefined);
 
+  // ── Automation mode (ported concept from the old full-autonomy build) ────
+  // When enabled, the chat presses its own "Proceed Intelligently" quick
+  // response a fixed countdown after each assistant response, so a work
+  // session keeps moving without the user babysitting it. Council mode has
+  // its own auto-advance above; this covers direct (Eliza) mode.
+  const [automationEnabled, setAutomationEnabled] = useState(false);
+  const [automationCountdown, setAutomationCountdown] = useState<number | null>(null);
+  const automationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const AUTOMATION_ADVANCE_SECONDS = 15;
+
+  const clearAutomationTimer = useCallback(() => {
+    if (automationTimerRef.current) {
+      clearInterval(automationTimerRef.current);
+      automationTimerRef.current = null;
+    }
+    setAutomationCountdown(null);
+  }, []);
+
+  const scheduleAutomationAdvance = useCallback(() => {
+    clearAutomationTimer();
+    let remaining = AUTOMATION_ADVANCE_SECONDS;
+    setAutomationCountdown(remaining);
+    automationTimerRef.current = setInterval(() => {
+      remaining -= 1;
+      setAutomationCountdown(remaining);
+      if (remaining <= 0) {
+        clearAutomationTimer();
+        handleSendMessageRef.current?.('Proceed Intelligently');
+      }
+    }, 1000);
+  }, [clearAutomationTimer]);
+
+  const toggleAutomation = useCallback(() => {
+    setAutomationEnabled(prev => {
+      if (prev) clearAutomationTimer(); // turning off: stop any pending auto-press
+      return !prev;
+    });
+  }, [clearAutomationTimer]);
+
+  // Documents the chat produces open in the dynamic aside (Dashboard listens
+  // for 'suite:aside'); the embedded viewer below stays as a fallback for
+  // pages that have no aside host.
+  const showDocAudit = useCallback((doc: { text: string; audit: any } | null) => {
+    setActiveDocAudit(doc);
+    if (doc) {
+      try {
+        window.dispatchEvent(new CustomEvent('suite:aside', {
+          detail: { kind: 'doc', doc: { fileName: 'Document from chat', text: doc.text, audit: doc.audit } },
+        }));
+      } catch { /* no aside host on this page — embedded viewer covers it */ }
+    }
+  }, []);
+
   /**
    * Parse the synthesis output to extract the lead executive's next steps.
    * Returns a structured prompt string the council can act on, or null if
@@ -666,8 +736,8 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
     let noteToRemoveId: string | null = null;
 
     setProcessingNotes((prev) => {
-      const template = PROCESSING_STICKY_TEMPLATES[prev.length % PROCESSING_STICKY_TEMPLATES.length];
       const activeNotes = prev.filter((note) => !note.isFallingAway);
+      const template = PROCESSING_STICKY_TEMPLATES[activeNotes.length % PROCESSING_STICKY_TEMPLATES.length];
       const oldestActive = activeNotes[0];
       const newNote: ProcessingStickyNote = {
         ...template,
@@ -1042,6 +1112,40 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
         const isFailedActivity = activity.status === 'failed' || activity.status === 'error';
         enqueueProcessingNote(getActivityStickyText(activity), isFailedActivity ? 'error' : 'default');
 
+        // Tool activity → yellow sticky note + per-message tool list.
+        // ai-chat emits tool_pending/tool_running/tool_success/tool_failed with
+        // the tool name in metadata.tool_name. Collapse the lifecycle into one
+        // entry per tool and keep the strongest status seen.
+        const activityType = String(activity.activity_type || '').toLowerCase();
+        if (activityType.startsWith('tool_')) {
+          const metadata = (activity.metadata || {}) as Record<string, any>;
+          const toolName = metadata.tool_name || metadata.function_name;
+          if (toolName) {
+            const lifecycle = activityType.replace('tool_', '');
+            const status: 'pending' | 'success' | 'failed' =
+              lifecycle === 'success' || activity.status === 'completed' ? 'success'
+              : lifecycle === 'failed' || isFailedActivity ? 'failed'
+              : 'pending';
+            const duration = Number(metadata.duration_ms) || undefined;
+            const list = toolCallsForTurnRef.current;
+            const existingIdx = list.findIndex(t => t.function_name === toolName);
+            if (existingIdx === -1) {
+              list.push({
+                id: `tc-${activity.id || `${toolName}-${Date.now()}`}`,
+                function_name: toolName,
+                status,
+                execution_time_ms: duration,
+              });
+            } else {
+              list[existingIdx] = {
+                ...list[existingIdx],
+                status: status === 'pending' ? list[existingIdx].status : status,
+                execution_time_ms: duration ?? list[existingIdx].execution_time_ms,
+              };
+            }
+          }
+        }
+
         if (activity.status === 'completed' || activity.status === 'failed') {
           dropOldestProcessingNote();
         }
@@ -1054,7 +1158,12 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
     );
     unsubscribers.push(activityUnsub);
 
-    setRealtimeConnected(true);
+    // Only claim a live realtime connection when subscriptions actually
+    // established. The local emulator stubs /realtime/v1, so the manager
+    // returns no-op unsubscribes and nothing is connected — reporting
+    // "connected" here was simply untrue and hid that fact.
+    setRealtimeConnected(false);
+
     return () => unsubscribers.forEach(unsub => unsub());
   }, [userContext?.ip, enqueueProcessingNote, dropOldestProcessingNote]);
 
@@ -1088,6 +1197,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   useEffect(() => {
     return () => {
       if (autoAdvanceTimerRef.current) clearInterval(autoAdvanceTimerRef.current);
+      if (automationTimerRef.current) clearInterval(automationTimerRef.current);
     };
   }, []);
 
@@ -1368,6 +1478,9 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
     };
 
     setMessages(prev => [...prev, elizaMessage]);
+      if ((response as any)?.auditResult) {
+        showDocAudit({ text: (response as any).text || '', audit: (response as any).auditResult });
+      }
     setLastElizaMessage(responseText);
 
     // Use TTS if requested and voice is enabled - auto-initialize if needed
@@ -1603,6 +1716,9 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       };
 
       setMessages(prev => [...prev, elizaMessage]);
+      if ((response as any)?.auditResult) {
+        showDocAudit({ text: (response as any).text || '', audit: (response as any).auditResult });
+      }
       setLastElizaMessage(responseText);
 
       // Store Eliza's response with enhanced data
@@ -1683,6 +1799,10 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
     const rawInput = quickMessage ?? textInput;
     const trimmedInput = rawInput.trim();
     if (!trimmedInput || isProcessing) return;
+    // Any new turn (user-typed or automation-fired) supersedes a pending
+    // automation countdown — the timer clears itself before firing, so this
+    // only ever cancels a stale one.
+    clearAutomationTimer();
     const messageText = formatUserMessageForDisplayAndParsing(trimmedInput);
 
 
@@ -1883,6 +2003,9 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
         };
 
         setMessages(prev => [...prev, elizaMessage]);
+      if ((response as any)?.auditResult) {
+        showDocAudit({ text: (response as any).text || '', audit: (response as any).auditResult });
+      }
         setLastElizaMessage(deliberation.synthesis);
 
         // Store council response
@@ -2035,17 +2158,46 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
         console.log('No reasoning data in response');
       }
 
-      // Extract tool calls from window if available (still relies on global state for now)
-      const toolCalls = (window as any).__lastElizaToolCalls || [];
+      // Tool calls for this turn. Prefer the authoritative list the edge
+      // function returns (ai-chat now emits `toolCalls` with name/status/
+      // duration); fall back to what the realtime activity log observed. The
+      // old window.__lastElizaToolCalls global was read here but never written
+      // by anything, so this list was always empty.
+      const responseToolCalls = Array.isArray((response as any)?.toolCalls)
+        ? ((response as any).toolCalls as Array<Record<string, any>>)
+        : null;
+      const observedToolCalls = toolCallsForTurnRef.current;
+      const toolCalls = (responseToolCalls && responseToolCalls.length > 0)
+        ? responseToolCalls.map((t, i) => ({
+            id: String(t.id || `tc-${i}`),
+            function_name: String(t.function_name || 'tool'),
+            status: (t.status === 'failed' ? 'failed' : t.status === 'success' ? 'success' : 'pending') as 'pending' | 'success' | 'failed',
+            execution_time_ms: t.execution_time_ms,
+          }))
+        : observedToolCalls;
       const executiveTitle = (window as any).__lastElizaExecutiveTitle || '';
 
       if (toolCalls.length > 0) {
-        toolCalls.forEach((tool: { function_name?: string }) => {
+        toolCalls.forEach((tool) => {
           if (tool.function_name) {
             enqueueProcessingNote(getToolStickyText(tool.function_name));
           }
         });
+        console.log('🔧 Tool calls for this turn:', toolCalls.map(t => t.function_name).join(', '));
       }
+      // Eliza drives the web aside: when she browsed a URL this turn, open it
+      // in the side panel so the user watches what she saw (page-agent style).
+      try {
+        const browsed = (responseToolCalls || []).find((t) => typeof (t as any).browse_url === 'string');
+        const browseUrl = (browsed as any)?.browse_url;
+        if (browseUrl) {
+          window.dispatchEvent(new CustomEvent('suite:aside', {
+            detail: { kind: 'web', url: browseUrl },
+          }));
+        }
+      } catch { /* no aside host */ }
+      // Drain so the next turn doesn't inherit this turn's tools.
+      toolCallsForTurnRef.current = [];
 
       const elizaMessage: UnifiedMessage = {
         id: `eliza-${Date.now()}`,
@@ -2064,7 +2216,30 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
       };
 
       setMessages(prev => [...prev, elizaMessage]);
+      if ((response as any)?.auditResult) {
+        showDocAudit({ text: (response as any).text || '', audit: (response as any).auditResult });
+      }
       setLastElizaMessage(displayContent);
+
+      // Dynamic aside: surface generated media in the side panel (Dashboard
+      // listens for 'suite:aside'; pages without an aside host ignore it).
+      try {
+        if (generatedImages.length > 0) {
+          window.dispatchEvent(new CustomEvent('suite:aside', {
+            detail: { kind: 'image', src: String(generatedImages[0]), title: 'Generated image' },
+          }));
+        } else if (generatedVideos.length > 0) {
+          window.dispatchEvent(new CustomEvent('suite:aside', {
+            detail: { kind: 'video', src: String(generatedVideos[0]), title: 'Generated video' },
+          }));
+        }
+      } catch { /* no aside host — inline previews still render */ }
+
+      // Automation mode: auto-press "Proceed Intelligently" after a countdown.
+      // Council mode self-advances via its own synthesis-driven timer above.
+      if (automationEnabled && !councilMode) {
+        scheduleAutomationAdvance();
+      }
 
       // Store Eliza's response with full data integration
       try {
@@ -2325,6 +2500,35 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
               </Tooltip>
             </TooltipProvider>
 
+            {/* Automation Mode Toggle — auto-presses "Proceed Intelligently"
+                after each response so the session keeps moving on its own */}
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    onClick={toggleAutomation}
+                    variant={automationEnabled ? 'default' : 'outline'}
+                    size="sm"
+                    className="text-xs h-7 px-1.5 sm:px-2 flex-shrink-0"
+                    aria-label="Toggle automation mode"
+                    title="Automation: auto-advance with Proceed Intelligently"
+                  >
+                    <Zap className="h-3 w-3 sm:mr-1" />
+                    <span className="hidden sm:inline">Automation</span>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom" className="max-w-xs">
+                  <p className="font-medium text-sm mb-1">
+                    {automationEnabled ? 'Automation On' : 'Automation Off'}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    When on, the chat presses "Proceed Intelligently" by itself
+                    15s after each response. Toggle off to take back manual control.
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+
             {/* Governance Status Badge */}
             <GovernanceStatusBadge />
 
@@ -2485,6 +2689,34 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
               </div>
             )}
 
+            {/* ⚡ Automation Banner — countdown to automatic "Proceed Intelligently" */}
+            {automationEnabled && automationCountdown !== null && (
+              <div className="flex justify-center animate-fade-in">
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 max-w-[90%] w-full">
+                  <div className="flex items-center justify-between gap-3 mb-2">
+                    <div className="flex items-center gap-2 text-xs text-amber-500 font-medium">
+                      <Zap className="h-3 w-3" />
+                      <span>Automation advancing in {automationCountdown}s…</span>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-6 px-2 text-xs"
+                      onClick={() => clearAutomationTimer()}
+                    >
+                      ⏸ Skip
+                    </Button>
+                  </div>
+                  <div className="w-full bg-amber-500/20 rounded-full h-1">
+                    <div
+                      className="bg-amber-500 h-1 rounded-full transition-all duration-1000"
+                      style={{ width: `${(1 - automationCountdown / AUTOMATION_ADVANCE_SECONDS) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
             {councilMode && autoAdvancePaused && !isProcessing && (
               <div className="flex justify-center">
                 <Button
@@ -2633,7 +2865,28 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
         </div>
       </div>
     </Card>
-    </div>
+    
+      {activeDocAudit && (
+        <div className="absolute inset-0 z-50 bg-background/95 backdrop-blur-sm animate-in fade-in zoom-in-95 p-6 flex flex-col">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-lg font-bold text-indigo-900 flex items-center gap-2">
+              <FileText className="w-5 h-5" />
+              Intelligence Audit Workspace
+            </h2>
+            <Button variant="ghost" size="sm" onClick={() => setActiveDocAudit(null)}>
+              <X className="w-4 h-4 mr-2" /> Close Workspace
+            </Button>
+          </div>
+          <div className="flex-1 overflow-hidden">
+            <DocViewer 
+              text={activeDocAudit.text} 
+              audit={activeDocAudit.audit} 
+              onApplyFix={(id, text) => console.log('Applying fix:', id, text)} 
+            />
+          </div>
+        </div>
+      )}
+</div>
   );
 };
 

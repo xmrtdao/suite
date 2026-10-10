@@ -30,7 +30,10 @@ export const AudioProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // Initialize audio element once
   useEffect(() => {
     if (!audioRef.current) {
-      const audio = new Audio('/audio/sweet.mp3');
+      // Must be base-relative: the suite is served by the relay under /suite/,
+      // so a hardcoded '/audio/...' 404s on the relay origin. import.meta.env
+      // .BASE_URL is '/suite/' in this build and '/' in a root-hosted one.
+      const audio = new Audio(`${import.meta.env.BASE_URL}audio/sweet.mp3`.replace(/\/{2,}/g, '/'));
       audio.loop = false;
       audio.volume = 0.3;
       audioRef.current = audio;

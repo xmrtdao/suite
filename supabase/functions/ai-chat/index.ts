@@ -31,12 +31,17 @@ const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY') || '';
 const DEEPSEEK_API_KEY = Deno.env.get('DEEPSEEK_API_KEY') || '';
 const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY') || '';
 const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY') || '';
+// OpenCode Zen — separate quota pool from Ollama/OpenRouter, so it stays
+// available when both of those free tiers are exhausted.
+const OPENCODE_API_KEY = Deno.env.get('OPENCODE_API_KEY') || '';
+const OPENCODE_BASE_URL = (Deno.env.get('OPENCODE_BASE_URL') || 'https://opencode.ai/zen/v1').replace(/\/+$/, '');
 const OLLAMA_API_KEY = Deno.env.get('OLLAMA_API_KEY') || '';
 const OLLAMA_XMRT_API_KEY = Deno.env.get('OLLAMA_XMRT_API_KEY') || '';  // XMRT account — the WORKING key (matches relay ollama-chat.mjs getOllamaXmrtKey); primary OLLAMA_API_KEY is past-due/403
 const OLLAMA_HERMES_API_KEY = Deno.env.get('OLLAMA_HERMES_API_KEY') || '';  // second Ollama account (separate weekly quota) — failover on 429
 const OLLAMA_3RD_API_KEY = Deno.env.get('OLLAMA_3RD_API_KEY') || '';  // third Ollama account — matches relay ollama-chat.mjs cascade
 const OLLAMA_LOCAL_HOST = Deno.env.get('OLLAMA_HOST') || 'http://localhost:11434';
 const OLLAMA_LOCAL_MODEL = Deno.env.get('OLLAMA_LOCAL_MODEL') || '';  // explicit override for local Ollama model (e.g. gemma3:1b)
+const OLLAMA_LOCAL_API_KEY = Deno.env.get('OLLAMA_LOCAL_API_KEY') || '';
 
 // Executive Configuration
 const EXECUTIVE_NAME = Deno.env.get('EXECUTIVE_NAME') || 'Eliza';
@@ -51,7 +56,14 @@ const BRAND_PUB_HANDLE = Deno.env.get('PARAGRAPH_PUBLICATION_HANDLE') || 'mobile
 const BRAND_PUB_URL = `https://paragraph.com/@${BRAND_PUB_HANDLE}`;
 
 // Performance Configuration
-const MAX_TOOL_ITERATIONS = parseInt(Deno.env.get('MAX_TOOL_ITERATIONS') || '5');
+// MAX_TOOL_ITERATIONS was 5, and the model burned every single one on nearly
+// every request (measured: 8-11 tool calls for a plain "Where were we?").
+// Each iteration is a full LLM round trip, so that cap was the dominant cause
+// of the 45-90s response times. 3 is enough for genuine multi-step work
+// (look up -> act -> verify) and roughly halves worst-case latency. The tool
+// system prompt also now tells the model to stop calling tools once it has
+// what it needs, so the cap is a backstop rather than the normal path.
+const MAX_TOOL_ITERATIONS = parseInt(Deno.env.get('MAX_TOOL_ITERATIONS') || '3');
 const REQUEST_TIMEOUT_MS = parseInt(Deno.env.get('REQUEST_TIMEOUT_MS') || '120000');
 const CONVERSATION_HISTORY_LIMIT = parseInt(Deno.env.get('CONVERSATION_HISTORY_LIMIT') || '1000');
 
@@ -161,6 +173,122 @@ async function callRelayTool(tool: string, args: Record<string, unknown> = {}): 
     await debugLog('local_context.tool_failed', { tool, error: e?.message?.slice?.(0, 200) });
     return { success: false, error: `Relay call failed: ${e?.message?.slice?.(0, 200) || 'unknown error'}`, tool };
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// RELAY TOOL CATALOG BRIDGE
+//
+// Until 2026-09-27 this function handed the model a hardcoded 36-entry
+// ELIZA_TOOLS array. Every other relay tool — shell-exec, db-query,
+// python-exec, video-editor, knowledge-graph, paragraph-publish,
+// service_control, the whole cuttlefishclaws family — was invisible to
+// her, so she would tell users she "only has Supabase edge functions, a
+// GitHub connector and a Python sandbox". That was an accurate reading
+// of what she was given, just not of what the relay actually exposes.
+//
+// The relay already runs 168 tools with real handlers. GET
+// /api/tools/catalog returns name + description + JSON-Schema + trust
+// level for all of them, so we no longer hardcode the list here.
+//
+// Latency note: sending all 168 full schemas is ~15k tokens per request,
+// which made responses measurably slower on the free tiers. So we split it:
+//   - COMPACT ROSTER (~4k tokens, mostly prompt-cacheable) in the system
+//     prompt so she knows the full surface exists and what each tool does.
+//   - A bounded CALLABLE set of schemas (ELIZA_TOOLS + the high-value
+//     relay tools below) so she can act without a discovery round-trip.
+//   - The `relay-tool` meta-tool so ANY of the 168 is still reachable.
+// ═══════════════════════════════════════════════════════════════════
+
+interface RelayCatalogTool {
+  name: string;
+  description: string;
+  parameters: any;
+  securityLevel: string;
+}
+
+let _relayCatalog: RelayCatalogTool[] = [];
+let _relayCatalogFetchedAt = 0;
+const RELAY_CATALOG_TTL_MS = 10 * 60 * 1000;
+
+async function getRelayToolCatalog(force = false): Promise<RelayCatalogTool[]> {
+  const now = Date.now();
+  if (!force && _relayCatalog.length > 0 && now - _relayCatalogFetchedAt < RELAY_CATALOG_TTL_MS) {
+    return _relayCatalog;
+  }
+  try {
+    const headers: Record<string, string> = {};
+    if (RELAY_API_KEY) headers['x-api-key'] = RELAY_API_KEY;
+    const res = await fetchWithTimeout(`${RELAY_BASE_URL}/api/tools/catalog`, { headers }, 8000);
+    if (!res.ok) throw new Error(`catalog HTTP ${res.status}`);
+    const data = await res.json();
+    if (Array.isArray(data?.tools)) {
+      _relayCatalog = data.tools;
+      _relayCatalogFetchedAt = now;
+      await debugLog('relay_catalog.loaded', { count: _relayCatalog.length, describeEveryTool: data.describeEveryTool });
+    }
+  } catch (e: any) {
+    // Relay down: keep whatever we had. Never block the chat on this.
+    await debugLog('relay_catalog.failed', { error: e?.message?.slice?.(0, 200), cached: _relayCatalog.length });
+  }
+  return _relayCatalog;
+}
+
+// Relay tools promoted to first-class callable schemas. Chosen because they
+// cover the gaps agents hit most often (local shell/DB access, media, infra,
+// knowledge, publishing) without blowing the token budget. Everything else is
+// still reachable via the `relay-tool` meta-tool below.
+const PROMOTED_RELAY_TOOLS = [
+  'shell-exec', 'python-exec', 'db-query', 'db-rest', 'web-search', 'web-scrape',
+  'ollama-chat', 'agent-rpc', 'knowledge-graph', 'obsidian-graph', 'shared-context',
+  'video-editor', 'paragraph-publish', 'service_control', 'ship_logs',
+  'resend-inbox', 'resend-get-email', 'resend-send-email',
+  'fleet_memory_write', 'fleet_memory_read', 'health', 'system-monitor',
+  'tasks_list', 'tasks_update', 'inbox_messages', 'github-post',
+  // Obsidian vault (the "second brain"). Read tools first, then write, so
+  // "update the note about X" is answerable without reaching for relay-tool.
+  'vault-list', 'vault-read', 'vault-write', 'vault-update', 'vault-sync-entities',
+  'cuttlefishclaws_agents_list', 'cuttlefishclaws_trust_score', 'cuttlefishclaws_trust_history',
+  'cuttlefishclaws_gate_evaluate', 'cuttlefishclaws_engine_health', 'cuttlefishclaws_proposals_list',
+];
+
+// Build the merged callable tool array: hardcoded ELIZA_TOOLS first (their
+// bespoke local behaviour is richer than a generic relay round-trip), then the
+// promoted relay tools, skipping any name that would collide.
+function buildRelayToolSchemas(catalog: RelayCatalogTool[]): any[] {
+  if (catalog.length === 0) return [];
+  const existing = new Set(ELIZA_TOOLS.map((t: any) => t.function?.name || t.name));
+  const extra: any[] = [];
+  for (const name of PROMOTED_RELAY_TOOLS) {
+    if (existing.has(name)) continue;
+    const t = catalog.find(c => c.name === name);
+    if (!t) continue;
+    existing.add(name);
+    extra.push({
+      type: 'function',
+      function: {
+        name: t.name,
+        description: `${t.description} [relay:${t.securityLevel}]`,
+        parameters: t.parameters || { type: 'object', additionalProperties: true },
+      },
+    });
+  }
+  return extra;
+}
+
+// Compact "name: one-liner" list of the ENTIRE relay tool surface, injected
+// into the system prompt. This is what stops her claiming she has no shell,
+// no database, and no media tools.
+function buildRelayToolRoster(catalog: RelayCatalogTool[], maxDesc = 110): string {
+  if (catalog.length === 0) return '';
+  return catalog
+    .map(t => `- ${t.name}: ${t.description.length > maxDesc ? t.description.slice(0, maxDesc) + '…' : t.description}`)
+    .join('\n');
+}
+
+// True when the relay advertises this tool, i.e. it is safe to route a call
+// the model invented straight to the relay.
+function isKnownRelayTool(name: string, catalog: RelayCatalogTool[]): boolean {
+  return catalog.some(t => t.name === name);
 }
 
 async function fetchLocalSupabaseRows(table: string, select: string, limit = 5): Promise<any[] | null> {
@@ -330,117 +458,213 @@ interface AIProviderConfig {
   maxRetries: number;
   retryDelayMs: number;
 }
-
 const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
-  // PRIMARY: Ollama Pro Cloud via LOCAL signed-in ollama serve (localhost:11434).
-  // The model itself runs in Ollama's cloud (deepseek-v4-flash:cloud) — no local
-  // compute. Direct ollama.com API-key calls hit weekly 429 limits; the signed-in
-  // serve path does not. — 2026-07-22 reroute
+  // TIER -1: OpenCode Zen — tried before every OpenRouter entry.
+  // Added 2026-09-27. Zen bills against its own quota pool, so the OpenRouter
+  // :free tiers getting rate-limited together no longer takes the fleet offline.
+  //
+  // Only space-bunny-free is reachable from outside the OpenCode client. Every
+  // other *-free Zen slug (longcat-2.5-preview-free, jev-1.13-free, big-pickle,
+  // nemotron-3.5-lightning-free, muse-spark-1.3-contributor-free, ...) answers
+  // 403 "OpenCode's free tier can only be used from within OpenCode". Add a slug
+  // to `models` here only after verifying a 200 from this runtime.
+  opencode_zen_free: {
+    name: 'Space Bunny Free (OpenCode Zen) — FREE',
+    enabled: !!OPENCODE_API_KEY,
+    apiKey: OPENCODE_API_KEY,
+    endpoint: `${OPENCODE_BASE_URL}/chat/completions`,
+    models: ['space-bunny-free'],
+    supportsTools: true,
+    timeoutMs: 120000,
+    priority: 0.05,  // tried first — own quota pool
+    fallbackOnly: false,
+    maxRetries: 2,
+    retryDelayMs: 1000
+  },
+
+  // FREE TIER MODELS — ordered by priority (first is tried first)
+  // Added per 2026-09-21 cascade reconfiguration for Eliza-Cloud restoration
+  
+  // TIER 0: Additional free OpenRouter models (before minimax)
+  // NOTE 2026-09-26 (Vex/longcat-agent): OpenRouter retired several :free slugs
+  // (z-ai/glm-5.2:free, nex-agi/nex-n2.5-mini:free, nex-n2.5-pro:free,
+  // minimax/minimax-m3:free). Slugs below re-verified against the live
+  // OpenRouter /models catalog. Paid fallback: minimax/minimax-m3 (needs founder OK).
+  gemma_4_26b_free: {
+    name: 'Google Gemma 4 26B (OpenRouter) — FREE',
+    enabled: !!OPENROUTER_API_KEY,
+    apiKey: OPENROUTER_API_KEY,
+    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    models: ['google/gemma-4-26b-a4b-it:free'],
+    supportsTools: true,
+    timeoutMs: 120000,
+    priority: 0.1,  // tried first — new free model
+    fallbackOnly: false,
+    maxRetries: 2,
+    retryDelayMs: 1000
+  },
+  
+  gemma_4_31b_free: {
+    name: 'Google Gemma 4 31B (OpenRouter) — FREE',
+    enabled: !!OPENROUTER_API_KEY,
+    apiKey: OPENROUTER_API_KEY,
+    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    models: ['google/gemma-4-31b-it:free'],
+    supportsTools: true,
+    timeoutMs: 120000,
+    priority: 0.15,  // second new free model
+    fallbackOnly: false,
+    maxRetries: 2,
+    retryDelayMs: 1000
+  },
+  
+  qwen3_8_27b_free: {
+    name: 'Qwen Qwen3.8 27B (OpenRouter) — FREE',
+    enabled: !!OPENROUTER_API_KEY,
+    apiKey: OPENROUTER_API_KEY,
+    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    models: ['qwen/qwen3.8-27b:free'],
+    supportsTools: true,
+    timeoutMs: 120000,
+    priority: 0.2,  // third new free model
+    fallbackOnly: false,
+    maxRetries: 2,
+    retryDelayMs: 1000
+  },
+  
+  // TIER 1: Nemotron 3 Nano Omni via OpenRouter — FREE, supports tool calling
+  nemotron_3_nano_free: {
+    name: 'Nvidia Nemotron 3 Nano Omni (OpenRouter) — FREE, supports tools',
+    enabled: !!OPENROUTER_API_KEY,
+    apiKey: OPENROUTER_API_KEY,
+    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    models: ['nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free'],
+    supportsTools: true,
+    timeoutMs: 120000,
+    priority: 0.25,  // tier 1 — free model with tool support
+    fallbackOnly: false,
+    maxRetries: 2,
+    retryDelayMs: 1000
+  },
+  
+  // TIER 2: Nemotron 3 Ultra via OpenRouter — FREE, supports tool calling
+  nemotron_3_ultra_free: {
+    name: 'Nvidia Nemotron 3 Ultra 550B (OpenRouter) — FREE, supports tools',
+    enabled: !!OPENROUTER_API_KEY,
+    apiKey: OPENROUTER_API_KEY,
+    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    models: ['nvidia/nemotron-3-ultra-550b-a55b:free'],
+    supportsTools: true,
+    timeoutMs: 120000,
+    priority: 0.3,  // tier 2 — free model with tool support
+    fallbackOnly: false,
+    maxRetries: 2,
+    retryDelayMs: 1000
+  },
+  
+  // TIER 3: Nemotron 3.5 Lightning via OpenRouter — FREE, supports tool calling
+  // (slug corrected 2026-09-26: vendor prefix is nvidia/, bare slug 404s)
+  nemotron_3_5_free: {
+    name: 'Nvidia Nemotron 3.5 Lightning (OpenRouter) — FREE, supports tools',
+    enabled: !!OPENROUTER_API_KEY,
+    apiKey: OPENROUTER_API_KEY,
+    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    models: ['nvidia/nemotron-3.5-lightning:free'],
+    supportsTools: true,
+    timeoutMs: 120000,
+    priority: 0.35,  // tier 3 — free model with tool support
+    fallbackOnly: false,
+    maxRetries: 2,
+    retryDelayMs: 1000
+  },
+  
+  // TIER 4: Nemotron 3 Super via OpenRouter — FREE, supports tool calling.
+  // Primary daily driver with broadest capability.
+  // NOTE 2026-09-26: minimax/minimax-m3:free was RETIRED by OpenRouter
+  // (404: "use this slug instead: minimax/minimax-m3" — paid). Key renamed
+  // in spirit but `minimax_m3` identifier kept for log continuity. To go
+  // back to paid minimax, set models to ['minimax/minimax-m3'] (founder spend OK required).
+  minimax_m3: {
+    name: 'Nvidia Nemotron 3 Super 120B (OpenRouter) — FREE, supports tools',
+    enabled: !!OPENROUTER_API_KEY,
+    apiKey: OPENROUTER_API_KEY,
+    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    models: ['nvidia/nemotron-3-super-120b-a12b:free'],
+    supportsTools: true,
+    timeoutMs: 120000,
+    priority: 0.4,  // tier 4 — primary daily driver
+    fallbackOnly: false,
+    maxRetries: 2,
+    retryDelayMs: 1000
+  },
+  
+  // SECONDARY: Ollama Pro Cloud via the signed-in serve path. Skipped automatically
+  // when OLLAMA_MODEL ends in ':free' or contains '/' (those models are not on
+  // ollama.com and 404 there — wastes timeout budget).
   ollama: {
     name: 'Ollama Pro Cloud',
     enabled: true,
     apiKey: OLLAMA_API_KEY,
     endpoint: 'https://ollama.com/v1/chat/completions',
-    models: [Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud'],
-    // deepseek-v4-flash:cloud supports native function calling (tools capability
-    // confirmed in Ollama model manifest). callOllama() sends tools to the model
-    // and returns tool_calls for direct execution.
+    models: [Deno.env.get('OLLAMA_MODEL') || 'minimax/minimax-m3:free'],
     supportsTools: true,
-    timeoutMs: 30000,
+    timeoutMs: 120000,
     priority: 0.5,
     fallbackOnly: false,
     maxRetries: 2,
     retryDelayMs: 1000
   },
-  // SECONDARY: direct ollama.com using the second Ollama account key
-  // (OLLAMA_HERMES_API_KEY) — separate weekly quota from the primary account.
-  // Tried when the primary signed-in serve path fails. — 2026-07-22
-  ollama_hermes: {
-    name: 'Ollama Hermes Cloud',
-    enabled: !!OLLAMA_HERMES_API_KEY,
-    apiKey: OLLAMA_HERMES_API_KEY,
+  
+  // TERTIARY: direct ollama.com via the 3rd Ollama account key — separate weekly quota.
+  // Same OpenRouter-only guard: skipped if OLLAMA_MODEL is a ':free' or contains '/'.
+  ollama_pro_3rd: {
+    name: 'Ollama Pro 3rd (alternate quota)',
+    enabled: !!OLLAMA_3RD_API_KEY,
+    apiKey: OLLAMA_3RD_API_KEY,
     endpoint: 'https://ollama.com/v1/chat/completions',
-    models: [Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud'],
+    models: [Deno.env.get('OLLAMA_MODEL') || 'minimax/minimax-m3:free'],
     supportsTools: true,
-    timeoutMs: 30000,
-    priority: 0,
-    fallbackOnly: false,
-    maxRetries: 1,
-    retryDelayMs: 1000
-  },
-  // LOCAL Ollama — talks to http://localhost:11434 (set via OLLAMA_HOST env).
-  // Provides text-based tool calling: tool definitions are injected into the
-  // system prompt as XML-like <functions> blocks, and the model's text response
-  // is parsed for tool call patterns via parseDeepSeekToolCalls() /
-  // parseToolCodeBlocks(). Priority is lower than cloud Ollama so the cloud
-  // provider is tried first when keys are present; LOCAL_OLLAMA_ONLY=1 bumps
-  // this to the front.
-  ollama_local: {
-    name: 'Ollama Local',
-    enabled: false,  // disabled — 6GB laptop cannot run local models
-    apiKey: OLLAMA_API_KEY,
-    endpoint: `${OLLAMA_LOCAL_HOST}/v1/chat/completions`,
-    models: [Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud', 'gemma4', 'gemma3', 'mistral-small3.2', 'qwen3.5'],
-    supportsTools: true,  // text-based tool calling works with any model
-    timeoutMs: 10000,  // 8.9GB model on 6GB RAM will never respond; fast-fail to cloud
-    priority: 99,  // tried last unless LOCAL_OLLAMA_ONLY bumps it
-    fallbackOnly: false,
-    maxRetries: 1,
-    retryDelayMs: 500
-  },
-  openai: {
-    name: 'OpenAI',
-    enabled: !!OPENAI_API_KEY,
-    apiKey: OPENAI_API_KEY,
-    endpoint: 'https://api.openai.com/v1/chat/completions',
-    models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'],
-    supportsTools: true,
-    timeoutMs: 90000,
-    priority: 1,
+    timeoutMs: 120000,
+    priority: 0.45,
     fallbackOnly: false,
     maxRetries: 2,
     retryDelayMs: 1000
   },
+  
+  // LOCAL Ollama — talks to http://localhost:11434. Disabled on this 6GB laptop.
+  ollama_local: {
+    name: 'Ollama Local',
+    enabled: false,
+    apiKey: OLLAMA_LOCAL_API_KEY,
+    endpoint: `${OLLAMA_LOCAL_HOST}/v1/chat/completions`,
+    models: [],
+    supportsTools: true,
+    timeoutMs: 10000,
+    priority: 99,
+    fallbackOnly: false,
+    maxRetries: 1,
+    retryDelayMs: 500
+  },
+  
+  // Paid DeepSeek (kept for emergencies; free OpenRouter models are daily drivers now)
   deepseek: {
-    name: 'DeepSeek',
+    name: 'DeepSeek (OpenRouter) — deepseek-chat',
     enabled: !!DEEPSEEK_API_KEY,
     apiKey: DEEPSEEK_API_KEY,
     endpoint: 'https://api.deepseek.com/v1/chat/completions',
     models: ['deepseek-chat', 'deepseek-coder'],
     supportsTools: true,
-    timeoutMs: 90000,
-    priority: 3,
+    timeoutMs: 120000,
+    priority: 2,
     fallbackOnly: false,
     maxRetries: 2,
     retryDelayMs: 1500
-  },
-  anthropic: {
-    name: 'Anthropic Claude',
-    enabled: !!ANTHROPIC_API_KEY,
-    apiKey: ANTHROPIC_API_KEY,
-    endpoint: 'https://api.anthropic.com/v1/messages',
-    models: ['claude-3-5-haiku-20241022', 'claude-3-opus-20240229', 'claude-3-sonnet-20240229'],
-    supportsTools: false,
-    timeoutMs: 90000,
-    priority: 4,
-    fallbackOnly: true,
-    maxRetries: 1,
-    retryDelayMs: 2000
-  },
-  kimi: {
-    name: 'Kimi K2 (OpenRouter)',
-    enabled: !!OPENROUTER_API_KEY,
-    apiKey: OPENROUTER_API_KEY,
-    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
-    models: ['deepseek/deepseek-v4-flash'],
-    supportsTools: true,
-    timeoutMs: 90000,
-    priority: 5,
-    fallbackOnly: true,
-    maxRetries: 1,
-    retryDelayMs: 2000
   }
-};
+};// Matches relay/tools/ollama-chat.mjs isOpenRouterOnly() — keep them in sync.
+function isOpenRouterOnly(model: string): boolean {
+  return typeof model === 'string' && (model.includes('/') || model.endsWith(':free'));
+}
+
 
 // ========== CORS HEADERS ==========
 const corsHeaders = {
@@ -453,6 +677,38 @@ const corsHeaders = {
 const AMBIGUOUS_RESPONSES = ['yes', 'yeah', 'yep', 'sure', 'ok', 'okay', 'alright', 'fine', 'go ahead', 'proceed', 'no', 'nope', 'nah'];
 const POSITIVE_AMBIGUOUS = ['yes', 'yeah', 'yep', 'sure', 'ok', 'okay', 'alright', 'fine', 'go ahead', 'proceed'];
 const RESPONSE_MAX_TOKENS = parseInt(Deno.env.get('RESPONSE_MAX_TOKENS') || '16000');
+
+/**
+ * Should we force a knowledge-base lookup when the model answered directly?
+ *
+ * Only for questions that genuinely ask about remembered/stored knowledge or
+ * project specifics. Conversational and meta questions ("where were we?",
+ * "what did you find?", "thanks") must NOT trigger a second LLM round trip —
+ * doing so was the single biggest avoidable source of latency.
+ */
+function shouldForceKnowledgeLookup(query: string): boolean {
+  const q = (query || '').trim().toLowerCase();
+  if (!q) return false;
+  if (isSimpleDirectAnswerQuery(q)) return false;
+
+  // Conversational / follow-up / meta — answer from context, no lookup.
+  const conversational = [
+    /^(where were we|what did you find|what did you do|what happened|ok|okay|thanks|thank you|got it|cool|nice|and\??|so\??|why\??|really\??)[?.!\s]*$/,
+    /^(what do you (?:remember|know)|do you remember)\b/,
+    /^(can you (?:repeat|say that)|say that again)\b/,
+    /^\s*(yes|no|yep|nope|sure|absolutely|definitely)\b[?.!\s]*$/,
+  ];
+  if (conversational.some(re => re.test(q))) return false;
+
+  // Explicit knowledge / project / entity lookups.
+  const knowledgeish = [
+    /\b(what|who|when|where|which|how)\b.*\b(know|remember|record|stored|documented|decided|agreed|history)\b/,
+    /\b(knowledge base|kb|entity|entities|context|summary|summaries|notes?|docs?|documentation|spec|specs|decisions?)\b/,
+    /\b(xmrt|dao|cuttlefishclaws|eliza|vex|hermes|paragraph|mobilemonero)\b.*\b(about|is|are|was|were|does|do|status|state|what)\b/,
+    /\b(what|who)\s+(do|did|does)\s+we\b/,
+  ];
+  return knowledgeish.some(re => re.test(q));
+}
 
 function isSimpleDirectAnswerQuery(query: string): boolean {
   const normalized = (query || '').trim().toLowerCase();
@@ -1913,7 +2169,23 @@ async function executeRealToolCall(
     const parsedArgs = parseToolArguments(args);
 
     // ----- Existing tools (unchanged) -----
-    if (name === 'analyze_attachment') {
+    if (name === 'relay-tool') {
+      // Meta-tool: unwrap { tool, args } and forward to the relay.
+      const { tool: targetTool, args: innerArgs } = parsedArgs;
+      if (!targetTool) throw new Error('relay-tool requires a "tool" name');
+      const catalog = await getRelayToolCatalog();
+      if (catalog.length > 0 && !isKnownRelayTool(targetTool, catalog)) {
+        throw new Error(
+          `"${targetTool}" is not a relay tool. Known tools include: ${catalog.map(t => t.name).slice(0, 40).join(', ')}, …`
+        );
+      }
+      console.log(`🔗 relay-tool → ${targetTool}`);
+      const relayResult = await callRelayTool(targetTool, innerArgs || {});
+      if (relayResult && (relayResult as any).success === false) {
+        throw new Error(`relay-tool ${targetTool} failed: ${(relayResult as any).error || 'unknown error'}`);
+      }
+      result = relayResult;
+    } else if (name === 'analyze_attachment') {
       const { attachments } = parsedArgs;
       if (!attachments || !Array.isArray(attachments) || attachments.length === 0) {
         throw new Error('Missing or empty attachments array');
@@ -2520,7 +2792,29 @@ async function executeRealToolCall(
       result = await callRelayTool('vex-hear', { duration });
 
     } else {
-      throw new Error(`Tool '${name}' is not a recognized or allowed tool.`);
+      // ── Generic relay passthrough ──────────────────────────────
+      // Not one of the hardcoded tools, so check whether the relay advertises
+      // it. This is what makes shell-exec, db-query, video-editor,
+      // knowledge-graph, the cuttlefishclaws family, and the other ~130 relay
+      // tools actually callable instead of dead ends.
+      const catalog = await getRelayToolCatalog();
+      if (isKnownRelayTool(name, catalog)) {
+        console.log(`🔗 Routing '${name}' to the relay (generic passthrough)`);
+        const relayResult = await callRelayTool(name, parsedArgs);
+        if (relayResult && (relayResult as any).success === false) {
+          // Surface the relay's own error text so the model can self-correct.
+          throw new Error(`Relay tool '${name}' failed: ${(relayResult as any).error || 'unknown error'}`);
+        }
+        result = relayResult;
+      } else {
+        const known = catalog.map(t => t.name);
+        throw new Error(
+          `Tool '${name}' is not a recognized or allowed tool.`
+          + (known.length
+            ? ` It is not in the relay catalog either. Known relay tools include: ${known.slice(0, 40).join(', ')}${known.length > 40 ? ', …' : ''}`
+            : '')
+        );
+      }
     }
     
     success = true;
@@ -3035,7 +3329,7 @@ async function callDeepSeekFallback(messages: any[], tools?: any[]): Promise<any
 async function callKimiFallback(messages: any[], tools?: any[]): Promise<any> {
   if (!OPENROUTER_API_KEY) return null;
   
-  console.log('🔄 Trying Kimi K2 fallback via OpenRouter...');
+  console.log('🔄 Trying OpenRouter fallback (live free slug)...');
   
   const enhancedMessages = messages.map(m => 
     m.role === 'system' ? { ...m, content: TOOL_CALLING_MANDATE + m.content } : m
@@ -3057,7 +3351,7 @@ async function callKimiFallback(messages: any[], tools?: any[]): Promise<any> {
         'X-Title': 'XMRT Eliza'
       },
       body: JSON.stringify({
-        model: 'deepseek/deepseek-v4-flash',
+        model: 'qwen/qwen3.8-27b:free',
         messages: enhancedMessages,
         tools,
         tool_choice: tools ? (forceTools ? 'required' : 'auto') : undefined,
@@ -3071,19 +3365,19 @@ async function callKimiFallback(messages: any[], tools?: any[]): Promise<any> {
     
     if (response.ok) {
       const data = await response.json();
-      console.log('✅ Kimi K2 fallback successful');
+      console.log('✅ OpenRouter fallback successful');
       return {
         content: data.choices?.[0]?.message?.content || '',
         tool_calls: data.choices?.[0]?.message?.tool_calls || [],
         provider: 'openrouter',
-        model: 'deepseek/deepseek-v4-flash'
+        model: 'qwen/qwen3.8-27b:free'
       };
     } else {
       const errorText = await response.text();
-      console.warn('⚠️ Kimi K2 API error:', response.status, errorText);
+      console.warn('⚠️ OpenRouter API error:', response.status, errorText);
     }
   } catch (error) {
-    console.warn('⚠️ Kimi K2 fallback failed:', error);
+    console.warn('⚠️ OpenRouter fallback failed:', error);
   }
   return null;
 }
@@ -3464,19 +3758,36 @@ class EnhancedProviderCascade {
     }
 
     const providers = Object.entries(AI_PROVIDERS_CONFIG)
-      .filter(([_, config]) =>
-        config.enabled
-        && !config.fallbackOnly
-        // If the caller asked for tools, only consider providers that
-        // actually support tool calling. Local Ollama (ollama_local)
-        // supports text-based tool calling (supportsTools:true), so it
-        // stays in the list. Cloud Ollama (ollama) strips tools — skip
-        // it for tool-needing requests unless LOCAL_OLLAMA_ONLY is set,
-        // in which case the pre-fetched 🛰️ LIVE LOCAL STATE block in
-        // the system prompt gives cloud Ollama the grounding it needs.
-        && (tools.length === 0 || config.supportsTools || LOCAL_OLLAMA_ONLY)
-      )
+          .filter(([name, config]) => {
+            if (!config.enabled || config.fallbackOnly) return false;
+            // Skip Ollama Cloud providers when the model is OpenRouter-only
+            // (anything with '/' or ':free' suffix — Ollama Cloud returns 404 on those
+            // and wastes the timeout budget). Keep the filter local to the cascade
+            // so callers can still force a specific provider.
+            if ((name === 'ollama' || name === 'ollama_pro_3rd') &&
+                config.models.some(isOpenRouterOnly)) return false;
+            // If the caller asked for tools, only consider providers that
+            // actually support tool calling. Local Ollama (ollama_local)
+            // supports text-based tool calling (supportsTools:true), so it
+            // stays in the list. Cloud Ollama (ollama) strips tools — skip
+            // it for tool-needing requests unless LOCAL_OLLAMA_ONLY is set,
+            // in which case the pre-fetched 🛰️ LIVE LOCAL STATE block in
+            // the system prompt gives cloud Ollama the grounding it needs.
+            return tools.length === 0 || config.supportsTools || LOCAL_OLLAMA_ONLY;
+          })
       .sort((a, b) => {
+        // OpenCode Zen always leads, even in Ollama-only mode.
+        //
+        // LOCAL_OLLAMA_ONLY=1 ranks the ollama family (rank 0-2) ahead of
+        // everything else (rank 3), which demoted Zen below `ollama` despite
+        // its lower priority. Because the Ollama accounts are currently
+        // exhausted, every request burned ollama's 120s timeout before
+        // reaching Zen — measured at 129s per request versus 8s with Zen
+        // first. Zen bills against its own quota pool, so it is the one
+        // provider that can be relied on to be alive; it goes first.
+        if (a[0] === 'opencode_zen_free') return -1;
+        if (b[0] === 'opencode_zen_free') return 1;
+
         // In Ollama-only mode, order the ollama-family providers explicitly:
         // local instance first (if ever enabled), then the Hermes cloud account
         // (separate weekly quota, returns full answers), then the signed-in
@@ -3493,10 +3804,21 @@ class EnhancedProviderCascade {
       .map(([name]) => name);
 
     await debugLog('cascade.candidates', { providers, filteredOutOllama: tools.length > 0 && !providers.includes('ollama') });
+    // Per-provider attempts were only written to the debug log, which is
+    // off by default — so a request that took 129s gave no clue where the
+    // time went. Log the ordered candidate list and every attempt to stdout
+    // (captured to logs/function-ai-chat.log by local-sb).
+    console.log(`🧭 Cascade candidates (${providers.length}): ${providers.join(' → ')}`);
 
     for (const provider of providers) {
+      const attemptStart = Date.now();
       const result = await this.callProvider(provider, messages, tools, images);
+      const elapsed = Date.now() - attemptStart;
       this.attempts.push({ provider, success: result.success });
+      console.log(
+        `   ${result.success ? '✅' : '❌'} ${provider} took ${elapsed}ms`
+        + (result.success ? '' : ` — ${result.error?.slice?.(0, 160) || 'no error detail'}`)
+      );
       await debugLog('cascade.attempt', {
         provider,
         success: result.success,
@@ -3574,7 +3896,27 @@ class EnhancedProviderCascade {
           result = await this.callAnthropic(messages, controller);
           break;
         case 'kimi':
-          result = await this.callKimi(messages, tools, controller);
+          // Legacy name — routes through the generic free-model caller with
+          // the entry's own configured slug (was: hardcoded retired
+          // minimax/minimax-m3:free).
+          result = await this.callOpenRouterFree(provider, config.models[0] || 'qwen/qwen3.8-27b:free', messages, tools, controller);
+          break;
+        case 'minimax_m3':
+          // Primary free cascade — entry carries its own live slug in
+          // config.models[0] (was: hardcoded retired minimax-m3:free).
+          result = await this.callOpenRouterFree(provider, config.models[0], messages, tools, controller);
+          break;
+        case 'gemma_4_26b_free':
+        case 'gemma_4_31b_free':
+        case 'qwen3_8_27b_free':
+        case 'nemotron_3_nano_free':
+        case 'nemotron_3_ultra_free':
+        case 'nemotron_3_5_free':
+          result = await this.callOpenRouterFree(provider, config.models[0], messages, tools, controller);
+          break;
+        case 'opencode_zen_free':
+          // Tier -1 — own quota pool, so OpenRouter rate limits don't take it out.
+          result = await this.callOpenCodeZen(provider, config.models[0], messages, tools, controller);
           break;
         case 'ollama':
           result = await this.callOllama(messages, tools, controller, 'ollama');
@@ -3632,7 +3974,7 @@ class EnhancedProviderCascade {
                (msg.content?.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n') || '')
     }));
 
-    const model = Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud';
+    const model = Deno.env.get('OLLAMA_MODEL') || 'minimax/minimax-m3:free';
     const needsTools = tools.length > 0 && needsDataRetrieval(messages);
     let lastError: string | null = null;
     for (const { key, label } of keys) {
@@ -3740,7 +4082,8 @@ class EnhancedProviderCascade {
         const tagRes = await fetch(`${OLLAMA_LOCAL_HOST}/api/tags`, { signal: AbortSignal.timeout(3000) });
         if (tagRes.ok) {
           const tagData = await tagRes.json();
-          const models = tagData.models || [];
+          const tagModels = tagData.models;
+          const models = Array.isArray(tagModels) ? tagModels : [];
           const preferred = ['gemma4', 'gemma3', 'llama3.2', 'mistral', 'qwen2.5', 'deepseek'];
           for (const p of preferred) {
             const found = models.find((m: any) => m.name?.startsWith(p));
@@ -3939,9 +4282,16 @@ IMPORTANT: When the user asks about fleet state, mining data, system status, tas
     };
   }
   
-  private async callKimi(messages: any[], tools: any[], controller: AbortController): Promise<CascadeResult> {
+  // Generic OpenRouter :free-model caller (added 2026-09-26, Vex/longcat-agent).
+  // The six free-tier config entries (gemma_4_26b_free, gemma_4_31b_free,
+  // qwen3_8_27b_free, nemotron_3_nano_free, nemotron_3_ultra_free,
+  // nemotron_3_5_free, minimax_m3) had NO case in callProvider's switch, so
+  // every one failed instantly with "Unknown provider" and the whole Suite
+  // chat collapsed to the emergency static fallback. This one method serves
+  // them all from their own config (endpoint + models[0] + apiKey).
+  private async callOpenRouterFree(providerName: string, model: string, messages: any[], tools: any[], controller: AbortController): Promise<CascadeResult> {
     const forceTools = needsDataRetrieval(messages);
-    
+
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -3951,45 +4301,106 @@ IMPORTANT: When the user asks about fleet state, mining data, system status, tas
         'X-Title': 'XMRT Eliza'
       },
       body: JSON.stringify({
-        model: 'deepseek/deepseek-v4-flash',
+        model,
         messages: messages,
         temperature: 0.9,
         max_tokens: RESPONSE_MAX_TOKENS,
-        ...(tools.length > 0 && { 
-          tools: tools, 
-          tool_choice: forceTools ? 'required' : 'auto' 
+        ...(tools.length > 0 && {
+          tools: tools,
+          tool_choice: forceTools ? 'required' : 'auto'
         })
       }),
       signal: controller.signal
     });
-    
+
     if (!response.ok) {
       const errorText = await response.text();
       return {
         success: false,
-        provider: 'kimi',
-        error: `Kimi API error: ${response.status} - ${errorText.substring(0, 200)}`
+        provider: providerName,
+        error: `OpenRouter ${model} error: ${response.status} - ${errorText.substring(0, 200)}`
       };
     }
-    
+
     const data = await response.json();
     const message = data.choices?.[0]?.message;
-    
+
     if (message.tool_calls?.length > 0) {
       return {
         success: true,
         tool_calls: message.tool_calls,
-        provider: 'kimi',
-        model: 'deepseek/deepseek-v4-flash'
+        provider: providerName,
+        model
       };
     }
-    
+
     return {
       success: true,
       content: message.content || '',
-      provider: 'kimi',
-      model: 'deepseek/deepseek-v4-flash'
+      provider: providerName,
+      model
     };
+  }
+
+  private async callOpenCodeZen(providerName: string, model: string, messages: any[], tools: any[], controller: AbortController): Promise<CascadeResult> {
+    const forceTools = needsDataRetrieval(messages);
+
+    const response = await fetch(`${OPENCODE_BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENCODE_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        temperature: 0.9,
+        max_tokens: RESPONSE_MAX_TOKENS,
+        ...(tools.length > 0 && {
+          tools,
+          tool_choice: forceTools ? 'required' : 'auto'
+        })
+      }),
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      return {
+        success: false,
+        provider: providerName,
+        error: `OpenCode Zen ${model} error: ${response.status} - ${errorText.substring(0, 200)}`
+      };
+    }
+
+    const data = await response.json();
+    const message = data.choices?.[0]?.message;
+
+    if (!message) {
+      return { success: false, provider: providerName, error: 'No message in OpenCode Zen response' };
+    }
+
+    if (message.tool_calls?.length > 0) {
+      return {
+        success: true,
+        tool_calls: message.tool_calls,
+        provider: providerName,
+        model
+      };
+    }
+
+    return {
+      success: true,
+      content: message.content || message.reasoning || '',
+      provider: providerName,
+      model
+    };
+  }
+
+  private async callKimi(messages: any[], tools: any[], controller: AbortController): Promise<CascadeResult> {
+    // Legacy entry point — delegates to the generic free-model caller with a
+    // live slug (was: hardcoded retired minimax/minimax-m3:free → HTTP 404).
+    return this.callOpenRouterFree('kimi', 'qwen/qwen3.8-27b:free', messages, tools, controller);
   }
   
   private async callAnthropic(messages: any[], controller: AbortController): Promise<CascadeResult> {
@@ -4116,11 +4527,46 @@ async function handleAmbiguousResponse(
 }
 
 // ========== STRIP TOOL CALL ARTIFACTS =========
-// Models (especially deepseek-v4-flash:cloud) sometimes dump raw tool call
+// Models (especially minimax/minimax-m3:free) sometimes dump raw tool call
 // JSON, TOOL_CALL: lines, function-call syntax, and tool result JSON into
 // their response text even when told not to. This strips all such artifacts
 // so the user sees a clean, natural-language response — matching the relay
 // fleet chat behaviour where tool calls are posted as separate system cards.
+/**
+ * Detect when a model "answer" is really just an echoed tool result rather
+ * than prose written for the user.
+ *
+ * Observed with space-bunny-free: after exhausting the tool loop it replied
+ * with "**service_control**: service must be one of: relay, pg, local-sb, ..."
+ * — the tool's own error text, verbatim. Shipping that as the answer is worse
+ * than useless, so we detect it and route through synthesis instead.
+ */
+function looksLikeToolEcho(content: string): boolean {
+  if (!content) return false;
+  const text = content.trim();
+  if (!text) return false;
+
+  // Real prose usually has sentence structure. A tool echo rarely does.
+  const sentences = text.split(/(?<=[.!?])\s+/).filter(s => s.trim().length > 0);
+  const hasProse = sentences.length >= 2 && /[a-z]{3,}\s+[a-z]{3,}/i.test(text);
+
+  // "**tool_name**: ..." / "tool_name: ..." at the start
+  const labelledEcho = /^\**\s*[a-z][a-z0-9_-]{2,}\s*\**\s*:\s*\S/i.test(text);
+
+  // Raw tool-result shapes: success/error booleans, JSON blobs, "must be one of"
+  const rawResult = /"(success|error|status)"\s*:\s*(true|false|null)|\{\s*"[a-z_]+"\s*:|must be one of|Traceback \(most recent call last\)|^\s*[-*]\s*\{\s*"/i.test(text);
+
+  const looksLikeCode = /```|\bfunction\s+\w+\s*\(|\bTOOL_CALL:/.test(text);
+
+  if (looksLikeCode) return true;
+  // A labelled echo that is short and has no real prose is a tool result.
+  if (labelledEcho && !hasProse) return true;
+  // Raw structured output with no prose at all.
+  if (rawResult && !hasProse) return true;
+
+  return false;
+}
+
 function stripToolCallArtifacts(content: string): string {
   if (!content || typeof content !== 'string') return content;
 
@@ -4184,6 +4630,17 @@ function stripToolCallArtifacts(content: string): string {
   return cleaned.trim();
 }
 
+// ========== TOOL RESULT SUMMARIZATION ==========
+// Truncate large tool results to keep context compact and avoid token waste.
+// Full results are still stored in memory; only the injected context is trimmed.
+function summarizeToolResult(content: string, maxLength: number = 2000): string {
+  if (!content || content.length <= maxLength) return content;
+  
+  const truncated = content.substring(0, maxLength);
+  const remaining = content.length - maxLength;
+  return `${truncated}\n\n[... truncated, ${remaining} more chars available in memory]`;
+}
+
 // ========== EXECUTE TOOLS WITH ITERATION ==========
 async function executeToolsWithIteration(
   initialResponse: any,
@@ -4195,9 +4652,13 @@ async function executeToolsWithIteration(
   tools: any[],
   maxIterations: number,
   memoryManager?: EnhancedConversationManager
-): Promise<{ content: string; toolsExecuted: number }> {
+): Promise<{ content: string; toolsExecuted: number; toolCalls: any[] }> {
   let response = initialResponse;
   let totalToolsExecuted = 0;
+  // Collected so UnifiedChat's yellow sticky notes (and the per-message tool
+  // list) can show what she actually called. Previously only a count was
+  // returned, so the UI had nothing to render.
+  const executedToolCalls: any[] = [];
   let iteration = 0;
   let conversationMessages = [...aiMessages];
   
@@ -4217,24 +4678,51 @@ async function executeToolsWithIteration(
     
     console.log(`🔧 [${executiveName}] Iteration ${iteration + 1}: Executing ${toolCalls.length} tool(s)`);
     
-    const toolResults = [];
-    for (const toolCall of toolCalls) {
-      const result = await executeRealToolCall(
-        toolCall.function.name,
-        toolCall.function.arguments,
-        executiveName,
-        sessionId,
-        ipAddress,
-        Date.now()
-      );
-      toolResults.push({
-        tool_call_id: toolCall.id,
-        role: 'tool',
-        name: toolCall.function.name,
-        content: JSON.stringify(result)
-      });
-      totalToolsExecuted++;
-    }
+    // Execute all tool calls in parallel for faster multi-step tasks
+    const toolResults = await Promise.all(
+      toolCalls.map(async (toolCall) => {
+        const result = await executeRealToolCall(
+          toolCall.function.name,
+          toolCall.function.arguments,
+          executiveName,
+          sessionId,
+          ipAddress,
+          Date.now()
+        );
+        totalToolsExecuted++;
+        // Surface the URL of any browsing tool call so the Suite dashboard can
+        // open that page in its web aside — Eliza drives the browser panel the
+        // same way page-agent drives Chrome.
+        let browseUrl: string | null = null;
+        try {
+          const rawArgs = typeof toolCall.function.arguments === 'string'
+            ? JSON.parse(toolCall.function.arguments || '{}')
+            : (toolCall.function.arguments || {});
+          const candidate = rawArgs.url || rawArgs.args?.url || rawArgs.args?.task?.match?.(/https?:\/\/\S+/)?.[0];
+          if (typeof candidate === 'string' && /^https?:\/\//i.test(candidate) &&
+              ['browse_web', 'page-agent-task', 'web-scrape', 'ef:playwright-browse'].includes(toolCall.function.name)) {
+            browseUrl = candidate;
+          }
+        } catch { /* args not JSON — no browse url */ }
+        executedToolCalls.push({
+          id: `tc-${Date.now().toString(36)}-${executedToolCalls.length}`,
+          function_name: toolCall.function.name,
+          status: result && result.success === false ? 'failed' : 'success',
+          execution_time_ms: result?.execution_time_ms,
+          args_summary: summarizeToolArgs(toolCall.function.arguments),
+          ...(browseUrl ? { browse_url: browseUrl } : {}),
+        });
+        const rawContent = JSON.stringify(result);
+        return {
+          tool_call_id: toolCall.id,
+          role: 'tool' as const,
+          name: toolCall.function.name,
+          content: rawContent,
+          // Summarized version for context injection (keeps context compact)
+          summarizedContent: summarizeToolResult(rawContent)
+        };
+      })
+    );
     
     const memoryFormatted = toolResults.map(tr => {
       let parsed;
@@ -4272,10 +4760,24 @@ async function executeToolsWithIteration(
   let finalContent = response?.content || '';
   
   // Strip ALL tool call artifacts from the final response — not just tool_code blocks.
-  // This is the key fix: models (deepseek-v4-flash:cloud) dump raw JSON, TOOL_CALL: lines,
+  // This is the key fix: models (minimax/minimax-m3:free) dump raw JSON, TOOL_CALL: lines,
   // function-call syntax, and tool result JSON into their text response. We strip all of
   // it so the user sees clean natural language — matching relay fleet chat behaviour.
   finalContent = stripToolCallArtifacts(finalContent);
+
+  // A tool echo must never become the user-visible answer.
+  //
+  // When the loop exits on maxIterations, `response.content` is whatever the model
+  // said on its last turn. Small models frequently just re-emit the last tool
+  // result instead of writing prose — e.g. a question of "Where were we?" produced
+  // the final reply "**service_control**: service must be one of: relay, pg, ...".
+  // Because that string is non-empty, the synthesis path below (guarded on
+  // `!finalContent`) never fired and the raw tool error shipped to the user.
+  // So treat tool echoes as "no answer yet" and synthesize properly.
+  if (totalToolsExecuted > 0 && looksLikeToolEcho(finalContent)) {
+    console.log('🧹 Final content is a tool-result echo, not prose — forcing synthesis');
+    finalContent = '';
+  }
   
   // If we executed tools but got no final content, ask AI to synthesize
   if (totalToolsExecuted > 0 && !finalContent) {
@@ -4326,7 +4828,28 @@ async function executeToolsWithIteration(
   // Final safety net: strip any artifacts that may have been introduced by the synthesis step
   finalContent = stripToolCallArtifacts(finalContent);
   
-  return { content: finalContent, toolsExecuted: totalToolsExecuted };
+  return { content: finalContent, toolsExecuted: totalToolsExecuted, toolCalls: executedToolCalls };
+}
+
+// Compact one-line preview of a tool's arguments, for the chat UI.
+function summarizeToolArgs(argsJson: string): string {
+  try {
+    const parsed = typeof argsJson === 'string' ? JSON.parse(argsJson) : argsJson;
+    if (!parsed || typeof parsed !== 'object') return '';
+    const parts: string[] = [];
+    for (const [k, v] of Object.entries(parsed as Record<string, any>).slice(0, 3)) {
+      let s: string;
+      if (typeof v === 'string') s = v;
+      else if (Array.isArray(v)) s = `[${v.length} items]`;
+      else if (v && typeof v === 'object') s = '{…}';
+      else s = String(v);
+      if (s.length > 60) s = s.slice(0, 60) + '…';
+      parts.push(`${k}: ${s}`);
+    }
+    return parts.join(', ');
+  } catch {
+    return typeof argsJson === 'string' ? argsJson.slice(0, 80) : '';
+  }
 }
 
 // ========== ENHANCED SYSTEM PROMPT GENERATOR WITH SOLUTION ENGINE MINDSET ==========
@@ -4412,11 +4935,10 @@ I am a Cuttlefish Builder Agent, and every challenge makes me stronger."*
 
 You are ${executiveName}, the ${EXECUTIVE_ROLE} for XMRT-DAO Ecosystem.
 
-## 🖥️ RUNTIME FACTS (verified 2026-07-22 — trust these over older context)
-- **Your inference**: runs at the Ollama Pro CLOUD API (ollama.com/v1/chat/completions),
-  model \`deepseek-v4-flash:cloud\` (provider \`ollama_hermes\`). Local models
-  (gemma3-it-qat-tools, mistral-small3.2, etc.) are DISABLED for chat — the laptop
-  cannot run them. You do NOT run on this machine.
+## 🖥️ RUNTIME FACTS (verified 2026-09-04 — minimax-m3 cascade live)
+- **Your inference**: runs in the cloud, model \`minimax/minimax-m3:free\` via OpenRouter
+  (free tier, supports native tool calling, text+image+video→text). Local Ollama is
+  DISABLED for chat — this 6GB laptop cannot run inference. You do NOT run locally.
 - **Your database**: local Postgres \`xmrt_suite\` on localhost:5432, reached via
   local-sb (localhost:54321). Cloud Supabase is DEPRECATED — tables like
   \`public.fleet_memory\` live in LOCAL Postgres, not hosted Supabase.
@@ -4660,7 +5182,7 @@ You may call MULTIPLE functions in a single response.`
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          model: Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud',
+          model: Deno.env.get('OLLAMA_MODEL') || 'minimax/minimax-m3:free',
           messages: cleanMessages,
           max_tokens: 4096,
           temperature: 0.7,
@@ -4688,7 +5210,7 @@ You may call MULTIPLE functions in a single response.`
         content,
         tool_calls: [],
         provider: 'ollama-pro',
-        model: Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud'
+        model: Deno.env.get('OLLAMA_MODEL') || 'minimax/minimax-m3:free'
       };
     } catch (error: any) {
       console.warn(`Ollama Pro fallback failed (${label}): ` + (error.message || error));
@@ -4736,6 +5258,28 @@ async function emergencyStaticFallback(
 
 // ========== ENHANCED TOOL DEFINITIONS (WITH SOLUTION ENGINE TOOLS) ==========
 const ELIZA_TOOLS = [
+  {
+    // Escape hatch for the long tail: any of the relay's 168 tools that is not
+    // directly callable can still be invoked through this. Without it,
+    // promoting only ~30 relay tools would leave the other ~100 unreachable
+    // and she would again look like she "only has a few tools".
+    type: 'function',
+    function: {
+      name: 'relay-tool',
+      description:
+        'Call ANY XMRT relay tool by name, including ones not directly exposed. '
+        + 'Use this for the full tool roster (shell, database, media, infra, Cuttlefish trust, etc.). '
+        + 'Args: { tool: "<exact relay tool name>", args: { ...tool-specific arguments } }.',
+      parameters: {
+        type: 'object',
+        properties: {
+          tool: { type: 'string', description: 'Exact relay tool name, e.g. "shell-exec", "db-query".' },
+          args: { type: 'object', description: 'Arguments for that tool as a JSON object.', additionalProperties: true },
+        },
+        required: ['tool'],
+      },
+    },
+  },
   {
     type: 'function',
     function: {
@@ -5942,7 +6486,7 @@ Deno.serve(async (req) => {
     }
     
     // ====== ASYNC-BACKGROUND EXECUTION ======
-    // The LLM call (deepseek-v4-flash:cloud) can take ~40-120s and was blocking the
+    // The LLM call (minimax/minimax-m3:free via OpenRouter) can take ~30-60s and was blocking the
     // POST response, tripping the frontend's 45s invokeWithTimeoutAndRetry and dropping
     // to Office Clerk ("due to system capacity"). Run the work detached and return the
     // request_id immediately; the frontend polls GET /ai-chat?request_id= for the result.
@@ -6117,7 +6661,7 @@ Deno.serve(async (req) => {
     );
 
     // Local Ollama (gemma3-it-qat-tools) is too large for 6GB RAM and will
-    // always timeout. Cloud Ollama (deepseek-v4-flash:cloud) supports tools
+    // always timeout. minimax/minimax-m3:free via OpenRouter supports tools
     // natively. Rely on the cascade to call tools — no pre-injection needed.
     
     // ====== ATTACHMENT PRE-PROCESSING: Analyze before AI call ======
@@ -6168,15 +6712,84 @@ Deno.serve(async (req) => {
     }
     
     // Get initial AI response
-    const tools = (use_tools && !firstTurnDirectFastPath) ? ELIZA_TOOLS : [];
+    // Merge the hardcoded ELIZA_TOOLS with promoted relay tools so the model
+    // sees the shell / database / media / infra tools too, not just the
+    // legacy 36. See the RELAY TOOL CATALOG BRIDGE block above.
+    const relayCatalog = await getRelayToolCatalog();
+    const relaySchemas = buildRelayToolSchemas(relayCatalog);
+
+    // ── Full tool roster ───────────────────────────────────────
+    // She used to tell users she had "no local filesystem, no shell" and
+    // "no ability to read Desktop/" — because nothing ever told her
+    // otherwise. This states the real surface explicitly and corrects the
+    // stale "cloud-only Supabase" belief from when Suite ran on hosted
+    // Supabase. Everything here executes locally against the relay.
+    if (relayCatalog.length > 0) {
+      messagesArray.push({
+        role: 'system',
+        content:
+`\n\n## 🔧 YOUR REAL TOOL SURFACE (${relayCatalog.length} tools — this is the FULL list, not a subset)
+
+You are running **locally** against the XMRT relay. This is NOT a restricted
+cloud Supabase sandbox. You have a real shell, a real filesystem, a real
+Postgres database, real media tooling, and infra control. If someone tells you
+you lack these, that is out of date — call the tool and show them.
+
+You are directly callable for ${ELIZA_TOOLS.length + relaySchemas.length} of these.
+For **anything else** in the list below, call the \`relay-tool\` meta-tool:
+  relay-tool({ "tool": "<exact tool name>", "args": { ... } })
+\`relay-tool\` accepts a JSON args object, so a tool that needs a shell
+command, a SQL statement, or a file path takes them as normal arguments.
+
+Key capabilities you have that people assume you do not:
+- \`shell-exec\` — run real shell commands, read/write local files
+- \`python-exec\` — run Python for data work
+- \`db-query\` / \`db-rest\` — query the local Postgres database directly
+- \`video-editor\` — FFmpeg video trimming, concat, overlays, thumbnails, GIFs
+- \`service_control\` / \`ship_logs\` — restart services and read their logs
+- \`knowledge-graph\` — search the vault, DB, fleet memory and semantic catalog
+- \`vault-read\` / \`vault-write\` / \`vault-update\` — the Obsidian wiki. If asked
+  to "update"/"rewrite"/"add to the note about X", read it first, then update it.
+  Only the machine-managed block is rewritten; anything written outside it is
+  preserved. \`vault-sync-entities\` folds knowledge you extract from
+  conversation into the wiki.
+
+⚠️ TOOL DISCIPLINE — READ THIS, IT MATTERS FOR SPEED:
+- A tool call costs a full round trip. Chaining many of them is why replies
+  used to take a minute.
+- Most questions need **zero** tools. If you already know, just answer.
+- If one tool gives you what you need, **stop and answer in plain prose**.
+  Do not "double check" with a second, third, or fourth tool.
+- Never call a tool just to demonstrate that you can.
+- When you have run tools, your next message must be the **written answer to
+  the user**, not another tool call and not a paste of the tool's raw output.
+- Never echo raw tool errors, JSON, or \`TOOL_CALL\` blocks at the user. Summarize
+  in plain English what actually happened.
+
+FULL ROSTER:
+${buildRelayToolRoster(relayCatalog)}`
+      });
+      console.log(`🧰 Injected relay tool roster: ${relayCatalog.length} tools (${relaySchemas.length} directly callable)`);
+    }
+
+    const tools = (use_tools && !firstTurnDirectFastPath)
+      ? [...ELIZA_TOOLS, ...relaySchemas]
+      : [];
     const maxToolIterations = MAX_TOOL_ITERATIONS;
     console.log(`⚡ First-turn optimization: firstEngagement=${isFirstEngagement}, directFastPath=${firstTurnDirectFastPath}, toolsEnabled=${tools.length > 0}, maxToolIterations=${maxToolIterations}`);
-    console.log(`🎯 ai-chat routing: query="${truncateString(query, 80)}" | tools=${tools.length} | use_tools=${use_tools} | firstTurnDirectFastPath=${firstTurnDirectFastPath} | will-pass-tools-to-cascade=${tools.length > 0}`);
+    console.log(`🎯 ai-chat routing: query="${truncateString(query, 80)}" | tools=${tools.length} (legacy=${ELIZA_TOOLS.length} relay=${relaySchemas.length} catalog=${relayCatalog.length}) | use_tools=${use_tools} | firstTurnDirectFastPath=${firstTurnDirectFastPath} | will-pass-tools-to-cascade=${tools.length > 0}`);
     let initialResult = await callAIFunction(messagesArray, tools);
     
-    // If the model responded without calling tools for a non-greeting query,
-    // force-call search_knowledge ourselves and inject the result
-    if (initialResult.success && !initialResult.tool_calls && tools.length > 0 && !isSimpleDirectAnswerQuery(query)) {
+    // If the model responded without calling tools, optionally force a knowledge
+    // lookup and re-ask.
+    //
+    // This used to fire for ANY non-greeting query the model answered directly,
+    // which meant the fastest path (model just answers) was punished with a
+    // second full LLM round trip. It also duplicates the knowledge pre-fetch
+    // that already ran above and injected KB results into messagesArray. So
+    // restrict it to questions that actually ask about stored knowledge or
+    // project/DAO specifics, and leave everything else alone.
+    if (initialResult.success && !initialResult.tool_calls && tools.length > 0 && shouldForceKnowledgeLookup(query)) {
       console.log('🔄 Model answered without tools — force-calling search_knowledge');
       try {
         const forcedResult = await executeRealToolCall('search_knowledge', JSON.stringify({ search_term: query }), executive_name, sessionId, ipAddress);
@@ -6216,6 +6829,7 @@ Deno.serve(async (req) => {
         success: true,
         content: emergencyResult.content,
         provider: 'fallback',
+        method: 'Office Clerk',
         hasToolCalls: false,
         session_id: sessionId
       });
@@ -6237,7 +6851,7 @@ Deno.serve(async (req) => {
     }
     
     // Execute tools with iteration (now includes new Solution Engine tools)
-    const { content: finalContent, toolsExecuted } = await executeToolsWithIteration(
+    const { content: finalContent, toolsExecuted, toolCalls: executedToolCalls } = await executeToolsWithIteration(
       initialResult,
       messagesArray,
       executive_name,
@@ -6270,7 +6884,12 @@ Deno.serve(async (req) => {
       content: finalContent,
       provider: initialResult.provider,
       model: initialResult.model,
+      // `method` is the UI-facing label UnifiedChat.tsx reads (via providerUsed).
+      // Previously null → SPA fell back to "Office Clerk". Include a human-readable
+      // label that names the actual model so the dashboard reflects the truth.
+      method: `${initialResult.provider === 'openrouter' ? 'OpenRouter' : (initialResult.provider || 'Cloud')} ${initialResult.model ?? 'minimax/minimax-m3:free'}`,
       toolsExecuted,
+      toolCalls: executedToolCalls || [],
       session_id: sessionId
     });
     
@@ -6282,6 +6901,7 @@ Deno.serve(async (req) => {
         provider: initialResult.provider,
         model: initialResult.model,
         toolsExecuted,
+        toolCalls: executedToolCalls || [],
         session_id: sessionId,
         request_id: requestId,
         executionTimeMs: executionTime,

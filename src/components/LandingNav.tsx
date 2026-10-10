@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { SuiteLogo } from '@/components/SuiteLogo';
-import { AuthModal } from '@/components/AuthModal';
 import { LanguageToggle } from '@/components/LanguageToggle';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { Menu, X, LogIn, Sparkles, Shield, FileText } from 'lucide-react';
@@ -18,20 +17,34 @@ import { toast } from 'sonner';
 
 export function LandingNav() {
   const navigate = useNavigate();
-  const { signInWithGoogle, isAuthenticated } = useAuth();
+  const { isAuthenticated } = useAuth();
   const { t } = useLanguage();
-  const [authModalOpen, setAuthModalOpen] = useState(false);
   const [isSigningIn, setIsSigningIn] = useState(false);
+
+  // API key is the only sign-in method, and the field lives on this page.
+  // Land the user on it rather than opening a dialog with nothing in it.
+  const goToApiKeyField = () => {
+    const isLanding = location.pathname === '/suite/' || location.pathname === '/suite';
+    if (!isLanding) {
+      navigate('/');
+      return;
+    }
+    // The form renders twice, once per breakpoint, so pick the visible one.
+    const fields = Array.from(
+      document.querySelectorAll<HTMLInputElement>('[data-api-key-input]')
+    );
+    const field = fields.find((f) => f.offsetParent !== null) ?? fields[0];
+    if (!field) return;
+    field.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    field.focus();
+  };
 
   const handleGetStarted = async () => {
     if (isAuthenticated) {
       navigate('/dashboard');
       return;
     }
-    
-    // If we're on the landing page, we don't have the email yet
-    // The AuthModal will handle the email-specific scope request
-    setAuthModalOpen(true);
+    goToApiKeyField();
   };
 
   return (
@@ -89,9 +102,9 @@ export function LandingNav() {
                     {t('button.dashboard')}
                   </DropdownMenuItem>
                 ) : (
-                  <DropdownMenuItem onClick={() => setAuthModalOpen(true)}>
+                  <DropdownMenuItem onClick={goToApiKeyField}>
                     <LogIn className="w-4 h-4 mr-2" />
-                    {t('button.signin')}
+                    Sign in with API key
                   </DropdownMenuItem>
                 )}
               </DropdownMenuContent>
@@ -99,8 +112,6 @@ export function LandingNav() {
           </div>
         </div>
       </header>
-
-      <AuthModal open={authModalOpen} onOpenChange={setAuthModalOpen} />
     </>
   );
 }

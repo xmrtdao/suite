@@ -187,8 +187,14 @@ serve(async (req) => {
     const sessionId = rawSessionId || sessionKey || session_id;
     const resolvedAgentId = agentId || agent_id || null;
 
-    // Auto-generate session key from IP (deterministic, survives page refresh)
-    const resolvedSessionKey = await generateSessionKey(req);
+    // Honor the client's stable session key when provided (e.g. 'suite-web' for
+    // anonymous, 'user-<id>' for authenticated). Only fall back to IP-derived
+    // keying when the client did NOT send a sessionKey. This prevents history
+    // from being orphaned under a new IP-derived key whenever the client's IP
+    // changes (VPN, network switch, proxy rotation).
+    const resolvedSessionKey = sessionKey
+      ? String(sessionKey).trim()
+      : await generateSessionKey(req);
 
     switch (action) {
       // ── Get or create a session ──

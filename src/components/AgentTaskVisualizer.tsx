@@ -15,6 +15,12 @@ import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from '@/hooks/use-toast';
 import { useIsMobile } from '@/hooks/useIsMobile';
+// Restored along with the provisioning call. The dialog had been stubbed out to
+// "provisioning is not available in the local stack", which described the symptom
+// and not the cause: agent-manager does run locally and answers on the relay
+// origin, because the relay proxies /functions/v1 through to local-sb. The
+// import went when the call did, and is needed again.
+import { supabase } from '@/integrations/supabase/client';
 import {
   MessageSquare,
   FileText,
@@ -189,6 +195,11 @@ function AgentCard({ agent, taskCount, assignedTasks, onAgentClick, onTaskDropTo
       onClick={() => onAgentClick(agent)}
       onDragOver={handleDragOver}
       onDrop={(e) => onTaskDropToAgent(e, agent.id)}
+      // getPrimaryName keeps only the first word, so "Provisioning Path Test"
+      // renders as "Provisioning" and the rest of the name is unrecoverable from
+      // the grid. Short is right for the card; the full name belongs in the
+      // tooltip, or an agent whose name happens to be two words is half-erased.
+      title={agent.name || undefined}
       className={`p-2.5 rounded-lg border transition-all cursor-pointer ${isDragOverAgent
         ? 'border-primary bg-primary/20 ring-2 ring-primary/50 scale-105'
         : hasUrgent
@@ -471,13 +482,60 @@ function ProvisionAgentDialog({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Agent provisioning requires the cloud edge function (agent-manager) which is not available locally.
-    toast({
-      title: 'Provisioning Unavailable',
-      description: 'Agent provisioning requires the cloud agent-manager edge function, which is not available in the local stack.',
-      variant: 'destructive',
-    });
-    setIsLoading(false);
+    setIsLoading(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('agent-manager', {
+        body: {
+          action: 'provision_openclaw_agent',
+          data: formData,
+        },
+      });
+
+      if (error) throw error;
+      if (!data?.ok || !data?.data?.success) {
+        throw new Error(data?.error || data?.data?.error || 'Failed to provision agent');
+      }
+
+      const uni = data.data.university;
+
+      // Three outcomes, not one. Provisioning and University enrolment are
+      // separate subsystems and they fail separately, and an operator told
+      // "provisioned" when enrolment silently failed finds out weeks later,
+      // when the agent still cannot be certified.
+      if (uni?.enrolled) {
+        toast({
+          title: 'Agent Provisioned',
+          description: uni.alreadyEnrolled
+            ? `${formData.name} was already enrolled in XMRT University.`
+            : `${formData.name} registered and enrolled in XMRT University — ${uni.totalModules ?? 14} modules to complete before it can be certified.`,
+        });
+      } else {
+        toast({
+          title: 'Provisioned — but not enrolled',
+          description: `${formData.name} is registered, but XMRT University enrolment failed: ${uni?.error ?? 'unknown reason'}. ${uni?.remedy ?? ''}`,
+          variant: 'destructive',
+        });
+      }
+
+      onSuccess();
+      onOpenChange(false);
+      setFormData({ name: '', id: '', role: 'developer', description: '', priority: 5, gateway_url: 'http://localhost:18789', session_key: 'agent:main:main' });
+    } catch (err) {
+      console.error('Provisioning failed:', err);
+      // "already exists" is not a failure, it is a duplicate, and it deserves
+      // its own words rather than being reported as a broken button.
+      const message = err instanceof Error ? err.message : 'Unknown error';
+      const isDuplicate = /already exists/i.test(message);
+      toast({
+        title: isDuplicate ? 'Agent Already Registered' : 'Provisioning Failed',
+        description: isDuplicate
+          ? `An agent with ID "${formData.id}" is already in the fleet. Pick a different ID, or manage the existing one.`
+          : message,
+        variant: isDuplicate ? 'default' : 'destructive',
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -662,6 +720,16 @@ export function AgentTaskVisualizer() {
     }
   };
 
+  /**
+   * Reassign a task, recording a handoff.
+   *
+   * This used to be a second, near-identical copy of the body below that logged
+   * `task_reassigned` with no handoff detail. Both existed because the
+   * drag-and-drop path and the agent-detail-sheet path were written separately,
+   * so the same user action produced two different records depending on which
+   * control you used - and the sheet, which is what you reach for on desktop,
+   * silently skipped the handoff. One implementation, one record shape.
+   */
   const handleTaskReassign = async (taskId: string, newAgentId: string | null) => {
     const task = tasks.find(t => t.id === taskId);
     if (!task) return;
@@ -670,80 +738,11 @@ export function AgentTaskVisualizer() {
     const newAgent = newAgentId ? agentMap.get(newAgentId) : null;
     const oldAgent = oldAgentId ? agentMap.get(oldAgentId) : null;
 
-    try {
-      // Update task in database
-      const { error: updateError } = await localUpdateTask(taskId, {
-        assignee_agent_id: newAgentId,
-        updated_at: new Date().toISOString()
-      });
-      if (updateError) throw new Error(updateError.message);
+    const aiConfirmation = newAgent
+      ? await generateHandoffConfirmation(task, newAgent, oldAgent)
+      : 'Task unassigned.';
 
-      // Update agent workloads
-      if (oldAgentId) {
-        await localUpdateAgent(oldAgentId, {
-          current_workload: Math.max(0, (oldAgent?.current_workload || 1) - 1),
-          status: 'IDLE'
-        });
-      }
-
-      if (newAgentId) {
-        await localUpdateAgent(newAgentId, {
-          current_workload: (newAgent?.current_workload || 0) + 1,
-          status: 'BUSY'
-        });
-      }
-
-      // Log activity
-      await localCreateActivityLog({
-        activity_type: 'task_reassigned',
-        title: newAgentId
-          ? `Task assigned to ${newAgent?.name || 'agent'}`
-          : `Task unassigned from ${oldAgent?.name || 'agent'}`,
-        description: `"${task.title}" ${newAgentId ? `reassigned to ${newAgent?.name}` : 'unassigned'}`,
-        status: 'completed',
-        task_id: taskId,
-        agent_id: newAgentId || oldAgentId || null,
-        metadata: {
-          task_title: task.title,
-          old_agent_id: oldAgentId,
-          new_agent_id: newAgentId,
-          old_agent_name: oldAgent?.name,
-          new_agent_name: newAgent?.name,
-        }
-      });
-
-      // Update local state
-      setTasks(prev => prev.map(t =>
-        t.id === taskId ? { ...t, assignee_agent_id: newAgentId } : t
-      ));
-
-      // Update agents state
-      setAgents(prev => prev.map(a => {
-        if (a.id === oldAgentId) {
-          return { ...a, current_workload: Math.max(0, (a.current_workload || 1) - 1), status: 'IDLE' };
-        }
-        if (a.id === newAgentId) {
-          return { ...a, current_workload: (a.current_workload || 0) + 1, status: 'BUSY' };
-        }
-        return a;
-      }));
-
-      toast({
-        title: newAgentId ? 'Task reassigned' : 'Task unassigned',
-        description: newAgentId
-          ? `"${task.title.slice(0, 30)}..." assigned to ${newAgent?.name}`
-          : `"${task.title.slice(0, 30)}..." unassigned`,
-      });
-
-    } catch (err) {
-      console.error('[AgentTaskVisualizer] Failed to reassign task:', err);
-      toast({
-        title: 'Failed to reassign task',
-        description: err instanceof Error ? err.message : 'An error occurred',
-        variant: 'destructive',
-      });
-      throw err;
-    }
+    return handleTaskReassignWithHandoff(taskId, newAgentId, aiConfirmation, oldAgent, newAgent);
   };
 
   // Generate AI handoff confirmation — static fallback (cloud lovable-chat edge function unavailable locally)
@@ -877,6 +876,12 @@ export function AgentTaskVisualizer() {
     setDraggedTask(task);
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', task.id);
+    // The agent detail sheet's drop zone reads 'taskId' and 'sourceAgentId',
+    // not 'text/plain' - two different contracts for the same drag. Without
+    // these, a task dragged out of the pipeline could never be dropped onto an
+    // agent's sheet, and the zone silently did nothing on every drop.
+    e.dataTransfer.setData('taskId', task.id);
+    e.dataTransfer.setData('sourceAgentId', task.assignee_agent_id || '');
   };
 
   const handleDragEnd = () => {
@@ -1011,12 +1016,12 @@ export function AgentTaskVisualizer() {
 
       if (tasksRes.error) {
         console.error('[AgentTaskVisualizer] Tasks error:', tasksRes.error);
-        setError(`Tasks: ${tasksRes.error.message}`);
+        setError(`Tasks: ${tasksRes.error?.message || tasksRes.error?.error || JSON.stringify(tasksRes.error)}`);
       }
 
       if (agentsRes.error) {
         console.error('[AgentTaskVisualizer] Agents error:', agentsRes.error);
-        setError(prev => prev ? `${prev}; Agents: ${agentsRes.error.message}` : `Agents: ${agentsRes.error.message}`);
+        setError(prev => prev ? `${prev}; Agents: ${agentsRes.error?.message || agentsRes.error?.error || JSON.stringify(agentsRes.error)}` : `Agents: ${agentsRes.error?.message || agentsRes.error?.error || JSON.stringify(agentsRes.error)}`);
       }
 
       if (tasksRes.data) {
@@ -1246,7 +1251,11 @@ export function AgentTaskVisualizer() {
         isOpen={isAgentSheetOpen}
         onClose={() => setIsAgentSheetOpen(false)}
         onTaskReassign={handleTaskReassign}
-        onTaskDrop={(taskId) => handleTaskReassign(taskId, selectedAgent?.id || null)}
+        onTaskDrop={async (taskId: string) => {
+          // The sheet awaits this and then refetches its own task list, so the
+          // promise has to cover the write rather than fire and forget.
+          await handleTaskReassign(taskId, selectedAgent?.id || null);
+        }}
         draggedTaskId={draggedTask?.id || null}
       />
 

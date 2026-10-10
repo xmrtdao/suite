@@ -41,10 +41,10 @@ class ConsolidatedAIService {
     this.providers.push({
       name: 'Gemini',
       supportsImages: true,
-      isAvailable: () => !!import.meta.env.VITE_GEMINI_API_KEY,
+      isAvailable: () => !!import.meta.env.GEMINI_API_KEY,
       chat: async (messages: AIMessage[], options?: AIOptions) => {
         if (!this.geminiClient) {
-          this.geminiClient = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY);
+          this.geminiClient = new GoogleGenerativeAI(import.meta.env.GEMINI_API_KEY);
         }
 
         const model = this.geminiClient.getGenerativeModel({ 
@@ -90,9 +90,9 @@ class ConsolidatedAIService {
     this.providers.push({
       name: 'OpenAI',
       supportsImages: false,
-      isAvailable: () => !!import.meta.env.VITE_OPENAI_API_KEY,
+      isAvailable: () => !!import.meta.env.OPENAI_API_KEY,
       chat: async (messages: AIMessage[], options?: AIOptions) => {
-        const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
+        const apiKey = import.meta.env.OPENAI_API_KEY;
         
         const formattedMessages = messages.map(msg => ({
           role: msg.role,
@@ -126,6 +126,44 @@ class ConsolidatedAIService {
 
         const data = await response.json();
         return data.choices[0].message.content;
+      }
+    });
+
+
+    // Provider 2b: Free cloud LLM (minimax/minimax-m3 via OpenRouter) — free tier, no paid key needed
+    this.providers.push({
+      name: 'MinimaxFree',
+      supportsImages: false,
+      isAvailable: () => !!(import.meta.env.OPENROUTER_API_KEY || import.meta.env.MINIMAX_API_KEY),
+      chat: async (messages: any[], options?: any) => {
+        const apiKey = import.meta.env.OPENROUTER_API_KEY || import.meta.env.MINIMAX_API_KEY || '';
+        const formattedMessages = messages.map(msg => ({
+          role: msg.role,
+          content: msg.content
+        }));
+        if (options?.systemPrompt) {
+          formattedMessages.unshift({ role: 'system', content: options.systemPrompt });
+        }
+        const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://suite.mobilemonero.com',
+            'X-Title': 'MobileMonero-Suite'
+          },
+          body: JSON.stringify({
+            model: 'gemma4:31b'  // updated to working relay cascade primary (minimax/minimax-m3:free unavailable per openrouter 404),
+            messages: formattedMessages,
+            temperature: options?.temperature || 0.7,
+            max_tokens: options?.maxTokens || 2048
+          })
+        });
+        if (!response.ok) {
+          throw new Error(`MinimaxFree/OpenRouter API error: ${response.statusText}`);
+        }
+        const data = await response.json();
+        return data.choices?.[0]?.message?.content || data.choices?.[0]?.content || JSON.stringify(data);
       }
     });
 
@@ -195,8 +233,8 @@ class ConsolidatedAIService {
     onChunk: (chunk: string) => void
   ): Promise<void> {
     // Streaming implementation for real-time responses
-    if (!this.geminiClient && import.meta.env.VITE_GEMINI_API_KEY) {
-      this.geminiClient = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY);
+    if (!this.geminiClient && import.meta.env.GEMINI_API_KEY) {
+      this.geminiClient = new GoogleGenerativeAI(import.meta.env.GEMINI_API_KEY);
     }
 
     if (this.geminiClient) {

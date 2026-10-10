@@ -1,10 +1,12 @@
 /**
  * Unified AI Fallback Service - GOOGLE CLOUD OAUTH2 PRIMARY VERSION
  * Provider cascade:
- *   1. Vertex AI via Service Account JWT (OAuth2) — primary, most reliable
- *   2. Vertex AI via Gemini API key — fallback
- *   3. DeepSeek V3
- *   4. Kimi
+ *   1. OpenCode Zen (opencode.ai/zen/v1, space-bunny-free) — separate quota pool
+ *   2. Ollama Pro Cloud
+ *   3. Vertex AI via Service Account JWT (OAuth2)
+ *   4. Vertex AI via Gemini API key
+ *   5. DeepSeek V3
+ *   6. Kimi
  *
  * TIMEOUT GUARDS: Per-provider timeouts prevent cascade hangs
  * FAST-FAIL: 402/429 errors skip immediately to next provider
@@ -19,12 +21,14 @@ const PROVIDER_TIMEOUTS = {
   gemini: 8000,       // Gemini API key fallback
   vertexai: 8000,     // Vertex AI Express Mode
   deepseek: 10000,    // Slightly longer for reasoning
-  kimi: 8000,
+  kimi: 8000,         // Kimi
   lovable: 10000,     // Lovable API
   ollamaPro: 15000,   // Ollama Pro cloud (OpenAI-compatible)
+  opencodeZen: 15000, // OpenCode Zen (OpenAI-compatible, space-bunny-free)
   embedding: 10000,
-};
-const RESPONSE_MAX_TOKENS = parseInt(Deno.env.get('RESPONSE_MAX_TOKENS') || '16000');
+  openrouter: 120000   // OpenRouter free models — higher timeout since they're cloud-hosted
+}
+const RESPONSE_MAX_TOKENS = parseInt(Deno.env.get('RESPONSE_MAX_TOKENS') || '32000');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SERVICE ACCOUNT JWT HELPER
@@ -916,11 +920,125 @@ async function handleOllamaResponse(response: Response, model: string): Promise<
 }
 
 /**
+ * Call OpenCode Zen via opencode.ai/zen/v1 (OpenAI-compatible).
+ * Uses OPENCODE_API_KEY. Default model: space-bunny-free.
+ *
+ * Only space-bunny-free is reachable from outside the OpenCode client — every
+ * other *-free Zen model (longcat-2.5-preview-free, jev-1.13-free, big-pickle,
+ * nemotron-3.5-lightning-free, muse-spark-1.3-contributor-free, ...) answers
+ * 403 "OpenCode's free tier can only be used from within OpenCode". Keep this
+ * list explicit and only add a model after verifying a 200 from this runtime.
+ *
+ * Runs first in the cascade because the Ollama Pro and OpenRouter free tiers
+ * get rate-limited together and take the whole fleet offline together; Zen bills
+ * against a separate quota pool.
+ */
+const OPENCODE_ZEN_MODELS = ['space-bunny-free'];
+
+async function callOpenCodeZen(
+  messages: AIMessage[],
+  options: UnifiedAIOptions = {}
+): Promise<ProviderResult> {
+  const key = Deno.env.get('OPENCODE_API_KEY');
+  if (!key) {
+    return { success: false, provider: 'opencode-zen', error: 'No OPENCODE_API_KEY configured' };
+  }
+
+  const base = (Deno.env.get('OPENCODE_BASE_URL') || 'https://opencode.ai/zen/v1').replace(/\/+$/, '');
+
+  // Honour an explicit caller request when it names a Zen model we can reach.
+  const requested = String(options.model || '');
+  const models = OPENCODE_ZEN_MODELS.includes(requested) ? [requested, ...OPENCODE_ZEN_MODELS] : OPENCODE_ZEN_MODELS;
+
+  const effectiveSystemPrompt = getEffectiveSystemPrompt(options);
+  const effectiveTools = getEffectiveTools(options);
+
+  const requestMessages = [
+    { role: 'system', content: effectiveSystemPrompt },
+    ...messages.filter(m => m.role !== 'system')
+  ];
+
+  const maxTokens = options.maxTokens || options.max_tokens || RESPONSE_MAX_TOKENS;
+  let lastError = 'no models configured';
+
+  for (const model of models) {
+    try {
+      console.log(`🌀 Attempting OpenCode Zen (${model})...`);
+
+      const requestBody: any = {
+        model,
+        messages: requestMessages,
+        temperature: options.temperature || 0.7,
+        max_tokens: maxTokens,
+      };
+
+      if (effectiveTools.length > 0) {
+        console.log(`🔧 OpenCode Zen: Passing ${effectiveTools.length} tools`);
+        requestBody.tools = effectiveTools;
+        requestBody.tool_choice = 'auto';
+      }
+
+      const response = await fetch(`${base}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${key}`,
+        },
+        body: JSON.stringify(requestBody),
+        signal: AbortSignal.timeout(PROVIDER_TIMEOUTS.opencodeZen),
+      });
+
+      if (!response.ok) {
+        const text = await response.text();
+        // 402/429 mean the quota is gone — skip to the next provider immediately
+        // rather than burning the rest of the budget on the same dead tier.
+        if (response.status === 402 || response.status === 429) {
+          return { success: false, provider: 'opencode-zen', error: `HTTP ${response.status}: ${text.slice(0, 200)}` };
+        }
+        lastError = `HTTP ${response.status}: ${text.slice(0, 200)}`;
+        continue;
+      }
+
+      const data = await response.json();
+      const message = data?.choices?.[0]?.message;
+
+      if (!message) {
+        lastError = 'no message in response';
+        continue;
+      }
+
+      console.log('✅ OpenCode Zen successful');
+
+      // transformResult only forwards tool_calls when the result carries a
+      // `message` object, so mirror handleOllamaResponse's shape exactly.
+      if (message.tool_calls?.length > 0) {
+        console.log(`🔧 OpenCode Zen returned ${message.tool_calls.length} tool calls`);
+        return { success: true, provider: 'opencode-zen', message };
+      }
+
+      const content = message.content || message.reasoning || '';
+      if (!content) {
+        lastError = 'empty content from OpenCode Zen';
+        continue;
+      }
+
+      return { success: true, provider: 'opencode-zen', content };
+    } catch (error) {
+      lastError = (error as Error).message;
+    }
+  }
+
+  return { success: false, provider: 'opencode-zen', error: lastError };
+}
+
+/**
  * MAIN ENTRY POINT: Unified AI Fallback Cascade
  *
- * Order (rewired 2026-06-10 per Vex/joe instruction):
- *   1. PRIMARY: Ollama Pro Cloud (OLLAMA_API_KEY, model = OLLAMA_MODEL or deepseek-v4-flash:cloud)
- *   2-5. Backup inference (tried only if Ollama fails):
+ * Order (OpenCode Zen added 2026-09-27 as tier 1):
+ *   1. PRIMARY: OpenCode Zen (OPENCODE_API_KEY, space-bunny-free) — separate
+ *      quota pool, so it survives the Ollama/OpenRouter free-tier rate limits
+ *   2. PRIMARY: Ollama Pro Cloud (OLLAMA_API_KEY, model = OLLAMA_MODEL or deepseek-v4-flash:cloud)
+ *   3-7. Backup inference (tried only if the above fail):
  *       - Vertex AI via Service Account OAuth2
  *       - Gemini API key (direct)
  *       - DeepSeek V3
@@ -932,34 +1050,40 @@ export async function callAIWithFallback(
 ): Promise<any> {
   const errors: string[] = [];
 
-  // 1. PRIMARY: Ollama Pro Cloud (deepseek-v4-flash:cloud by default)
+  // 1. PRIMARY: OpenCode Zen (space-bunny-free)
+  const zenResult = await callOpenCodeZen(messages, options);
+  if (zenResult.success) return transformResult(zenResult);
+  errors.push(`OpenCodeZen: ${zenResult.error}`);
+  console.warn('⚠️ OpenCode Zen failed, trying Ollama Pro Cloud...');
+
+  // 2. PRIMARY: Ollama Pro Cloud (deepseek-v4-flash:cloud by default)
   const ollamaResult = await callOllamaPro(messages, options);
   if (ollamaResult.success) return transformResult(ollamaResult);
   errors.push(`OllamaPro: ${ollamaResult.error}`);
   console.warn('⚠️ Ollama Pro failed, trying Vertex SA backup...');
 
-  // 2. BACKUP: Vertex AI via Service Account OAuth2
+  // 3. BACKUP: Vertex AI via Service Account OAuth2
   console.log('🔑 Trying Vertex AI SA OAuth2 (backup)...');
   const saResult = await callVertexWithServiceAccount(messages, options);
   if (saResult.success) return transformResult(saResult);
   errors.push(`VertexSA: ${saResult.error}`);
 
-  // 3. BACKUP: Gemini API key
+  // 4. BACKUP: Gemini API key
   const geminiResult = await callGemini(messages, options);
   if (geminiResult.success) return transformResult(geminiResult);
   errors.push(`Gemini: ${geminiResult.error}`);
 
-  // 4. BACKUP: Vertex AI Express Mode (reuses Gemini key)
+  // 5. BACKUP: Vertex AI Express Mode (reuses Gemini key)
   const vertexResult = await callVertex(messages, options);
   if (vertexResult.success) return transformResult(vertexResult);
   errors.push(`Vertex: ${vertexResult.error}`);
 
-  // 5. BACKUP: DeepSeek V3
+  // 6. BACKUP: DeepSeek V3
   const deepSeekResult = await callDeepSeek(messages, options);
   if (deepSeekResult.success) return transformResult(deepSeekResult);
   errors.push(`DeepSeek: ${deepSeekResult.error}`);
 
-  // 6. BACKUP: Kimi
+  // 7. BACKUP: Kimi
   const kimiResult = await callKimi(messages, options);
   if (kimiResult.success) return transformResult(kimiResult);
   errors.push(`Kimi: ${kimiResult.error}`);

@@ -28,6 +28,28 @@ interface ChannelData {
   reconnectAttempts: number;
 }
 
+/**
+ * The local stack's Supabase emulator (local-sb) implements /realtime/v1 as a
+ * NOOP broadcast stub — it never emits postgres_changes. Binding against it
+ * makes supabase-js's realtime internals throw
+ * "Cannot destructure property 'postgres_changes' of 'undefined'" on every
+ * message, because the stub's replies don't match the v2 bind payload.
+ *
+ * The throw happens inside supabase-js, before our callback runs, so guarding
+ * the callback cannot suppress it. The only real fix is to not bind. Callers
+ * get a working no-op unsubscribe and must fetch data explicitly instead —
+ * which UnifiedChat already does for tool calls (they come back on the
+ * ai-chat response), so nothing is lost.
+ */
+const LOCAL_REALTIME_IS_STUB = (() => {
+  if (typeof window === 'undefined') return true;
+  const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+  // local-anon-key is the emulator's fixed key; real Supabase never uses it.
+  return !key || key === 'local-anon-key';
+})();
+
+let _stubWarned = false;
+
 class RealtimeSubscriptionManager {
   private static instance: RealtimeSubscriptionManager;
   private channels = new Map<string, ChannelData>();
@@ -62,6 +84,17 @@ class RealtimeSubscriptionManager {
       clientFilter
     } = options;
 
+    if (LOCAL_REALTIME_IS_STUB) {
+      if (!_stubWarned) {
+        _stubWarned = true;
+        console.info(
+          'ℹ️ Realtime disabled: the local Supabase emulator only stubs /realtime/v1 '
+          + '(no postgres_changes). Subscriptions are no-ops here — data is fetched explicitly.'
+        );
+      }
+      return () => {};
+    }
+
     // Create unique channel key based on subscription parameters
     const channelKey = `${schema}.${tableName}:${event}:${filter}`;
 
@@ -80,6 +113,8 @@ class RealtimeSubscriptionManager {
             ...(filter && { filter }) // Add server-side filter if provided
           } as any,
           (payload) => {
+            // Defensive: a malformed frame must never take down the app.
+            if (!payload || typeof payload !== 'object') return;
             const channelData = this.channels.get(channelKey);
             if (!channelData) return;
 

@@ -108,7 +108,12 @@ export class UnifiedElizaService {
     try {
       // Fetch agent status from Supabase
       // All 5 council executives by their correct function IDs
-      const COUNCIL_EXECS = ['vercel-ai-chat', 'deepseek-chat', 'gemini-chat', 'openai-chat', 'coo-chat'];
+      // ai-chat is the Eliza-Cloud path — powers minimax-m3 via OpenRouter as of 2026-09-04.
+      // Add it to the front so suite-dashboard chat routes through the minimax
+      // cascade instead of relying on stale per-persona edge functions
+      // (vercel-ai-chat / deepseek-chat / gemini-chat / openai-chat / coo-chat)
+      // which still reference deprecated models and are flaky on mobile tunnel.
+      const COUNCIL_EXECS = ['ai-chat', 'vercel-ai-chat', 'deepseek-chat', 'gemini-chat', 'openai-chat', 'coo-chat'];
 
       const { data: agents, error } = await supabase
         .from('agents')
@@ -230,9 +235,13 @@ export class UnifiedElizaService {
     functionName: string,
     payload: Record<string, any>
   ): Promise<{ data: any; error: any }> {
-    const EXEC_TIMEOUT_MS = 45000; // 45s — generous for the mobile tunnel path
+    const EXEC_TIMEOUT_MS = 60000; // 60s — guards the initial functions.invoke() return
     const MAX_ATTEMPTS = 2;
-    const POLL_TIMEOUT_MS = 60000; // total budget to wait for a background result
+    // ai-chat via the public tunnel can take 90-120s on cold invocations (the
+    // Deno subprocess boots fresh, then runs ~20s of cascade + ~10-30s of LLM
+    // generation). 60s was too tight — bumped to 180s so the SPA doesn't drop
+    // to FallbackAIService (Office Clerk) when ai-chat is actually succeeding.
+    const POLL_TIMEOUT_MS = 180000;
     const POLL_INTERVAL_MS = 2000;
 
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -426,8 +435,23 @@ export class UnifiedElizaService {
         if (content && content.length > 0) {
           console.log(`✅ ${executive} SUCCESS! Extracted content:`, content.substring(0, 100) + '...');
 
-          // Return as STRING (what frontend expects)
-          return content;
+          // Return as the rich object the SPA expects: UnifiedChat.tsx reads
+          // responseObj.method (line 1972) to label the "via X" line. Previously
+          // we returned just `content` (a string), so method defaulted to
+          // "Office Clerk" via `responseObj.method || 'Office Clerk'`. Now we
+          // pass through the real provider/model that ai-chat told us.
+          return {
+            text: content,
+            method: data?.method ?? `${executive} (${data?.provider || 'cloud'})`,
+            provider: data?.provider,
+            model: data?.model,
+            // ai-chat returns the tools it actually ran so UnifiedChat's yellow
+            // sticky notes and the per-message tool list can render them. This
+            // was previously dropped here, so the sticky notes could never
+            // show tool activity.
+            toolCalls: Array.isArray(data?.toolCalls) ? data.toolCalls : undefined,
+            confidence: 0.95,
+          };
         }
 
         console.log(`⚠️ ${executive} no valid content extracted`);
@@ -474,7 +498,16 @@ export class UnifiedElizaService {
       if (error) { console.error(`❌ ${functionId} error:`, error); return null; }
       const content = this.extractResponseContent(data);
       if (content) { console.log(`✅ ${functionId} response (${content.length} chars)`); }
-      return content;
+      // Return rich object so UnifiedChat.tsx can label the source correctly
+      // instead of falling back to "Office Clerk" via responseObj.method || 'Office Clerk'.
+      return {
+        text: content || '',
+        method: data?.method ?? functionId,
+        provider: data?.provider,
+        model: data?.model,
+        toolCalls: Array.isArray(data?.toolCalls) ? data.toolCalls : undefined,
+        confidence: 0.95,
+      };
     } catch (err: any) {
       console.error(`💥 ${functionId} crashed:`, err?.message);
       return null;

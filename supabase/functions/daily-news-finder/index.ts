@@ -39,28 +39,116 @@ serve(async (req) => {
 
         const supabase = createClient(supabaseUrl, supabaseKey);
 
-        // ── Duplicate Guard ──────────────────────────────────────────
-        // The cron engine runs every 30s and checks the same minute.
-        // If the state file is stale or two engines run, daily-news-finder
-        // can fire multiple times and spam paragraph.com with duplicate
-        // posts. Check the activity log: if we already published today,
-        // exit immediately.
+        // ── Atomic Publication Claim (TOCTOU fix) ───────────────────
+        // The old guard was a bare SELECT. Every concurrent invocation read
+        // "nothing recent", all of them generated an article, and all of them
+        // published - the log row was only written AFTER paragraph-publisher
+        // returned, so the race window was the entire AI + publish path. That
+        // is the 11-posts-in-25-seconds behaviour in the @mobilemonero feed.
+        //
+        // eliza_activity_log.dedupe_key carries a UNIQUE partial index
+        // (WHERE dedupe_key IS NOT NULL), so Postgres - not application logic -
+        // decides who wins the daily slot. Exactly one invocation can hold it;
+        // every other invocation gets 23505 and exits without generating a word.
+        //
+        // The claim row IS the daily_news_published row, inserted up front with
+        // status='in_progress' and flipped to 'completed' on success. One row per
+        // day, which is what the 23h guard and the audit trail both assume.
+        const CLAIM_TTL_MS = 30 * 60 * 1000; // 30-minute lease
+        const claimKey = `daily-news:${new Date().toISOString().slice(0, 10)}`;
+
+        // Releases the slot if we bail out before publishing, so a transient
+        // failure does not cost the next scheduled run 30 minutes of lease.
+        const releaseClaim = async (why: string) => {
+            try {
+                await supabase
+                    .from('eliza_activity_log')
+                    .update({ status: 'failed', description: why,
+                              updated_at: new Date().toISOString() })
+                    .eq('dedupe_key', claimKey)
+                    .eq('status', 'in_progress');
+            } catch (e) {
+                console.warn('claim release failed (harmless):', e);
+            }
+        };
+
+        const { error: claimErr } = await supabase
+            .from('eliza_activity_log')
+            .insert({
+                activity_type: 'daily_news_published',
+                title: '📰 Daily News (in progress)',
+                description: 'Claimed the daily publication slot.',
+                status: 'in_progress',
+                dedupe_key: claimKey,
+                function_name: FUNCTION_NAME,
+            });
+
+        let haveClaim = false;
+        if (!claimErr) {
+            haveClaim = true;
+        } else if (claimErr.code === '23505') {
+            // Slot already taken. Take it over ONLY if the holder's lease has
+            // expired. The status + updated_at predicates make this a
+            // compare-and-swap, so two contenders can never both win.
+            const { data: taken, error: takeErr } = await supabase
+                .from('eliza_activity_log')
+                .update({
+                    status: 'in_progress',
+                    description: 'Took over an expired publication claim.',
+                    updated_at: new Date().toISOString(),
+                })
+                .eq('dedupe_key', claimKey)
+                .eq('status', 'in_progress')
+                .lt('updated_at', new Date(Date.now() - CLAIM_TTL_MS).toISOString())
+                .select('id');
+            if (takeErr) console.warn('lease takeover failed:', takeErr.message);
+            haveClaim = Array.isArray(taken) && taken.length > 0;
+        } else {
+            // Fail CLOSED. Publishing without a claim is precisely the bug
+            // being fixed, so surface the error instead of falling through.
+            console.error('Publication claim insert failed:', claimErr.message);
+            await usageTracker.error({ error: `claim_failed: ${claimErr.message}` });
+            return new Response(JSON.stringify({
+                success: false, skipped: true, reason: 'claim_unavailable',
+                error: claimErr.message,
+            }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 503,
+            });
+        }
+
+        if (!haveClaim) {
+            console.log(`Publication claim: ${claimKey} held by another run. Skipping.`);
+            await usageTracker.success({ result_summary: 'skipped_claim_contended' });
+            return new Response(JSON.stringify({
+                success: false, skipped: true,
+                reason: 'daily slot already claimed by another invocation',
+                claim_key: claimKey,
+            }), {
+                headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+                status: 200,
+            });
+        }
+        console.log(`Publication claim acquired: ${claimKey}`);
+
+        // ── Secondary safety net ──────────────────────────────────
+        // Cheap read BEHIND the atomic claim. Catches anything published
+        // through a path that does not take a claim. Note status filter: our
+        // own in_progress claim row is excluded.
         const { data: recent, error: recentErr } = await supabase
             .from('eliza_activity_log')
             .select('id, created_at')
             .eq('activity_type', 'daily_news_published')
+            .eq('status', 'completed')
             .gte('created_at', new Date(Date.now() - 23 * 60 * 60 * 1000).toISOString())
             .order('created_at', { ascending: false })
             .limit(1);
-        if (recentErr) {
-            console.warn('Duplicate guard query failed:', recentErr.message);
-            // Don't block on query failure; continue cautiously
-        } else if (recent && recent.length > 0) {
-            console.log(`Duplicate guard: already published today (${recent[0].created_at}). Skipping.`);
+        if (!recentErr && recent && recent.length > 0) {
+            console.log(`Secondary guard: already published (${recent[0].created_at}). Releasing claim.`);
+            await releaseClaim('secondary guard: already published within 23h');
             await usageTracker.success({ result_summary: 'skipped_duplicate_guard' });
             return new Response(JSON.stringify({
-                success: false,
-                skipped: true,
+                success: false, skipped: true,
                 reason: 'daily_news_published already exists in last 23h',
                 last_publish: recent[0].created_at,
             }), {
@@ -98,6 +186,7 @@ serve(async (req) => {
         }
 
         if (items.length === 0) {
+            await releaseClaim('no stories in feed');
             throw new Error('No items found in RSS feed.');
         }
 
@@ -363,8 +452,12 @@ serve(async (req) => {
             || `https://paragraph.com/@${pubHandle}`;
 
         // 5. Log Success
-        await supabase.from('eliza_activity_log').insert({
-            activity_type: 'daily_news_published',
+        // Flip the claim we took at the top of the run to 'completed' instead
+        // of inserting a second row. Keeps exactly one row per day, which is
+        // what the 23h guard, the audit trail, and the lease all assume.
+        await supabase.from('eliza_activity_log').update({
+            status: 'completed',
+            title: '📰 Daily News Published',
             title: '📰 Daily News Published',
             description: `Published analysis of: ${selectedStoryTitle}`,
             status: 'completed',
@@ -374,8 +467,9 @@ serve(async (req) => {
                 original_link: storyLink,
                 published_url: publishedUrl,
                 paragraph_response: pubData
-            }
-        });
+            },
+            updated_at: new Date().toISOString(),
+        }).eq('dedupe_key', claimKey);
 
         await usageTracker.success({ result_summary: 'news_published', provider: usedProvider });
 

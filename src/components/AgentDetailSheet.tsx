@@ -62,7 +62,10 @@ interface AgentDetailSheetProps {
   isOpen: boolean;
   onClose: () => void;
   onTaskReassign: (taskId: string, newAgentId: string | null) => Promise<void>;
-  onTaskDrop: (taskId: string) => void;
+  // Returns a promise so the sheet can refresh after the write lands. This sheet
+  // keeps its own task list and fetches it on open, so without that it kept
+  // showing the pre-drop state: a success toast next to "No active tasks".
+  onTaskDrop: (taskId: string) => Promise<void> | void;
   draggedTaskId: string | null;
 }
 
@@ -166,14 +169,24 @@ export const AgentDetailSheet: React.FC<AgentDetailSheetProps> = ({
     setIsDragOver(false);
   };
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(false);
-    const taskId = e.dataTransfer.getData('taskId');
+    // Accept either payload shape. A task dragged out of the pipeline carries
+    // text/plain; a task dragged from inside a sheet carries taskId. Reading
+    // only taskId meant this zone ignored every pipeline drag - it highlighted,
+    // accepted the drop, and did nothing.
+    const taskId = e.dataTransfer.getData('taskId') || e.dataTransfer.getData('text/plain');
+    // Empty means the drag began somewhere that does not record an owner (the
+    // pipeline), which is not the same as "belongs to this agent".
     const sourceAgentId = e.dataTransfer.getData('sourceAgentId');
 
     if (taskId && sourceAgentId !== agent?.id) {
-      onTaskDrop(taskId);
+      await onTaskDrop(taskId);
+      // This sheet holds its own copy of the task list, fetched on open, so it
+      // does not learn about the handoff on its own. Refetch once the write has
+      // landed, otherwise the panel contradicts the toast that just confirmed it.
+      await fetchAgentTasks();
     }
   };
 

@@ -1,11 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useId } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { useAuth } from '@/contexts/AuthContext';
 import { DemoVideoModal } from '@/components/DemoVideoModal';
 import { LandingNav } from '@/components/LandingNav';
-import { AuthModal } from '@/components/AuthModal';
 import { Footer } from '@/components/Footer';
 import { useLanguage } from '@/contexts/LanguageContext';
 import {
@@ -29,7 +28,7 @@ const executives = [
     description:
       'AI/ML strategy, technical architecture, ethical AI, subagent orchestration',
     gradient: 'from-blue-500 to-cyan-500',
-    photo: '/executives/anya.png',
+    photo: `${import.meta.env.BASE_URL}executives/anya.png`,
   },
   {
     name: 'Mr. Omar Al-Farsi',
@@ -38,7 +37,7 @@ const executives = [
     description:
       'Treasury management, global markets, tokenomics, fiscal strategy',
     gradient: 'from-amber-500 to-yellow-500',
-    photo: '/executives/omar.png',
+    photo: `${import.meta.env.BASE_URL}executives/omar.png`,
   },
   {
     name: 'Ms. Isabella Rodriguez',
@@ -47,7 +46,7 @@ const executives = [
     description:
       'Brand storytelling, viral growth, consumer psychology, content strategy',
     gradient: 'from-pink-500 to-rose-500',
-    photo: '/executives/bella.png',
+    photo: `${import.meta.env.BASE_URL}executives/bella.png`,
   },
   {
     name: 'Mr. Klaus Richter',
@@ -56,7 +55,7 @@ const executives = [
     description:
       'Process optimization, agent pipelines, operational excellence',
     gradient: 'from-slate-500 to-gray-600',
-    photo: '/executives/klaus.png',
+    photo: `${import.meta.env.BASE_URL}executives/klaus.png`,
   },
   {
     name: 'Ms. Akari Tanaka',
@@ -64,7 +63,7 @@ const executives = [
     role: 'Chief People Officer',
     description: 'Talent development, inclusive culture, community governance',
     gradient: 'from-teal-500 to-emerald-500',
-    photo: '/executives/akari.png',
+    photo: `${import.meta.env.BASE_URL}executives/akari.png`,
   },
 ];
 
@@ -177,12 +176,72 @@ const sectionStickyNotes = [
   },
 ] as const;
 
+function ApiKeySignInForm({ className = '' }: { className?: string }) {
+  const { signInWithApiKey } = useAuth();
+  const navigate = useNavigate();
+  const [apiKey, setApiKey] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  // Two of these render at once (one per breakpoint), so a fixed id would be
+  // duplicated in the document and the label would point at the wrong field.
+  const fieldId = useId();
+  const errorId = `${fieldId}-error`;
+
+  const submit = () => {
+    if (!apiKey.trim()) return;
+    try {
+      signInWithApiKey(apiKey);
+      setError(null);
+      navigate('/dashboard');
+    } catch (e: any) {
+      setError(e?.message || 'Could not sign in with that key');
+    }
+  };
+
+  return (
+    <div className={`flex flex-col items-center gap-3 ${className}`}>
+      <label htmlFor={fieldId} className="sr-only">
+        API key
+      </label>
+      <input
+        id={fieldId}
+        data-api-key-input=""
+        type="password"
+        autoComplete="off"
+        spellCheck={false}
+        placeholder="Enter your API key"
+        value={apiKey}
+        onChange={(e) => {
+          setApiKey(e.target.value);
+          if (error) setError(null);
+        }}
+        onKeyDown={(e) => e.key === 'Enter' && submit()}
+        aria-invalid={!!error}
+        aria-describedby={error ? errorId : undefined}
+        className="w-full px-4 py-3 text-base bg-card/80 border border-border/50 rounded-lg text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-primary/50 text-center font-mono tracking-wider"
+      />
+      <Button
+        size="lg"
+        onClick={submit}
+        className="w-full text-lg px-8 py-6 bg-primary hover:bg-primary/90"
+        disabled={!apiKey.trim()}
+      >
+        Sign In with API Key
+        <ArrowRight className="ml-2 w-5 h-5" />
+      </Button>
+      {error && (
+        <p id={errorId} role="alert" className="text-sm text-destructive text-center">
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export default function Landing() {
   const navigate = useNavigate();
-  const { isAuthenticated, isLoading, signInWithEmail } = useAuth();
+  const { isAuthenticated, isLoading } = useAuth();
   const { t } = useLanguage();
   const [demoOpen, setDemoOpen] = useState(false);
-  const [apiKeyInput, setApiKeyInput] = useState('');
 
   // Redirect authenticated users to dashboard
   useEffect(() => {
@@ -190,13 +249,6 @@ export default function Landing() {
       navigate('/dashboard', { replace: true });
     }
   }, [isAuthenticated, isLoading, navigate]);
-
-  const handleApiKeyLogin = async () => {
-    const key = apiKeyInput.trim();
-    if (!key) return;
-    // Redirect with api_key as query param — AuthContext reads this on mount
-    window.location.href = `/suite/dashboard?api_key=${encodeURIComponent(key)}`;
-  };
 
   const handleGetStarted = async () => {
     if (isAuthenticated) {
@@ -316,46 +368,12 @@ export default function Landing() {
             </div>
 
             <div className="mx-auto max-w-sm px-8 pb-12 pt-44">
-              <div className="flex flex-col items-center gap-3">
-                <input
-                  type="text"
-                  placeholder="Enter your API key"
-                  value={apiKeyInput}
-                  onChange={(e) => setApiKeyInput(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleApiKeyLogin()}
-                  className="w-full px-4 py-3 text-base bg-card/80 border border-border/50 rounded-lg text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-primary/50 text-center font-mono tracking-wider"
-                />
-                <Button
-                  size="lg"
-                  onClick={handleApiKeyLogin}
-                  className="w-full text-lg px-8 py-6 bg-primary hover:bg-primary/90"
-                  disabled={!apiKeyInput.trim()}
-                >
-                  Sign In with API Key
-                  <ArrowRight className="ml-2 w-5 h-5" />
-                </Button>
-              </div>
+              <ApiKeySignInForm className="w-full" />
             </div>
           </div>
 
           <div className="hidden xl:flex flex-col items-center gap-3 mb-16 max-w-sm mx-auto">
-            <input
-              type="text"
-              placeholder="Enter your API key"
-              value={apiKeyInput}
-              onChange={(e) => setApiKeyInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleApiKeyLogin()}
-              className="w-full px-4 py-3 text-base bg-card/80 border border-border/50 rounded-lg text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-primary/50 text-center font-mono tracking-wider"
-            />
-            <Button
-              size="lg"
-              onClick={handleApiKeyLogin}
-              className="w-full text-lg px-8 py-6 bg-primary hover:bg-primary/90"
-              disabled={!apiKeyInput.trim()}
-            >
-              Sign In with API Key
-              <ArrowRight className="ml-2 w-5 h-5" />
-            </Button>
+            <ApiKeySignInForm className="w-full" />
           </div>
 
           {/* Stats Row - show final values immediately for fast scrollers */}
@@ -723,9 +741,6 @@ export default function Landing() {
       </section>
 
       <Footer />
-
-      {/* Auth Modal */}
-      <AuthModal open={authModalOpen} onOpenChange={setAuthModalOpen} />
 
       {/* Demo Video Modal */}
       <DemoVideoModal open={demoOpen} onOpenChange={setDemoOpen} />

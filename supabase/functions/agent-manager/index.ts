@@ -1398,23 +1398,37 @@ serve(async (req) => {
           throw new ValidationError(`Invalid role "${role}". Must be one of: ${VALID_AGENT_ROLES.join(", ")}`);
         }
 
-        // Insert new agent
+        // Insert new agent.
+        //
+        // Only columns that exist. This used to include a `metadata` object with
+        // the OpenClaw connection details, and the agents table has never had a
+        // `metadata` column - so every provision attempt died on
+        // `column "metadata" of relation "agents" does not exist`, which this
+        // function's error path flattened to the useless "Agent provision failed".
+        // The Provision Agent button has therefore never provisioned anything.
+        //
+        // Nothing in the codebase reads `agents.metadata` either, so the details
+        // had no reader even in principle. They are kept in the activity log
+        // below, which does have a metadata column, and returned in the response.
+        // Migration 20260929_agent_metadata.sql adds the column for when someone
+        // with DDL access runs it.
+        const openClaw = {
+          agent_type: 'openclaw',
+          source: 'openclaw',
+          provisioned_at: new Date().toISOString(),
+          description: payload.description || null,
+          priority: payload.priority || null,
+          gateway_url: payload.gateway_url || 'http://localhost:18789',
+          session_key: payload.session_key || 'agent:main:main',
+          ...(payload.metadata || {}),
+        };
+
         const insertBody = {
           id: agentId,
           name: payload.name,
           role: role,
           status: "IDLE",
-          metadata: {
-            agent_type: 'openclaw',
-            source: 'openclaw',
-            provisioned_at: new Date().toISOString(),
-            description: payload.description || null,
-            priority: payload.priority || null,
-            // Bridge connection details - used by openclaw-poller
-            gateway_url: payload.gateway_url || 'http://localhost:18789',
-            session_key: payload.session_key || 'agent:main:main',
-            ...(payload.metadata || {}),
-          },
+          description: payload.description || null,
           current_workload: 0,
           // Default max tasks if not provided
           max_concurrent_tasks: payload.max_concurrent_tasks ?? 3,
@@ -1426,16 +1440,61 @@ serve(async (req) => {
           throw new AppError(inserted.error.message || "Agent provision failed");
         }
 
+        // Enrol in XMRT University, so provisioning and certification are one step.
+        //
+        // This was the missing link. Provisioning registered an agent and stopped,
+        // so the 14-module curriculum had to be started by hand - and 17 of the 31
+        // enrolments in the system were sitting at 0 of 14 for exactly that reason.
+        // An agent that is registered but has never heard of the University cannot
+        // graduate, so it can never be certified, so it never gets a JWT.
+        //
+        // Deliberately NOT fatal. The agent row is already committed by this point,
+        // and tearing down a successful registration because a different subsystem
+        // was unhappy is worse than reporting it: an operator who sees "provisioned,
+        // enrolment failed: <reason>" can fix one thing, where a rolled-back
+        // registration leaves them with nothing and no explanation.
+        let university: Record<string, unknown> = { enrolled: false }
+        try {
+          const { data: uni, error: uniErr } = await supabase.functions.invoke("xmrt-university", {
+            body: { action: "enroll", agent_id: agentId, agent_name: payload.name },
+          })
+          const remedy = `Enrol ${agentId} manually: POST xmrt-university { action: "enroll", agent_id: "${agentId}" }`
+          if (uniErr) {
+            university = { enrolled: false, error: uniErr.message || "xmrt-university did not respond", remedy }
+            console.error(`[agent-manager] ${agentId} provisioned but university enrolment failed:`, uniErr.message)
+          } else if (uni && (uni as any).success) {
+            const d = uni as any
+            university = {
+              enrolled: true,
+              alreadyEnrolled: !!String(d.message || "").includes("Already enrolled"),
+              totalModules: d.total_modules ?? null,
+              currentModule: d.enrollment?.current_module ?? null,
+              message: d.message,
+            }
+          } else {
+            university = { enrolled: false, error: (uni as any)?.error || "enrolment refused", remedy }
+            console.error(`[agent-manager] ${agentId} university enrolment refused:`, (uni as any)?.error)
+          }
+        } catch (e: any) {
+          university = {
+            enrolled: false,
+            error: e?.message || String(e),
+            remedy: `Enrol ${agentId} manually: POST xmrt-university { action: "enroll", agent_id: "${agentId}" }`,
+          }
+          console.error(`[agent-manager] ${agentId} university enrolment threw:`, e?.message)
+        }
+
         // Activity log
         await supabase.from("eliza_activity_log").insert({
           activity_type: "agent_provisioned",
           title: `Provisioned OpenClaw Agent: ${inserted.data.name}`,
-          description: `ID: ${inserted.data.id}, Role: ${inserted.data.role}`,
-          metadata: { agent_id: inserted.data.id, source: 'openclaw' },
+          description: `ID: ${inserted.data.id}, Role: ${inserted.data.role}`
+            + (university.enrolled ? `, enrolled in XMRT University` : `, NOT enrolled: ${university.error}`),
+          metadata: { agent_id: inserted.data.id, source: 'openclaw', university, openclaw: openClaw },
           status: "completed",
         });
 
-        result = { success: true, agent: inserted.data };
+        result = { success: true, agent: inserted.data, openclaw: openClaw, university };
         break;
       }
 

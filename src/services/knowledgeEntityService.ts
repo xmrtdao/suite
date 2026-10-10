@@ -50,13 +50,31 @@ export class KnowledgeEntityService {
           })
           .eq('id', existing.id);
       } else {
-        // Create new entity
+        // Create new entity.
+        // The table's NOT NULL columns are: id, name, entity (jsonb), metadata,
+        // created_at, updated_at. This insert originally set only entity_name /
+        // entity_type / description / confidence_score / metadata, so every create
+        // 500'd — first on `name`, then on `entity`:
+        //   null value in column "name"   ... violates not-null constraint
+        //   null value in column "entity" ... violates not-null constraint
+        // `entity` holds the structured form of the entity, `name`/`entity_name`
+        // the legacy duplicate label, and `metadata` carries the extras.
         await supabase
           .from('knowledge_entities')
           .insert({
+            name: entityName,
+            entity: {
+              name: entityName,
+              entity_name: entityName,
+              entity_type: entityType,
+              type: entityType,
+              description: description || '',
+            },
             entity_name: entityName,
             entity_type: entityType,
+            type: entityType,
             description,
+            content: description || entityName,
             confidence_score: confidenceScore,
             metadata: metadata || {}
           });

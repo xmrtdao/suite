@@ -128,11 +128,8 @@ export class ConversationPersistenceService {
       );
 
       if (error) {
-        console.error('Error fetching session:', error);
-        throw error;
-      }
-
-      if (data.session) {
+        console.warn('Edge function error fetching session, continuing to create/fallback:', error);
+      } else if (data?.session) {
         // Resume existing session
         this.currentSessionId = data.session.id;
         this.currentSessionKey = data.session.session_key || sessionKey;
@@ -141,8 +138,12 @@ export class ConversationPersistenceService {
         );
         return this.currentSessionId;
       }
+    } catch (error) {
+      console.warn('Exception during session fetch, continuing to create/fallback:', error);
+    }
 
-      // Create new session using service role via edge function
+    // Create new session using service role via edge function
+    try {
       const { data: createData, error: createError } =
         await supabase.functions.invoke('conversation-access', {
           body: {

@@ -201,53 +201,112 @@ export function subscribeAgents(
 
 // ── Dashboard stats ─────────────────────────────────────────────
 
+function formatBytesShort(bytes: number | null | undefined): string {
+  if (bytes == null || !Number.isFinite(bytes)) return 'unknown size';
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(0)} MB`;
+  return `${Math.round(bytes / 1024)} KB`;
+}
+
 export async function fetchDashboardStats(): Promise<{
   activeAgents: number;
   activeTasks: number;
   totalExecutions: number;
+  totalExecutionsIsEstimate: boolean;
+  executionsLast24h: number;
   knowledgeEntitiesTotal: number;
   userContextKnowledge: number;
   userWorkflows: number;
   healthScore: number;
-  healthStatus: string;
+  healthStatus: 'healthy' | 'degraded' | 'critical' | 'unknown';
   healthIssues: string[];
 }> {
   const defaults = {
     activeAgents: 0,
     activeTasks: 0,
     totalExecutions: 0,
+    totalExecutionsIsEstimate: false,
+    executionsLast24h: 0,
     knowledgeEntitiesTotal: 0,
     userContextKnowledge: 0,
     userWorkflows: 0,
-    healthScore: 100,
-    healthStatus: 'healthy' as string,
+    healthScore: 0,
+    healthStatus: 'unknown' as 'healthy' | 'degraded' | 'critical' | 'unknown',
     healthIssues: [] as string[],
   };
 
   try {
-    const [tasksRes, agentsRes, healthRes] = await Promise.all([
+    // Health and the counts come from the same relay telemetry endpoint the
+    // Nexus panel uses, so the two panels can never disagree.
+    //
+    // Previously: health came from /api/suite/health, whose body is
+    // {ok, companies} — it has no health_score or status field, so every read
+    // missed and `healthScore` fell back to the literal 100 below. That is why
+    // the dashboard showed "System Health 100%" unconditionally: it was a
+    // default, not a measurement. The score is now derived from signals that
+    // are actually reported, and unknown when they are missing.
+    const [tasksRes, agentsRes, teleRes] = await Promise.all([
       fetch('/api/suite/tasks?status_in=PENDING,IN_PROGRESS,CLAIMED,BLOCKED'),
       fetch('/api/suite/agents?status_in=IDLE,BUSY'),
-      fetch('/api/suite/health'),
+      fetch('/api/suite/telemetry'),
     ]);
 
     const tasks = tasksRes.ok ? await tasksRes.json() : [];
     const agents = agentsRes.ok ? await agentsRes.json() : [];
-    let healthScore = 100, healthStatus = 'healthy', healthIssues: string[] = [];
+    const tele = teleRes.ok ? await teleRes.json() : null;
+    const stats = tele?.stats ?? null;
+    const storage = tele?.storage ?? null;
+    const wf = tele?.workflows ?? null;
 
-    if (healthRes.ok) {
-      const h = await healthRes.json();
-      healthScore = h.health_score ?? 100;
-      healthStatus = h.status ?? 'healthy';
-      if (h.issues_count && h.issues_count > 0) {
-        healthIssues = [`${h.issues_count} issue(s) detected`];
-      }
+    const healthIssues: string[] = [];
+
+    // Health is scored only from signals that are actually reported.
+    //
+    // It previously leaned on a "reclaimable bytes" figure that turned out to
+    // be TOAST storage — live jsonb payloads, not free space. A VACUUM run
+    // against the three worst tables reclaimed 0.2MB, so the penalty was
+    // charging the system for data it legitimately holds. Replaced with two
+    // things that are true and actionable: how much of the database is index
+    // overhead (measured, and reducible), and whether scheduled work is
+    // failing.
+    const indexPct = storage?.totals?.indexPctOfDatabase ?? 0;
+    const failedJobs = wf?.lastRunFailed ?? 0;
+    const jobsWithFailures = wf?.withFailures ?? 0;
+
+    if (indexPct >= 25) {
+      healthIssues.push(
+        `${indexPct}% of the database is indexes (${formatBytesShort(storage?.totals?.indexBytes)})`
+      );
+    }
+    if (failedJobs > 0) {
+      healthIssues.push(`${failedJobs} scheduled job(s) failed on last run`);
+    }
+
+    let healthScore = 0;
+    let healthStatus: 'healthy' | 'degraded' | 'critical' | 'unknown' = 'unknown';
+    if (storage || wf || stats) {
+      // An absent signal costs points rather than being read as "fine".
+      let penalty = 0;
+      penalty += Math.min(40, Math.round(indexPct));
+      penalty += Math.min(30, failedJobs * 10);
+      penalty += jobsWithFailures > 0 ? 10 : 0;
+      healthScore = Math.max(0, 100 - penalty);
+      healthStatus =
+        healthScore >= 80 ? 'healthy' : healthScore >= 50 ? 'degraded' : 'critical';
     }
 
     return {
       ...defaults,
       activeAgents: Array.isArray(agents) ? agents.length : 0,
       activeTasks: Array.isArray(tasks) ? tasks.length : 0,
+      totalExecutions: stats?.executions?.lifetime ?? 0,
+      totalExecutionsIsEstimate: !!stats?.executions?.lifetimeIsEstimate,
+      executionsLast24h: stats?.executions?.last24h ?? 0,
+      knowledgeEntitiesTotal: stats?.knowledgeEntities ?? 0,
+      // shared_context is what the old /api/suite/knowledge-stats would have
+      // returned had it existed; it never did — that path 404s.
+      userContextKnowledge: stats?.sharedContext ?? 0,
+      userWorkflows: stats?.workflows?.templates ?? 0,
       healthScore,
       healthStatus,
       healthIssues,

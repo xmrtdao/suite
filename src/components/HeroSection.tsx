@@ -1,14 +1,12 @@
 import { useState, useEffect } from 'react';
-import { AnimatedCounter } from './AnimatedCounter';
+import { UnifiedDataModule } from './UnifiedDataModule';
 import { supabase } from '@/integrations/supabase/client';
 import {
   Zap,
   Bot,
   Activity,
   ChevronLeft,
-  ChevronDown,
   ChevronRight,
-  ChevronUp,
   Workflow,
   BrainCircuit,
   Network,
@@ -17,14 +15,18 @@ import {
   Gauge,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { formatCount } from '@/services/suiteTelemetry';
 import { useLanguage } from '@/contexts/LanguageContext';
 
 export interface Stats {
   totalExecutions: number;
+  /** True when totalExecutions is a planner estimate, not a count. */
+  totalExecutionsIsEstimate: boolean;
+  executionsLast24h: number;
   activeAgents: number;
   activeTasks: number;
   healthScore: number;
-  healthStatus: 'healthy' | 'degraded' | 'critical';
+  healthStatus: 'healthy' | 'degraded' | 'critical' | 'unknown';
   healthIssues: string[];
   knowledgeEntitiesTotal: number;
   userContextKnowledge: number;
@@ -60,7 +62,6 @@ export const HeroSection = ({ stats }: HeroSectionProps) => {
   const { t } = useLanguage();
   const [currentBanner, setCurrentBanner] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
-  const [isUnifiedDataMinimized, setIsUnifiedDataMinimized] = useState(true);
   const [ecosystemEndpoints, setEcosystemEndpoints] = useState<EcosystemEndpoint[]>([
     {
       id: 'system-status',
@@ -230,7 +231,13 @@ export const HeroSection = ({ stats }: HeroSectionProps) => {
       kind: 'stat',
       icon: <Zap className="h-3 w-3 text-primary" />,
       value: stats.totalExecutions,
-      suffix: '+',
+      suffix: stats.totalExecutionsIsEstimate ? '~' : '',
+      // Say where the number comes from and how fresh it is. It was a hardcoded
+      // zero for as long as this panel existed; a real figure with its
+      // provenance attached is the difference between a metric and a decoration.
+      detail: stats.executionsLast24h
+        ? `${formatCount(stats.executionsLast24h)} in 24h`
+        : undefined,
     },
     {
       id: 'agents',
@@ -245,14 +252,19 @@ export const HeroSection = ({ stats }: HeroSectionProps) => {
       kind: 'health',
       icon: <Gauge className="h-3 w-3 text-amber-500" />,
       value: stats.healthScore,
-      suffix: '%',
-      detail: stats.healthIssues[0],
+      suffix: stats.healthStatus === 'unknown' ? '' : '%',
+      detail:
+        stats.healthStatus === 'unknown'
+          ? 'Not measured yet'
+          : stats.healthIssues[0],
       status:
-        stats.healthScore >= 95
-          ? 'healthy'
+        stats.healthStatus === 'unknown'
+          ? 'unknown'
           : stats.healthScore >= 80
-            ? 'degraded'
-            : 'error',
+            ? 'healthy'
+            : stats.healthScore >= 50
+              ? 'degraded'
+              : 'error',
     },
     {
       id: 'tasks',
@@ -289,22 +301,10 @@ export const HeroSection = ({ stats }: HeroSectionProps) => {
       icon: <Workflow className="h-3 w-3 text-sky-500" />,
       value: stats.userWorkflows,
     },
-    ...ecosystemEndpoints.map((endpoint) => ({
-      id: endpoint.id,
-      label: endpoint.name,
-      kind: 'endpoint' as const,
-      icon:
-        endpoint.id === 'database' ? (
-          <Database className="h-2.5 w-2.5 text-primary" />
-        ) : endpoint.id === 'agent-runtime' ? (
-          <Cpu className="h-2.5 w-2.5 text-primary" />
-        ) : (
-          <Workflow className="h-2.5 w-2.5 text-primary" />
-        ),
-      detail: endpoint.metric,
-      status: endpoint.status,
-      path: endpoint.path,
-    })),
+    // The per-subsystem endpoints are deliberately NOT spread in here. They are
+    // passed separately as `endpoints` and rendered as the compact "Subsystems"
+    // strip, which carries status dots and an "n/n answering" count. Including
+    // them in both places printed every endpoint twice on one screen.
   ];
 
   return (
@@ -374,123 +374,18 @@ export const HeroSection = ({ stats }: HeroSectionProps) => {
           </button>
         </div>
 
-        <div className="glass-card rounded-xl border border-primary/15 bg-background/65 p-1.5 shadow-lg shadow-primary/5">
-          <div className="mb-1.5 flex items-center justify-between gap-2">
-            <div>
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
-                <Network className="h-3 w-3 text-primary" />
-                Unified data module
-              </div>
-              <p className="mt-0.5 text-[10px] text-muted-foreground">
-                Core hero metrics and ecosystem endpoint telemetry.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setIsUnifiedDataMinimized((prev) => !prev)}
-              className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-background/70 px-2 py-1 text-[10px] font-medium text-foreground transition-colors hover:bg-background"
-              aria-expanded={!isUnifiedDataMinimized}
-              aria-label={isUnifiedDataMinimized ? 'Expand unified data module' : 'Minimize unified data module'}
-            >
-              {isUnifiedDataMinimized ? (
-                <>
-                  <ChevronDown className="h-3 w-3" />
-                  Expand
-                </>
-              ) : (
-                <>
-                  <ChevronUp className="h-3 w-3" />
-                  Minimize
-                </>
-              )}
-            </button>
-          </div>
-
-          {isUnifiedDataMinimized ? (
-            <div className="rounded-md border border-dashed border-border/60 bg-background/40 px-2 py-1.5 text-[10px] text-muted-foreground">
-              Module minimized to preserve dashboard space. Expand to view live telemetry and pipeline metrics.
-            </div>
-          ) : (
-            <>
-              <div className="grid grid-cols-2 gap-1 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
-                {heroDataPoints.map((point) => (
-                  <DataPointCard key={point.id} point={point} />
-                ))}
-              </div>
-
-              <div className="mt-1 rounded-md border border-border/50 bg-background/45 px-1.5 py-1">
-                <div className="mb-1 flex items-center justify-between">
-                  <p className="text-[9px] font-medium text-foreground">Task pipeline</p>
-                  <p className="text-[8px] text-muted-foreground">Live miniature view</p>
-                </div>
-                <div className="grid grid-cols-4 gap-1">
-                  {pipelineStages.map((stage, index) => (
-                    <div key={stage.id} className="relative rounded-sm border border-border/50 bg-background/70 px-1 py-0.5">
-                      <div className="truncate text-[8px] text-muted-foreground">{stage.label}</div>
-                      <div className="text-[10px] font-semibold text-foreground">
-                        <AnimatedCounter end={stage.value} />
-                      </div>
-                      {index < pipelineStages.length - 1 && (
-                        <div className="pointer-events-none absolute -right-1.5 top-1/2 h-px w-2 -translate-y-1/2 bg-primary/50" />
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </>
-          )}
-        </div>
+        {/* One consolidated panel. The fleet counters, the subsystem strip and
+            the task pipeline used to sit in a second card below this one, which
+            split the dashboard's telemetry across two places that could disagree
+            and neither of which carried a timestamp. They are now rendered
+            inside the XMRT Nexus alongside the storage and graph telemetry. */}
+        <UnifiedDataModule
+          dataPoints={heroDataPoints}
+          pipeline={pipelineStages}
+          endpoints={ecosystemEndpoints}
+        />
       </div>
     </section>
   );
 };
 
-const DataPointCard = ({ point }: { point: HeroDataPoint }) => {
-  const statusClass =
-    point.status === 'healthy'
-      ? 'bg-emerald-500'
-      : point.status === 'degraded'
-        ? 'bg-amber-500'
-        : point.status === 'error'
-          ? 'bg-destructive'
-          : 'bg-muted-foreground';
-  const isEndpoint = point.kind === 'endpoint';
-  const isHealth = point.kind === 'health';
-  const valueClass =
-    isHealth && point.value !== undefined
-      ? point.value >= 95
-        ? 'text-emerald-500'
-        : point.value >= 80
-          ? 'text-amber-500'
-          : 'text-destructive'
-      : 'text-foreground';
-
-  return (
-    <div className="rounded-md border border-border/50 bg-background/50 px-1.5 py-1 text-[9px]">
-      <div className="flex items-center justify-between gap-1">
-        <div className="inline-flex items-center gap-1 truncate font-medium text-foreground">
-          {point.icon}
-          <span className="truncate">{point.label}</span>
-        </div>
-        {(isEndpoint || isHealth) && (
-          <span className={cn('h-1.5 w-1.5 rounded-full', statusClass)} />
-        )}
-      </div>
-      {isEndpoint ? (
-        <>
-          <p className="truncate text-[8px] text-muted-foreground">/{point.path}</p>
-          <p className="truncate text-[9px] text-foreground">{point.detail}</p>
-        </>
-      ) : (
-        <>
-          <div className={cn('truncate text-sm font-bold md:text-base', valueClass)}>
-            <AnimatedCounter end={point.value ?? 0} suffix={point.suffix} />
-          </div>
-          <p className="truncate text-[8px] text-muted-foreground">
-            {point.detail || 'Live dashboard metric'}
-          </p>
-        </>
-      )}
-    </div>
-  );
-};

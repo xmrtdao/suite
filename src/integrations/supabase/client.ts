@@ -2,20 +2,15 @@
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 
-// The Suite SPA is ALWAYS served by the relay (localhost:8080 locally,
-// suite.mobilemonero.com through the tunnel). The relay proxies BOTH
-// /functions/v1 and /rest/v1 to local-sb (54321), so the relay origin is the
-// correct Supabase base in every environment. Prefer window.location.origin
-// over VITE_SUPABASE_URL — a hardcoded 127.0.0.1:54321 breaks on the tunnel
-// (127.0.0.1 is the device itself, so the ai-chat edge function call fails
-// and the chat falls back to Office Clerk).
-const SUPABASE_URL = typeof window !== 'undefined'
+// The Suite SPA is ALWAYS served by the relay, so the relay IS our origin.
+// Using window.location.origin keeps every call loopback-local when the
+// dashboard is opened at http://localhost:8080/suite (no Cloudflare tunnel
+// round-trip, works during internet outages) and automatically correct when
+// the same build is reached through https://relay.mobilemonero.com.
+const SUPABASE_URL = (typeof window !== 'undefined' && window.location?.origin)
   ? window.location.origin
-  : (import.meta.env.VITE_SUPABASE_URL || 'http://127.0.0.1:8080');
+  : 'http://127.0.0.1:8080';
 const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || 'local-anon-key';
-
-// Import the supabase client like this:
-// import { supabase } from "@/integrations/supabase/client";
 
 export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
   auth: {

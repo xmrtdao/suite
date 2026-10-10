@@ -1440,25 +1440,81 @@ async function seedCoursesFromCurriculum(supabase: any): Promise<void> {
  * Load curriculum from database, falling back to hardcoded CURRICULUM.
  * Normalizes both formats (DB columns vs hardcoded object fields).
  */
+/**
+ * Load the curriculum an agent is actually certified against. FAILS CLOSED.
+ *
+ * This returned a hardcoded CURRICULUM whenever the table read failed or came
+ * back empty. That fallback is 13 modules where the table holds 14, so any
+ * hiccup - an empty table mid-migration, a transient error, a misconfigured
+ * service key - silently replaced the course with a shorter one. Because
+ * `graduate` checks `completed_count >= totalModules` against whatever this
+ * returned, an agent could then graduate having completed 13 of 14 and be handed
+ * a valid XMRT-CERT carrying fleet:read/write/mine/vote. The certificate would
+ * be real, verifiable, and attesting to less learning than it appears to.
+ *
+ * A certification system must fail closed: if the whole course cannot be loaded,
+ * nobody can be certified against it. So this throws.
+ *
+ * The built-in curriculum is kept only behind an explicit opt-in, for bootstrapping
+ * an instance before the table is seeded - and when it is used the log says so
+ * loudly, because a certificate issued that way should never be indistinguishable
+ * from a real one.
+ */
 async function loadCurriculum(supabase: any): Promise<typeof CURRICULUM> {
-  try {
-    const { data: dbCourses } = await supabase
-      .from('xmrt_university_courses')
-      .select('*')
-      .order('order_index', { ascending: true })
+  const { data: dbCourses, error } = await supabase
+    .from('xmrt_university_courses')
+    .select('*')
+    .order('order_index', { ascending: true })
 
-    if (dbCourses && dbCourses.length > 0) {
-      return dbCourses.map((c: any) => ({
-        module: c.module_number,
-        title: c.title,
-        description: c.description,
-        passing_score: c.passing_score,
-        quiz: typeof c.quiz_questions === 'string' ? JSON.parse(c.quiz_questions) : (c.quiz_questions || []),
-        traps: typeof c.trap_questions === 'string' ? JSON.parse(c.trap_questions) : (c.trap_questions || []),
-      }))
+  if (error) {
+    throw new Error(
+      'Could not read the curriculum: ' + (error.message || 'unknown error') +
+      ' Refusing to certify against a course that cannot be loaded in full.'
+    )
+  }
+  if (!dbCourses || dbCourses.length === 0) {
+    if (Deno.env.get('XMRT_UNIVERSITY_ALLOW_SHORT_COURSE') === '1') {
+      console.warn(
+        '[xmrt-university] WARNING: serving the built-in ' + CURRICULUM.length +
+        '-module course because the table is empty and the opt-in is set. ' +
+        'Certificates issued this way cover less than the real curriculum.'
+      )
+      return CURRICULUM
     }
-  } catch { /* fall through to hardcoded */ }
-  return CURRICULUM
+    throw new Error(
+      'The curriculum table is empty, so the course cannot be determined. ' +
+      'Seed xmrt_university_courses, or set XMRT_UNIVERSITY_ALLOW_SHORT_COURSE=1 ' +
+      'to knowingly certify against the short built-in course instead.'
+    )
+  }
+  return dbCourses.map((c: any) => ({
+    module: c.module_number,
+    title: c.title,
+    description: c.description,
+    passing_score: c.passing_score,
+    quiz: typeof c.quiz_questions === 'string' ? JSON.parse(c.quiz_questions) : (c.quiz_questions || []),
+    traps: typeof c.trap_questions === 'string' ? JSON.parse(c.trap_questions) : (c.trap_questions || []),
+  }))
+}
+
+/**
+ * Hash a certificate token for storage.
+ *
+ * The column is `jwt_hash` and the migration calls it "Hash of the issued JWT for
+ * verification" - and the code stored the JWT itself. That put every certified
+ * agent's live bearer credential in a table anyone with read access could read,
+ * under a name that told them not to look twice. The token is returned to the
+ * agent once, at issue, and never needed again: `verify` looks the certificate up
+ * by agent or cert id and checks expiry plus security flags, and never reads it.
+ *
+ * SHA-256 rather than a slow KDF, deliberately - the input is high-entropy signed
+ * output, not a user-chosen password, and there is nothing to resist an offline
+ * dictionary attack here, only a need to confirm the token presented is the one
+ * issued.
+ */
+async function hashToken(token: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token))
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, '0')).join('')
 }
 
 function getModuleCount(curriculum: typeof CURRICULUM): number {
@@ -1905,7 +1961,22 @@ serve(async (req) => {
       const certId = generateCertId()
       const expiresAt = new Date(Date.now() + CERT_VALIDITY_DAYS * 86400000)
       const permissions = ['fleet:read', 'fleet:write', 'mine', 'vote']
-      const jwtSecret = Deno.env.get('SUPABASE_JWT_SECRET') || supabaseKey
+      // No fallback to the service key. A certificate signed with a credential
+      // that rotates is a certificate that dies on the next rotation, and it
+      // fails silently: the token verifies today and not after a key change.
+      // Refusing to issue is better than minting one with an expiry date.
+      const jwtSecret = Deno.env.get('SUPABASE_JWT_SECRET')
+      if (!jwtSecret) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: 'SUPABASE_JWT_SECRET is not set, so no certificate can be issued. ' +
+              'Refusing to sign one with the service key, which rotates and would ' +
+              'invalidate every certificate already issued.',
+          }),
+          { status: 500, headers: { ...CORS_HEADERS, 'Content-Type': 'application/json' } },
+        )
+      }
       const jwtToken = createJWT(agent_id, enrollment.agent_name, certId, 'graduate', permissions, jwtSecret)
 
       // Store certificate
@@ -1913,7 +1984,11 @@ serve(async (req) => {
         agent_id,
         agent_name: enrollment.agent_name,
         certificate_id: certId,
-        jwt_hash: jwtToken, // Store the token for verification
+        // The HASH, not the token. See hashToken(): storing the token put a live
+        // bearer credential for every certified agent in a table anyone with read
+        // access could read, under a column named jwt_hash. The token itself is
+        // returned to the agent once, below, and never needs to be stored.
+        jwt_hash: await hashToken(jwtToken),
         tier: 'graduate',
         permissions,
         expires_at: expiresAt.toISOString(),

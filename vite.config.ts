@@ -12,10 +12,13 @@ export default defineConfig(async ({ mode }) => {
   }
 
   return {
-    base: "/suite/",
+    // Served by the relay under /suite/ (locally + via tunnel) — assets must
+    // resolve under /suite/assets/. A bare '/' base 404s all JS (white screen).
+    base: '/suite/',
     server: {
       host: "::",
-      port: 5173,
+      port: 8080,
+      allowedHosts: ["relay.mobilemonero.com", "suite.mobilemonero.com"],
     },
     plugins: [
       react(),

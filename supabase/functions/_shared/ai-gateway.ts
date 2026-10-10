@@ -21,46 +21,16 @@ export interface GatewayConfig {
   retryAttempts: number;
   circuitBreakerThreshold: number;
 }
-
 // Production AI Gateway Configuration
-// Priority order: Vertex gemini-2.5-pro → Vertex gemini-2.5-flash → Gemini API → DeepSeek → OpenAI → Kimi
+// Priority order: Ollama Pro Cloud (deepseek-v4-flash:cloud) → Ollama gemma4:31b → OpenRouter (nemotron-3.5-lightning:free)
+// Only VERIFIED WORKING free models included; deepseek-v4-flash:cloud kept for funded keys
 const GATEWAY_CONFIG: GatewayConfig = {
   providers: [
-    // ── Ollama Pro Cloud (3 API keys in cascade) ─────────────
+    // ── Ollama Pro Cloud (deepseek-v4-flash:cloud primary, gemma4:31b free fallback) ─────────────
     {
       name: 'ollama-pro',
-      get apiKey() { return Deno.env.get('OLLAMA_API_KEY') || '' },
-      endpoint: 'https://ollama.com/v1/chat/completions',
-      model: Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud',
-      priority: 1,
-      rateLimit: 1200,
-      timeout: 60000,
-      available: !!Deno.env.get('OLLAMA_API_KEY')
-    },
-    {
-      name: 'ollama-pro-xmrt',
-      get apiKey() { return Deno.env.get('OLLAMA_XMRT_API_KEY') || '' },
-      endpoint: 'https://ollama.com/v1/chat/completions',
-      model: Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud',
-      priority: 2,
-      rateLimit: 1200,
-      timeout: 60000,
-      available: !!Deno.env.get('OLLAMA_XMRT_API_KEY')
-    },
-    {
-      name: 'ollama-pro-3rd',
-      get apiKey() { return Deno.env.get('OLLAMA_3RD_API_KEY') || '' },
-      endpoint: 'https://ollama.com/v1/chat/completions',
-      model: Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud',
-      priority: 3,
-      rateLimit: 1200,
-      timeout: 60000,
-      available: !!Deno.env.get('OLLAMA_3RD_API_KEY')
-    },
-    {
-      name: 'vertex-pro',
-      // Endpoint is dynamically set per-request via vertexAuthHelper
-      endpoint: getVertexEndpoint('gemini-2.5-pro'),
+      get apiKey() { return Deno.env.get('OLLAMA_API_KEY') || '' },\n      endpoint: 'https://ollama.com/v1/chat/completions',\\n      model: Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud',\\n      priority: 1,\\n      rateLimit: 1200,\\n      timeout: 120000,\\n      available: !!Deno.env.get('OLLAMA_API_KEY')\\n    },\\n    {\\n      name: 'ollama-pro-xmrt',\\n      get apiKey() { return Deno.env.get('OLLAMA_XMRT_API_KEY') || '' },\\n      endpoint: 'https://ollama.com/v1/chat/completions',\\n      model: Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud',\\n      priority: 2,\\n      rateLimit: 1200,\\n      timeout: 120000,\\n      available: !!Deno.env.get('OLLAMA_XMRT_API_KEY')\\n    },\\n    {\\n      name: 'ollama-pro-3rd',\\n      get apiKey() { return Deno.env.get('OLLAMA_3RD_API_KEY') || '' },\\n      endpoint: 'https://ollama.com/v1/chat/completions',\\n      model: 'gemma4:31b',\\n      priority: 3,\\n      rateLimit: 1200,\\n      timeout: 120000,\\n      available: !!Deno.env.get('OLLAMA_3RD_API_KEY')\\n    },\\n    {\\n      name: 'openrouter',\\n      endpoint: 'https://openrouter.ai/api/v1/chat/completions',\\n      model: 'nvidia/nemotron-3.5-lightning:free',\\n      priority: 4,\\n      rateLimit: 5000,\\n      timeout: 120000,\\n      available: true\\n    },\\n  ],\\n  fallbackStrategy: 'sequential',\\n  retryAttempts: 3,\\n  circuitBreakerThreshold: 5
+};
       model: 'gemini-2.5-pro',
       priority: 1,
       rateLimit: 10000, // High — backed by $1000 GCP credits
@@ -111,7 +81,16 @@ const GATEWAY_CONFIG: GatewayConfig = {
       rateLimit: 1200, // ~300-1200 req per 5-hour window, shared quotas
       timeout: 60000,
       available: true
-    }
+    },
+    {
+          name: 'openrouter',
+          endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+          model: 'nvidia/nemotron-3-ultra-550b-a55b:free',
+          priority: 9,
+          rateLimit: 5000,
+          timeout: 60000,
+          available: true
+        }
   ],
   fallbackStrategy: 'sequential',
   retryAttempts: 3,
