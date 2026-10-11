@@ -4,6 +4,8 @@
 // All calls go to the local relay at /api/suite/*.
 // ─────────────────────────────────────────────────────────────
 
+import { relayAuthHeaders } from '@/integrations/relay-auth';
+
 interface LocalResponse<T> {
   data: T | null;
   error: { message: string } | null;
