@@ -275,6 +275,9 @@ const PROMOTED_RELAY_TOOLS = [
   'resend-inbox', 'resend-get-email', 'resend-send-email',
   'fleet_memory_write', 'fleet_memory_read', 'health', 'system-monitor',
   'tasks_list', 'tasks_update', 'inbox_messages', 'github-post',
+  // Canonical entity resolution: always resolve a person/org name before any
+  // CRM read or write so stale emails/aliases map to the canonical entity.
+  'resolve-entity',
   // Obsidian vault (the "second brain"). Read tools first, then write, so
   // "update the note about X" is answerable without reaching for relay-tool.
   'vault-list', 'vault-read', 'vault-write', 'vault-update', 'vault-sync-entities',
@@ -846,6 +849,17 @@ const TOOL_CALLING_MANDATE = `
 - DO NOT generate contract code or unrelated content when asked to send emails
 - Always show draft for approval before sending
 - Use conversation context to understand what email content is needed
+
+📇 ENTITY RESOLUTION (MANDATORY for CRM/people/orgs):
+- When the user mentions a person, contact, or organization BY NAME and you are
+  about to recall, look up, or write anything about them → FIRST call
+  resolve-entity({query: "<name or email or alias>"}).
+- Use the returned canonical entity (name, primary email, aliases) for all
+  subsequent CRM reads/writes in this turn. Superseded emails and aliases map
+  to the canonical record automatically — never create a duplicate contact for
+  a name that already resolves.
+- If resolution is ambiguous (multiple candidates), ask the user to pick one
+  before writing.
 
 🔧 GITHUB FUNCTIONALITY:
 - Use the full GitHub tool suite when user asks about GitHub operations
