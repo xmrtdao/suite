@@ -2,6 +2,7 @@ import React, { useCallback, useState } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { Upload, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { relayAuthHeaders } from '@/integrations/relay-auth';
 import { Button } from './ui/button';
 
 interface DocDropzoneProps {
@@ -25,10 +26,10 @@ export const DocDropzone = ({ onUploadSuccess, isUploading }: DocDropzoneProps) 
       // Desktop/xmrtdao/temp and returns extracted text as JSON.
       const response = await fetch('/api/upload-temp', {
         method: 'POST',
-        headers: {
+        headers: relayAuthHeaders({
           'Content-Type': file.type || 'application/octet-stream',
           'X-File-Name': encodeURIComponent(file.name),
-        },
+        }),
         body: file,
       });
 

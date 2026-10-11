@@ -29,7 +29,7 @@ export async function fetchTasks(options?: {
     if (options?.limit) params.set('limit', String(options.limit));
     if (options?.offset) params.set('offset', String(options.offset));
     const qs = params.toString();
-    const res = await fetch(`/api/suite/tasks${qs ? '?' + qs : ''}`);
+    const res = await fetch(`/api/suite/tasks${qs ? '?' + qs : ''}`, { headers: relayAuthHeaders() });
     if (!res.ok) return { data: null, error: { message: `HTTP ${res.status}` } };
     const data = await res.json();
     return { data, error: null };
@@ -40,7 +40,7 @@ export async function fetchTasks(options?: {
 
 export async function fetchTaskById(id: string): Promise<LocalResponse<any>> {
   try {
-    const res = await fetch(`/api/suite/tasks/${id}`);
+    const res = await fetch(`/api/suite/tasks/${id}`, { headers: relayAuthHeaders() });
     if (!res.ok) return { data: null, error: { message: `HTTP ${res.status}` } };
     const data = await res.json();
     return { data, error: null };
@@ -53,7 +53,7 @@ export async function createTask(data: Record<string, any>): Promise<LocalRespon
   try {
     const res = await fetch('/api/suite/tasks', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: relayAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(data),
     });
     if (!res.ok) return { data: null, error: { message: `HTTP ${res.status}` } };
@@ -68,7 +68,7 @@ export async function updateTask(id: string, data: Record<string, any>): Promise
   try {
     const res = await fetch(`/api/suite/tasks/${id}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: relayAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(data),
     });
     if (!res.ok) return { data: null, error: { message: `HTTP ${res.status}` } };
@@ -81,7 +81,7 @@ export async function updateTask(id: string, data: Record<string, any>): Promise
 
 export async function deleteTask(id: string): Promise<LocalResponse<null>> {
   try {
-    const res = await fetch(`/api/suite/tasks/${id}`, { method: 'DELETE' });
+    const res = await fetch(`/api/suite/tasks/${id}`, { method: 'DELETE', headers: relayAuthHeaders() });
     if (!res.ok) return { data: null, error: { message: `HTTP ${res.status}` } };
     return { data: null, error: null };
   } catch (e: any) {
@@ -98,7 +98,7 @@ export async function fetchAgents(options?: {
     const params = new URLSearchParams();
     if (options?.status_in?.length) params.set('status_in', options.status_in.join(','));
     const qs = params.toString();
-    const res = await fetch(`/api/suite/agents${qs ? '?' + qs : ''}`);
+    const res = await fetch(`/api/suite/agents${qs ? '?' + qs : ''}`, { headers: relayAuthHeaders() });
     if (!res.ok) return { data: null, error: { message: `HTTP ${res.status}` } };
     const data = await res.json();
     return { data, error: null };
@@ -122,7 +122,7 @@ export async function createActivityLog(entry: {
     // POST to the /api/suite/activity-log endpoint (inline if not yet defined, fallback to no-op)
     const res = await fetch('/api/suite/activity-log', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: relayAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(entry),
     });
     if (!res.ok) return { data: null, error: { message: `HTTP ${res.status}` } };
@@ -137,7 +137,7 @@ export async function updateAgent(id: string, data: Record<string, any>): Promis
   try {
     const res = await fetch(`/api/suite/agents/${id}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: relayAuthHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(data),
     });
     if (!res.ok) return { data: null, error: { message: `HTTP ${res.status}` } };
@@ -246,9 +246,9 @@ export async function fetchDashboardStats(): Promise<{
     // default, not a measurement. The score is now derived from signals that
     // are actually reported, and unknown when they are missing.
     const [tasksRes, agentsRes, teleRes] = await Promise.all([
-      fetch('/api/suite/tasks?status_in=PENDING,IN_PROGRESS,CLAIMED,BLOCKED'),
-      fetch('/api/suite/agents?status_in=IDLE,BUSY'),
-      fetch('/api/suite/telemetry'),
+      fetch('/api/suite/tasks?status_in=PENDING,IN_PROGRESS,CLAIMED,BLOCKED', { headers: relayAuthHeaders() }),
+      fetch('/api/suite/agents?status_in=IDLE,BUSY', { headers: relayAuthHeaders() }),
+      fetch('/api/suite/telemetry', { headers: relayAuthHeaders() }),
     ]);
 
     const tasks = tasksRes.ok ? await tasksRes.json() : [];
@@ -325,8 +325,8 @@ export async function fetchKnowledgeStats(): Promise<{
 }> {
   try {
     const [entitiesRes, workflowsRes] = await Promise.all([
-      fetch('/api/suite/knowledge-stats'),
-      fetch('/api/suite/workflow-stats'),
+      fetch('/api/suite/knowledge-stats', { headers: relayAuthHeaders() }),
+      fetch('/api/suite/workflow-stats', { headers: relayAuthHeaders() }),
     ]);
     const entities = entitiesRes.ok ? await entitiesRes.json() : {};
     const workflows = workflowsRes.ok ? await workflowsRes.json() : {};

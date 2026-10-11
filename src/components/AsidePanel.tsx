@@ -4,8 +4,8 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { FileText, Globe, Image as ImageIcon, Video, X, Zap, RefreshCw, ExternalLink } from 'lucide-react';
-import { DocDropzone } from '@/components/DocDropzone';
 import { DocViewer } from '@/components/DocViewer';
+import { relayAuthHeaders } from '@/integrations/relay-auth';
 
 /**
  * AsidePanel — the Suite dashboard's dynamic side panel.
@@ -58,8 +58,8 @@ const OpsView = () => {
     setError(null);
     try {
       const [sup, pipe] = await Promise.all([
-        fetch('/api/supervisor/status').then(r => r.json()),
-        fetch('/api/tasks/pipeline-summary').then(r => r.json()),
+        fetch('/api/supervisor/status', { headers: relayAuthHeaders() }).then(r => r.json()),
+        fetch('/api/tasks/pipeline-summary', { headers: relayAuthHeaders() }).then(r => r.json()),
       ]);
       setServices(sup.services || []);
       setPipeline(pipe && typeof pipe.total === 'number' ? pipe : null);
@@ -173,7 +173,7 @@ const WebView = ({ initialUrl }: { initialUrl?: string }) => {
     try {
       const r = await fetch('/api/browse', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: relayAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ url: t }),
       });
       const data = await r.json();
@@ -313,15 +313,10 @@ export const AsidePanel = ({ aside, onChange, onClose }: AsidePanelProps) => {
               />
             </div>
           ) : (
-            <div className="p-4">
-              <DocDropzone
-                isUploading={false}
-                onUploadSuccess={(_path, text, fileName) =>
-                  onChange({ kind: 'doc', doc: { fileName: fileName || 'document', text } })
-                }
-              />
-              <p className="text-xs text-muted-foreground mt-3 text-center">
-                The document opens here, next to the chat — ask about it once it loads.
+            <div className="p-4 flex-1 flex flex-col items-center justify-center text-center gap-2">
+              <FileText className="w-8 h-8 text-muted-foreground/50" />
+              <p className="text-xs text-muted-foreground">
+                Attach a document from the chat — the paperclip or drag-and-drop — and it opens here, next to the conversation.
               </p>
             </div>
           )

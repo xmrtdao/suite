@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Card } from './ui/card';
+import { relayAuthHeaders } from '@/integrations/relay-auth';
 import { Button } from './ui/button';
 import { Textarea } from './ui/textarea';
 import { Badge } from './ui/badge';
@@ -1972,7 +1973,7 @@ const [messages, setMessages] = useState<UnifiedMessage[]>([]);
       try {
         const clerkRes = await fetch('/api/clerk/chat', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: relayAuthHeaders({ 'Content-Type': 'application/json' }),
           // l1:false keeps this call millisecond-fast (deterministic table
           // only). The slow local-model path is reserved for when the cloud
           // cascade fails — see the catch block below.
@@ -2365,7 +2366,7 @@ const [messages, setMessages] = useState<UnifiedMessage[]>([]);
       try {
         const l1Res = await fetch('/api/clerk/chat', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: relayAuthHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ message: trimmedInput, l1: true }),
           signal: AbortSignal.timeout(75000),
         });

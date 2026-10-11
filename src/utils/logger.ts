@@ -10,6 +10,8 @@
  * logger.error('Failed to fetch data', error);
  */
 
+import { relayAuthHeaders } from '@/integrations/relay-auth';
+
 const isDevelopment = import.meta.env.DEV;
 const isProduction = import.meta.env.PROD;
 
@@ -102,7 +104,7 @@ class Logger {
       // Client-side: send to backend logging endpoint
       fetch('/api/log', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: relayAuthHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ level, message, metadata, timestamp: new Date().toISOString() })
       }).catch(() => {
         // Silent fail - don't want logging to break the app

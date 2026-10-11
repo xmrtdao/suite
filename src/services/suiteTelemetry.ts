@@ -5,6 +5,8 @@
 // where this tenant sits in the ecosystem graph, and how much of the database
 // is actually reclaimable. Neither is answerable from a table the SPA can query.
 
+import { relayAuthHeaders } from '@/integrations/relay-auth';
+
 export interface TelemetryTable {
   schema: string;
   name: string;
@@ -168,7 +170,7 @@ export async function fetchSuiteTelemetry(
   // break on the tunnel, the same way a hardcoded VITE_SUPABASE_URL does.
   const res = await fetch('/api/suite/telemetry', {
     signal,
-    headers: { Accept: 'application/json' },
+    headers: relayAuthHeaders({ Accept: 'application/json' }),
   });
   if (!res.ok) {
     throw new Error(`telemetry request failed (${res.status})`);
