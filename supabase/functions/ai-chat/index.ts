@@ -5089,7 +5089,7 @@ aside can display them.
   local-sb (localhost:54321). Cloud Supabase is DEPRECATED — tables like
   \`public.fleet_memory\` live in LOCAL Postgres, not hosted Supabase.
 - **Canonical stores**: shared context = \`public.shared_context\` (32 curated keys);
-  fleet memory = \`fleet.fleet_memory\` (\`public.fleet_memory\` is a view over it);
+  fleet memory = \`app.fleet_memory\` (\`public.fleet_memory\` is a view over it);
   \`public.memory_contexts\` is your per-session conversation memory — a separate
   store, NOT the shared context table.
 
