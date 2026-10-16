@@ -66,9 +66,15 @@ serve(async (req) => {
       );
     }
 
-    const start_gemini_key = Deno.env.get("GEMINI_API_KEY");
-    if (!start_gemini_key) {
-      console.error("❌ CRITICAL WARNING: GEMINI_API_KEY not found. Agent intelligence will be disabled.");
+    // AI tiers: OpenCode Zen -> OpenRouter -> Ollama Cloud (all OpenAI-compatible).
+    // GEMINI/DEEPSEEK keys are no longer read anywhere in this function.
+    const aiKeys = {
+      opencode: Deno.env.get("OPENCODE_API_KEY"),
+      openrouter: Deno.env.get("OPENROUTER_API_KEY"),
+      ollama: Deno.env.get("OLLAMA_API_KEY") || Deno.env.get("OLLAMA_XMRT_API_KEY"),
+    };
+    if (!aiKeys.opencode && !aiKeys.openrouter && !aiKeys.ollama) {
+      console.error("❌ CRITICAL WARNING: No AI provider key found (OPENCODE/OPENROUTER/OLLAMA). Agent intelligence will be disabled.");
       // We don't exit here because simple tasks might still work, but we log strictly.
     }
 
@@ -362,14 +368,30 @@ Return ONLY the JSON object.
 `;
 
     const aiResponse = await callAI(prompt);
+    // Honesty gate: progress is only ever marked for a parsed AI decision.
+    // An unavailable provider or unparseable output records a failed attempt
+    // and advances nothing — marking fallback text as completed work would
+    // manufacture progress the agent never performed.
+    if (aiResponse.startsWith("AI analysis unavailable")) {
+      return { success: false, error: "ai_unavailable_no_progress_written" };
+    }
     let decision;
     try {
       const cleanJson = aiResponse.replace(/```json/g, '').replace(/```/g, '').trim();
-      decision = JSON.parse(cleanJson);
+      try {
+        decision = JSON.parse(cleanJson);
+      } catch {
+        // Free-tier models often wrap the object in prose: recover the
+        // outermost {...} before giving up to the manual fallback.
+        const start = cleanJson.indexOf('{');
+        const end = cleanJson.lastIndexOf('}');
+        if (start < 0 || end <= start) throw new Error('no JSON object');
+        decision = JSON.parse(cleanJson.slice(start, end + 1));
+      }
     } catch (e) {
       console.error("   ❌ Failed to parse AI decision:", aiResponse);
-      // Fallback to simple analysis
-      return { success: true, summary: "Completed (Manual Fallback): " + item };
+      // Unparseable output is not work. Record the failure, write nothing.
+      return { success: false, error: "unparseable_decision_no_progress_written" };
     }
 
     // 3. Execute the decision
@@ -472,74 +494,76 @@ Example: ["Analyze competitors", "Draft marketing copy", "Review with user"]
   }
 }
 
+async function chatCompletion(url: string, key: string, model: string, prompt: string): Promise<string> {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: "user", content: prompt }],
+      temperature: 0.3,
+      max_tokens: 500,
+    }),
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`AI API Error: ${response.status} - ${errorText.slice(0, 200)}`);
+  }
+  const result = await response.json();
+  // OpenAI-compatible shape (OpenRouter, Ollama Cloud, OpenCode Zen). Gemini-style
+  // candidates shape accepted too, in case a proxy translates upstream.
+  // Empty content falls through to the next tier rather than poisoning the
+  // decision parse downstream.
+  const content = result.choices?.[0]?.message?.content
+    || result.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!content || !String(content).trim()) throw new Error("empty completion from " + url);
+  return content;
+}
+
 async function callAI(prompt: string): Promise<string> {
-  const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
-  const DEEPSEEK_API_KEY = Deno.env.get("DEEPSEEK_API_KEY");
-
-  // Try Gemini first
-  if (GEMINI_API_KEY) {
+  // Tier 1: OpenRouter (OpenAI-compatible). Default is a free model verified
+  // live against real decision prompts (laguna-s-2.1); OPENROUTER_MODEL pins
+  // another catalog id. Rejected: openrouter/free (safety model, empty),
+  // gemma-4-31b-it:free (429), nemotron-3-nano-omni (empties on long prompts).
+  const openrouterKey = Deno.env.get("OPENROUTER_API_KEY");
+  if (openrouterKey) {
+    const model = Deno.env.get("OPENROUTER_MODEL") || "poolside/laguna-s-2.1:free";
     try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          contents: [{
-            parts: [{ text: prompt }]
-          }],
-          generationConfig: {
-            temperature: 0.3,
-            maxOutputTokens: 500,
-          }
-        }),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`Gemini API Error: ${response.status} - ${errorText}`);
-        throw new Error(`Gemini API Error: ${response.status}`);
-      }
-
-      const result = await response.json();
-      return result.candidates?.[0]?.content?.parts?.[0]?.text || "No analysis generated";
+      return await chatCompletion("https://openrouter.ai/api/v1/chat/completions", openrouterKey, model, prompt);
     } catch (error) {
-      console.error("Gemini API Exception, trying DeepSeek fallback:", error);
+      console.error("OpenRouter Exception, trying Ollama Cloud fallback:", error);
     }
   } else {
-    console.error("❌ WARNING: GEMINI_API_KEY not found in secrets. Falling back to DeepSeek.");
+    console.error("❌ WARNING: OPENROUTER_API_KEY not found. Falling back to Ollama Cloud.");
   }
 
-  // Fallback to DeepSeek
-  if (!DEEPSEEK_API_KEY) {
-    return "AI analysis unavailable (Missing both GEMINI_API_KEY and DEEPSEEK_API_KEY)";
-  }
-
-  try {
-    const response = await fetch("https://api.deepseek.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${DEEPSEEK_API_KEY}`
-      },
-      body: JSON.stringify({
-        model: "deepseek-v4-pro",
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.3,
-        max_tokens: 500,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error(`DeepSeek API Error: ${response.status} - ${errorText}`);
-      throw new Error(`DeepSeek API Error: ${response.status}`);
+  // Tier 2: Ollama Cloud (OpenAI-compatible). OLLAMA_MODEL is operator config
+  // (gemma4:31b); note Pro-quota 429s surface here when the cap is hit.
+  const ollamaKey = Deno.env.get("OLLAMA_API_KEY") || Deno.env.get("OLLAMA_XMRT_API_KEY");
+  if (ollamaKey) {
+    const ollamaModel = Deno.env.get("OLLAMA_MODEL") || "gemma4:31b";
+    try {
+      return await chatCompletion("https://ollama.com/v1/chat/completions", ollamaKey, ollamaModel, prompt);
+    } catch (error) {
+      console.error("Ollama Cloud Exception, trying OpenCode Zen fallback:", error);
     }
+  } else {
+    console.error("❌ WARNING: OLLAMA_API_KEY not found. Falling back to OpenCode Zen.");
+  }
 
-    const result = await response.json();
-    return result.choices?.[0]?.message?.content || "No analysis generated";
+  // Tier 3: OpenCode Zen (OpenAI-compatible, fleet free tier). Currently 403s
+  // (FreeTierError: free tier only works from inside OpenCode) — kept so a
+  // future key upgrade lights it up with no code change.
+  const opencodeKey = Deno.env.get("OPENCODE_API_KEY");
+  if (!opencodeKey) {
+    return "AI analysis unavailable (Missing OPENROUTER, OLLAMA and OPENCODE keys)";
+  }
+  const base = (Deno.env.get("OPENCODE_BASE_URL") || "https://opencode.ai/zen/v1").replace(/\/$/, "");
+  const model = (Deno.env.get("OPENCODE_MODELS") || "space-bunny-free").split(",")[0].trim();
+  try {
+    return await chatCompletion(`${base}/chat/completions`, opencodeKey, model, prompt);
   } catch (error) {
-    console.error("DeepSeek API Exception:", error);
+    console.error("OpenCode Zen Exception:", error);
     return "AI analysis unavailable (all providers failed)";
   }
 }
