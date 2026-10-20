@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <title>Fun Frame Photo AI Experience</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Inter', 'sans-serif'],
+              display: ['Space Grotesk', 'sans-serif'],
+            },
+            colors: {
+              brand: {
+                50: '#f0fdf4',
+                100: '#dcfce7',
+                500: '#22c55e',
+                600: '#16a34a',
+                900: '#14532d',
+              },
+              funframe: {
+                green: '#22c55e',
+                darkGreen: '#15803d',
+                black: '#000000',
+              },
+              kiosk: {
+                bg: '#09090b',
+                card: '#18181b',
+                accent: '#22c55e'
+              }
+            },
+            animation: {
+              'flash': 'flash 0.5s ease-out',
+              'pulse-fast': 'pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+            },
+            keyframes: {
+              flash: {
+                '0%': { opacity: '1', backgroundColor: 'white' },
+                '100%': { opacity: '0', backgroundColor: 'transparent' },
+              }
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      body { background-color: #f8fafc; color: #0f172a; }
+      #root { min-height: 100vh; }
+      /* Hide scrollbar for Kiosk feel */
+      .no-scrollbar::-webkit-scrollbar { display: none; }
+      .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+
+<link rel="stylesheet" href="/index.css">
+  <script type="importmap">
+{
+  "imports": {
+    "recharts": "https://esm.sh/recharts@^3.5.1",
+    "lucide-react": "https://esm.sh/lucide-react@^0.559.0",
+    "@google/genai": "https://esm.sh/@google/genai@^1.32.0",
+    "react/": "https://esm.sh/react@^19.2.1/",
+    "react": "https://esm.sh/react@^19.2.1",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.1/"
+  }
+}
+</script>
+  <script type="module" crossorigin src="/assets/index-SH0tB-36.js"></script>
+<script async src="https://bolt.new/badge.js?s=83723337-e582-4965-a148-6b294108c233"></script></head>
+  <body>
+    <div id="root"></div>
+</body>
+</html>

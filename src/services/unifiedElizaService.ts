@@ -404,9 +404,18 @@ export class UnifiedElizaService {
         }
         payload.session_id = storedSession;
         
-        // Include conversation history from context so ai-chat has full context
+        // Include conversation history from context so ai-chat has full context.
+        //
+        // Was a hardcoded slice(-20). Measured message size on this system's
+        // own traffic is ~988 chars mean / 2,465 p95, so 20 messages is roughly
+        // 5k-12k tokens. The server now applies a token budget sized to
+        // whichever model ends up answering (see fitMessagesToBudget in
+        // ai-chat/index.ts), which ranges from 65k to 1M tokens — 20 was
+        // throwing away context that the budget could comfortably carry.
+        // 60 keeps roughly 30 turns of real dialogue.
+        const HISTORY_MESSAGES_SENT = 60;
         if (context.conversationContext?.recentMessages && Array.isArray(context.conversationContext.recentMessages)) {
-          const historyMessages = context.conversationContext.recentMessages.slice(-20).map((m: any) => ({
+          const historyMessages = context.conversationContext.recentMessages.slice(-HISTORY_MESSAGES_SENT).map((m: any) => ({
             role: m.sender === 'user' ? 'user' : 'assistant',
             content: m.content || ''
           }));

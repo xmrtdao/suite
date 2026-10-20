@@ -1,0 +1,38 @@
+// Party Favor Photo - themed transformation library
+export const THEMES = {
+  "hollywood": {
+    "name": "Hollywood Red Carpet",
+    "prompt": "Transform this person into a glamorous Hollywood red carpet star, paparazzi flashes, elegant gown or tuxedo, golden hour lighting",
+    "style": "cinematic, high fashion"
+  },
+  "enchanted_forest": {
+    "name": "Enchanted Forest",
+    "prompt": "Transform this person into an enchanted forest fairy, glowing mushrooms, fireflies, mystical woodland magic, ethereal light",
+    "style": "whimsical, fantasy"
+  },
+  "steampunk": {
+    "name": "Steampunk",
+    "prompt": "Transform this person into a steampunk adventurer, brass goggles, copper gears, Victorian fashion, industrial steam atmosphere",
+    "style": "retro-futuristic, mechanical"
+  },
+  "psychedelic": {
+    "name": "Psychedelic",
+    "prompt": "Transform this person into a vibrant psychedelic artwork, swirling neon colors, trippy patterns, kaleidoscopic effects",
+    "style": "vivid, surreal"
+  },
+  "fairy": {
+    "name": "Fairy Wings",
+    "prompt": "Transform this person with glowing iridescent fairy wings, sparkling dust, pastel dreamy background, magical aura",
+    "style": "delicate, luminous"
+  },
+  "superhero": {
+    "name": "Superhero",
+    "prompt": "Transform this person into a comic book superhero, dynamic pose, dramatic cape, bold costume, action energy",
+    "style": "comic, epic"
+  },
+  "custom": {
+    "name": "Custom",
+    "prompt": "{user_prompt}",
+    "style": "user-defined"
+  }
+};

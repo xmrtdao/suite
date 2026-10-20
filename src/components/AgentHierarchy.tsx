@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { realtimeManager } from '@/services/realtimeSubscriptionManager';
 import {
     Users,
     Briefcase,
@@ -36,13 +37,15 @@ export const AgentHierarchy = () => {
 
         fetchAgents();
 
-        const channel = supabase
-            .channel('agents-hierarchy-status')
-            .on('postgres_changes', {
-                event: '*',
-                schema: 'public',
-                table: 'agents'
-            }, (payload) => {
+        // Route through realtimeManager: it no-ops against the local Supabase
+        // emulator, which stubs /realtime/v1 and never emits postgres_changes.
+        // A direct supabase.channel().on('postgres_changes') bind against that
+        // stub throws "Cannot destructure property 'postgres_changes' of
+        // 'undefined'" inside supabase-js before our callback can run.
+        const unsubscribe = realtimeManager.subscribe(
+            'agents',
+            (payload) => {
+                if (!payload) return;
                 if (payload.eventType === 'UPDATE' && payload.new) {
                     setAgents(prev => prev.map(a =>
                         a.id === payload.new.id ? { ...a, ...payload.new } : a
@@ -50,11 +53,12 @@ export const AgentHierarchy = () => {
                 } else if (payload.eventType === 'INSERT' && payload.new) {
                     setAgents(prev => [...prev, payload.new as Agent]);
                 }
-            })
-            .subscribe();
+            },
+            { event: '*' }
+        );
 
         return () => {
-            supabase.removeChannel(channel);
+            unsubscribe();
         };
     }, []);
 

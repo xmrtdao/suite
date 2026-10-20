@@ -65,7 +65,16 @@ const BRAND_PUB_URL = `https://paragraph.com/@${BRAND_PUB_HANDLE}`;
 // what it needs, so the cap is a backstop rather than the normal path.
 const MAX_TOOL_ITERATIONS = parseInt(Deno.env.get('MAX_TOOL_ITERATIONS') || '3');
 const REQUEST_TIMEOUT_MS = parseInt(Deno.env.get('REQUEST_TIMEOUT_MS') || '120000');
-const CONVERSATION_HISTORY_LIMIT = parseInt(Deno.env.get('CONVERSATION_HISTORY_LIMIT') || '1000');
+
+// Messages loaded from storage per request.
+//
+// Was 1000. That number was never reachable in practice — the frontend only
+// ever sent 20 (now 60), and messages are persisted at MAX_HISTORY_MESSAGES —
+// but it also was not the real constraint. What actually limits how much
+// history reaches the model is the per-provider token budget in
+// fitMessagesToBudget(), because the cascade spans 65,536 to 1,000,000 tokens
+// of context. This is now simply the read ceiling.
+const CONVERSATION_HISTORY_LIMIT = parseInt(Deno.env.get('CONVERSATION_HISTORY_LIMIT') || '400');
 
 // ========== DIAGNOSTIC FILE LOG ==========
 // The local-sb functions router swallows deno stderr on successful starts,
@@ -437,11 +446,45 @@ async function fetchLocalFleetContext(query: string): Promise<string> {
 
 // Memory Configuration
 const MEMORY_SUMMARY_INTERVAL = parseInt(Deno.env.get('MEMORY_SUMMARY_INTERVAL') || '5');
-const MAX_TOOL_RESULTS_MEMORY = parseInt(Deno.env.get('MAX_TOOL_RESULTS_MEMORY') || '100');
+
+// Tool results retained in memory. Tool output is the bulkiest thing we carry:
+// measured ~500-2000 chars each, so 100 results is 25k-50k tokens — a large
+// slice of a 65k window on the small models. The value is now a CEILING that
+// fitMessagesToBudget() trims against the selected model's real context; the
+// fallback below is what a model with no declared window gets.
+const MAX_TOOL_RESULTS_MEMORY = parseInt(Deno.env.get('MAX_TOOL_RESULTS_MEMORY') || '60');
 
 // NEW: Conversation Memory Configuration
 const CONVERSATION_SUMMARY_LIMIT = parseInt(Deno.env.get('CONVERSATION_SUMMARY_LIMIT') || '2000');
 const MAX_SUMMARIZED_CONVERSATIONS = parseInt(Deno.env.get('MAX_SUMMARIZED_CONVERSATIONS') || '100');
+
+// How many historical summaries actually reach the system prompt.
+//
+// This used to be a hardcoded slice(0, 5): loadHistoricalSummaries() fetched
+// up to MAX_SUMMARIZED_CONVERSATIONS (100) and generateSystemPrompt() threw
+// away all but 5. Measured cost of a summary is ~222 chars, so 25 of them is
+// only ~1,400 tokens — trivial against every window in the cascade — while
+// the extra 20 are real recall the model was being denied.
+const MAX_SUMMARIES_IN_PROMPT = parseInt(Deno.env.get('MAX_SUMMARIES_IN_PROMPT') || '25');
+
+// Hard ceiling on raw message history, regardless of model. This is a
+// backstop; the real limit is fitMessagesToBudget()'s token budget.
+const MAX_HISTORY_MESSAGES = parseInt(Deno.env.get('MAX_HISTORY_MESSAGES') || '400');
+
+// Assumed context window for a provider that does not declare one. Deliberately
+// conservative — the smallest window currently in the cascade is 65,536
+// (liquid/lfm-2.5-2.6b), so 64k is the safe floor for an unknown model.
+const DEFAULT_CONTEXT_WINDOW = parseInt(Deno.env.get('DEFAULT_CONTEXT_WINDOW') || '65536');
+
+// Reserve headroom for the response itself. RESPONSE_MAX_TOKENS defaults to
+// 16000, so on a 65k window nearly a quarter of the budget is the answer.
+const HISTORY_BUDGET_FRACTION = parseFloat(Deno.env.get('HISTORY_BUDGET_FRACTION') || '0.55');
+
+// Average characters per token. Measured on this codebase's own traffic: the
+// global mean message is ~988 chars and p95 is ~2465; 4 chars/token is the
+// standard English approximation and errs on the generous side, which is the
+// right direction — under-counting would overflow the window.
+const CHARS_PER_TOKEN = 4.0;
 
 // Initialize Supabase client with proper configuration
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
@@ -491,26 +534,157 @@ interface AIProviderConfig {
   fallbackOnly: boolean;
   maxRetries: number;
   retryDelayMs: number;
+  // Declared context window in tokens, verified against the provider's live
+  // model catalog. `undefined` means "unknown" and falls back to
+  // DEFAULT_CONTEXT_WINDOW. This is what lets history be sized to the model
+  // actually selected rather than to one global guess — the cascade spans
+  // 65,536 (liquid) to 1,000,000 (nemotron-ultra), a 15x difference.
+  contextWindow?: number;
 }
 const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
-  // TIER -1: OpenCode Zen — tried before every OpenRouter entry.
-  // Added 2026-09-27. Zen bills against its own quota pool, so the OpenRouter
-  // :free tiers getting rate-limited together no longer takes the fleet offline.
+  // TIER -1: OpenCode Zen — the requested free combo.
   //
-  // Only space-bunny-free is reachable from outside the OpenCode client. Every
-  // other *-free Zen slug (longcat-2.5-preview-free, jev-1.13-free, big-pickle,
-  // nemotron-3.5-lightning-free, muse-spark-1.3-contributor-free, ...) answers
-  // 403 "OpenCode's free tier can only be used from within OpenCode". Add a slug
-  // to `models` here only after verifying a 200 from this runtime.
+  // Re-probed 2026-10-19 from this runtime, and it cannot answer from here:
+  //   *-free slugs  -> 403 "OpenCode's free tier can only be used from within
+  //                     OpenCode. Download it at https://opencode.ai"
+  //   paid slugs    -> 402 "Insufficient account funds" on the account behind
+  //                     OPENCODE_API_KEY
+  //   space-bunny-free -> 410 "deprecated. Use minimax-m3.1-flash-free instead"
+  //                     (and that replacement is itself 403 from outside
+  //                     OpenCode, so the note above still stands)
+  //
+  // So the slug is updated to the current one and the entry is disabled: it
+  // cannot answer a request from this runtime, and leaving it enabled spent
+  // a third of a second proving that on every call. Re-enable it by flipping
+  // `enabled` once the account has funds, or when calling from inside
+  // OpenCode, where the free tier is the point.
   opencode_zen_free: {
-    name: 'Space Bunny Free (OpenCode Zen) — FREE',
-    enabled: !!OPENCODE_API_KEY,
+    name: 'MiniMax M3.1 Flash Free (OpenCode Zen) — FREE',
+    enabled: false,
     apiKey: OPENCODE_API_KEY,
     endpoint: `${OPENCODE_BASE_URL}/chat/completions`,
-    models: ['space-bunny-free'],
+    models: ['minimax-m3.1-flash-free'],
     supportsTools: true,
+    // Context window: not published on OpenRouter (Zen is a separate catalog).
+    // Falls back to DEFAULT_CONTEXT_WINDOW.
+    contextWindow: undefined,
     timeoutMs: 120000,
-    priority: 0.05,  // tried first — own quota pool
+    priority: 0.05,  // own quota pool, once it can answer
+    fallbackOnly: false,
+    maxRetries: 2,
+    retryDelayMs: 1000
+  },
+
+  // ── VERIFIED WORKING FREE MODELS ────────────────────────────────
+  // Added 2026-10-11. The cascade had drifted: qwen3_8_27b_free was a slug
+  // OpenRouter retired (permanent 404), both gemma slugs were 429, and the
+  // whole budget was being spent re-probing them on every tool iteration.
+  //
+  // Each slug below was probed live against the OpenRouter catalog AND the
+  // /chat/completions endpoint before being added — measured latency and
+  // native tool_calls support are in each comment. Do not add a slug here
+  // just because it appears in the catalog; verify it answers with real
+  // tool_calls first (see _probe_candidates.py in the repo root).
+
+  // MiniMax M3.1 Flash — the free slug OpenRouter now serves. Added 2026-10-19.
+  // The older minimax/minimax-m3:free was retired (404), and the replacement
+  // name that 404 pointed at — minimax/minimax-m3 — is paid.
+  //
+  // Probed live from this runtime before being added, per the rule above:
+  //   200 in 1015ms, native tool_calls confirmed (a real function call came
+  //   back, not prose), 1,000,000 token context per the OpenRouter catalog.
+  // That makes it the fastest verified slug in the cascade.
+  minimax_m3_1_flash_free: {
+    name: 'MiniMax M3.1 Flash (OpenRouter) — FREE, supports tools',
+    enabled: !!OPENROUTER_API_KEY,
+    apiKey: OPENROUTER_API_KEY,
+    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    models: ['minimax/minimax-m3.1-flash:free'],
+    supportsTools: true,
+    // Verified against OpenRouter /models on 2026-10-19.
+    contextWindow: 1000000,
+    timeoutMs: 45000,
+    priority: 0.03,  // fastest verified slug — tried before the rest
+    fallbackOnly: false,
+    maxRetries: 2,
+    retryDelayMs: 1000
+  },
+
+  poolside_laguna_s: {
+    name: 'Poolside Laguna S 2.1 (OpenRouter) — FREE, supports tools',
+    enabled: !!OPENROUTER_API_KEY,
+    apiKey: OPENROUTER_API_KEY,
+    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    models: ['poolside/laguna-s-2.1:free'],
+    supportsTools: true,
+    // Verified against OpenRouter /models on 2026-10-11.
+    contextWindow: 262144,
+    timeoutMs: 45000,
+    priority: 0.06,  // verified 1000ms + native tool_calls — fastest live slug
+    fallbackOnly: false,
+    maxRetries: 2,
+    retryDelayMs: 1000
+  },
+
+  cohere_north_mini_code: {
+    name: 'Cohere North Mini Code (OpenRouter) — FREE, supports tools',
+    enabled: !!OPENROUTER_API_KEY,
+    apiKey: OPENROUTER_API_KEY,
+    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    models: ['cohere/north-mini-code:free'],
+    supportsTools: true,
+    // Verified against OpenRouter /models on 2026-10-11.
+    contextWindow: 256000,
+    timeoutMs: 45000,
+    priority: 0.07,  // verified 1396ms + native tool_calls
+    fallbackOnly: false,
+    maxRetries: 2,
+    retryDelayMs: 1000
+  },
+
+  apodex_1_1_mini: {
+    name: 'Apexd Apex 1.1 Mini (OpenRouter) — FREE, supports tools',
+    enabled: !!OPENROUTER_API_KEY,
+    apiKey: OPENROUTER_API_KEY,
+    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    models: ['apodex/apodex-1.1-mini:free'],
+    supportsTools: true,
+    // Verified against OpenRouter /models on 2026-10-11.
+    contextWindow: 262144,
+    timeoutMs: 45000,
+    priority: 0.08,  // verified 2406ms + native tool_calls
+    fallbackOnly: false,
+    maxRetries: 2,
+    retryDelayMs: 1000
+  },
+
+  dots_3_note_preview: {
+    name: 'Dots Studio Dots 3 Note (OpenRouter) — FREE, supports tools',
+    enabled: !!OPENROUTER_API_KEY,
+    apiKey: OPENROUTER_API_KEY,
+    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    models: ['dots-studio/dots-3-note-preview:free'],
+    supportsTools: true,
+    // Verified against OpenRouter /models on 2026-10-11.
+    contextWindow: 512000,
+    timeoutMs: 45000,
+    priority: 0.09,  // verified 3501ms + native tool_calls
+    fallbackOnly: false,
+    maxRetries: 2,
+    retryDelayMs: 1000
+  },
+
+  liquid_lfm_2_5_2_6b: {
+    name: 'Liquid LFM 2.5 2.6B (OpenRouter) — FREE, supports tools',
+    enabled: !!OPENROUTER_API_KEY,
+    apiKey: OPENROUTER_API_KEY,
+    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    models: ['liquid/lfm-2.5-2.6b:free'],
+    supportsTools: true,
+    // Verified against OpenRouter /models on 2026-10-11.
+    contextWindow: 65536,
+    timeoutMs: 45000,
+    priority: 0.11,  // verified 6055ms + native tool_calls (slowest verified)
     fallbackOnly: false,
     maxRetries: 2,
     retryDelayMs: 1000
@@ -531,6 +705,8 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     endpoint: 'https://openrouter.ai/api/v1/chat/completions',
     models: ['google/gemma-4-26b-a4b-it:free'],
     supportsTools: true,
+    // Verified against OpenRouter /models on 2026-10-11.
+    contextWindow: 262144,
     timeoutMs: 120000,
     priority: 0.1,  // tried first — new free model
     fallbackOnly: false,
@@ -545,6 +721,8 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     endpoint: 'https://openrouter.ai/api/v1/chat/completions',
     models: ['google/gemma-4-31b-it:free'],
     supportsTools: true,
+    // Verified against OpenRouter /models on 2026-10-11.
+    contextWindow: 262144,
     timeoutMs: 120000,
     priority: 0.15,  // second new free model
     fallbackOnly: false,
@@ -554,13 +732,20 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
   
   qwen3_8_27b_free: {
     name: 'Qwen Qwen3.8 27B (OpenRouter) — FREE',
-    enabled: !!OPENROUTER_API_KEY,
+    // DISABLED 2026-10-11: OpenRouter retired this free slug. Verified live —
+    // every call returns a permanent 404 "This model is unavailable for free.
+    // The paid version is available now." A 404 is not a rate limit; it will
+    // not recover on its own, so probing it only burns a cascade slot.
+    // Re-enable only after confirming the slug actually answers.
+    enabled: false,
     apiKey: OPENROUTER_API_KEY,
     endpoint: 'https://openrouter.ai/api/v1/chat/completions',
     models: ['qwen/qwen3.8-27b:free'],
     supportsTools: true,
-    timeoutMs: 120000,
-    priority: 0.2,  // third new free model
+    // Verified against OpenRouter /models on 2026-10-11.
+    contextWindow: 262144,
+    timeoutMs: 45000,
+    priority: 0.2,
     fallbackOnly: false,
     maxRetries: 2,
     retryDelayMs: 1000
@@ -574,7 +759,14 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     endpoint: 'https://openrouter.ai/api/v1/chat/completions',
     models: ['nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free'],
     supportsTools: true,
-    timeoutMs: 120000,
+    // Cut 120s -> 45s on 2026-10-11. Measured twice in one request: 3316ms
+    // when healthy, but it also hung to the full abort (120011ms, then
+    // 120005ms on the synthesis pass) — roughly 240s of a 336s request spent
+    // on a provider that returned nothing. 45s keeps ample headroom over the
+    // observed healthy latency while capping the damage when it wedges.
+    // Verified against OpenRouter /models on 2026-10-11.
+    contextWindow: 256000,
+    timeoutMs: 45000,
     priority: 0.25,  // tier 1 — free model with tool support
     fallbackOnly: false,
     maxRetries: 2,
@@ -589,6 +781,8 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     endpoint: 'https://openrouter.ai/api/v1/chat/completions',
     models: ['nvidia/nemotron-3-ultra-550b-a55b:free'],
     supportsTools: true,
+    // Verified against OpenRouter /models on 2026-10-11.
+    contextWindow: 1000000,
     timeoutMs: 120000,
     priority: 0.3,  // tier 2 — free model with tool support
     fallbackOnly: false,
@@ -605,6 +799,8 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     endpoint: 'https://openrouter.ai/api/v1/chat/completions',
     models: ['nvidia/nemotron-3.5-lightning:free'],
     supportsTools: true,
+    // Verified against OpenRouter /models on 2026-10-11.
+    contextWindow: 1000000,
     timeoutMs: 120000,
     priority: 0.35,  // tier 3 — free model with tool support
     fallbackOnly: false,
@@ -625,6 +821,8 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     endpoint: 'https://openrouter.ai/api/v1/chat/completions',
     models: ['nvidia/nemotron-3-super-120b-a12b:free'],
     supportsTools: true,
+    // Verified against OpenRouter /models on 2026-10-11.
+    contextWindow: 262144,
     timeoutMs: 120000,
     priority: 0.4,  // tier 4 — primary daily driver
     fallbackOnly: false,
@@ -635,13 +833,24 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
   // SECONDARY: Ollama Pro Cloud via the signed-in serve path. Skipped automatically
   // when OLLAMA_MODEL ends in ':free' or contains '/' (those models are not on
   // ollama.com and 404 there — wastes timeout budget).
+  //
+  // The default model was wrong: minimax/minimax-m3:free is not an ollama.com
+  // model and answers 404 ("model not found. Try glm-5.3-flash:cloud").
+  // Re-probed 2026-10-19: all three Ollama cloud keys are out of quota (429
+  // "You used all included Pro usage"), and deepseek-v4-flash:cloud was retired
+  // on 2026-09-25 (410). The entry stays because the quota resets; a quota
+  // answer is a fast 429, not a hang.
   ollama: {
     name: 'Ollama Pro Cloud',
     enabled: true,
     apiKey: OLLAMA_API_KEY,
     endpoint: 'https://ollama.com/v1/chat/completions',
-    models: [Deno.env.get('OLLAMA_MODEL') || 'minimax/minimax-m3:free'],
+    models: [Deno.env.get('OLLAMA_MODEL') || 'glm-5.3-flash:cloud'],
     supportsTools: true,
+    // Ollama Cloud does not publish a per-model window through our config
+    // path, and the model in use varies with OLLAMA_MODEL, so this stays on
+    // the conservative default rather than guessing a large one.
+    contextWindow: undefined,
     timeoutMs: 120000,
     priority: 0.5,
     fallbackOnly: false,
@@ -651,13 +860,16 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
   
   // TERTIARY: direct ollama.com via the 3rd Ollama account key — separate weekly quota.
   // Same OpenRouter-only guard: skipped if OLLAMA_MODEL is a ':free' or contains '/'.
+  // Default model corrected 2026-10-19: minimax/minimax-m3:free is not an
+  // ollama.com model (404). All three keys are currently quota-exhausted (429).
   ollama_pro_3rd: {
     name: 'Ollama Pro 3rd (alternate quota)',
     enabled: !!OLLAMA_3RD_API_KEY,
     apiKey: OLLAMA_3RD_API_KEY,
     endpoint: 'https://ollama.com/v1/chat/completions',
-    models: [Deno.env.get('OLLAMA_MODEL') || 'minimax/minimax-m3:free'],
+    models: [Deno.env.get('OLLAMA_MODEL') || 'glm-5.3-flash:cloud'],
     supportsTools: true,
+    contextWindow: undefined,
     timeoutMs: 120000,
     priority: 0.45,
     fallbackOnly: false,
@@ -673,6 +885,8 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     endpoint: `${OLLAMA_LOCAL_HOST}/v1/chat/completions`,
     models: [],
     supportsTools: true,
+    // Local models are typically small; keep the conservative default.
+    contextWindow: undefined,
     timeoutMs: 10000,
     priority: 99,
     fallbackOnly: false,
@@ -688,6 +902,9 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     endpoint: 'https://api.deepseek.com/v1/chat/completions',
     models: ['deepseek-chat', 'deepseek-coder'],
     supportsTools: true,
+    // deepseek-chat is 64k; deepseek-coder is 128k. Use the larger so a coder
+    // request is not truncated, and the budget trims to fit either.
+    contextWindow: 131072,
     timeoutMs: 120000,
     priority: 2,
     fallbackOnly: false,
@@ -697,6 +914,182 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
 };// Matches relay/tools/ollama-chat.mjs isOpenRouterOnly() — keep them in sync.
 function isOpenRouterOnly(model: string): boolean {
   return typeof model === 'string' && (model.includes('/') || model.endsWith(':free'));
+}
+
+// ========== PROVIDER CIRCUIT BREAKER ==========
+// The cascade re-runs the FULL ordered candidate list on every tool iteration and
+// again for the final synthesis. Measured on 2026-10-11: one "What's new?"
+// request ran the cascade 4x and took 336s, of which ~240s was a single dead
+// provider (nemotron_3_nano_free) burning its 120s abort twice. Every other
+// dead provider (403/404/429) was re-probed each iteration too.
+//
+// So each provider's outcome is remembered process-wide and providers in
+// cooldown are skipped. Two cooldowns:
+//   - "hard"  (401/402/403/404/410) — key/quota/slug problems. These do not
+//     self-heal in seconds, so sit out a long window.
+//   - "soft"  (429/5xx/timeout/transport) — short window, then retry.
+// A success clears the entry immediately, so a provider that recovers is used
+// again at once (this is what keeps opencode_zen_free first: it 403s from
+// outside OpenCode today, but the moment it answers it wins the top slot again).
+
+const HARD_FAIL_RE = /\b(401|402|403|404|410)\b/;
+const HARD_FAIL_COOLDOWN_MS = 10 * 60 * 1000;  // 10 min — key/quota/slug class
+const SOFT_FAIL_COOLDOWN_MS = 60 * 1000;       // 1 min  — rate limit / flaky
+// Never let the breaker starve the cascade: if fewer than this many providers
+// are available, ignore cooldown and try the full list rather than give up.
+const CIRCUIT_MIN_PROVIDERS = 2;
+
+type ProviderHealth = {
+  failures: number;
+  lastError: string;
+  cooldownUntil: number;
+};
+
+const providerHealth = new Map<string, ProviderHealth>();
+
+function cooldownForError(error: string): number {
+  return HARD_FAIL_RE.test(error || '') ? HARD_FAIL_COOLDOWN_MS : SOFT_FAIL_COOLDOWN_MS;
+}
+
+/** Record a failed attempt and put the provider in cooldown. */
+function recordProviderFailure(provider: string, error: string): void {
+  const prev = providerHealth.get(provider);
+  const failures = (prev?.failures ?? 0) + 1;
+  const base = cooldownForError(error);
+  // Repeated failures back off further, capped at 4x the base window.
+  const cooldown = Math.min(base * Math.min(failures, 4), HARD_FAIL_COOLDOWN_MS * 4);
+  providerHealth.set(provider, { failures, lastError: (error || '').slice(0, 160), cooldownUntil: Date.now() + cooldown });
+}
+
+/** Record a success — clears the breaker so a recovered provider is retried at once. */
+function recordProviderSuccess(provider: string): void {
+  providerHealth.delete(provider);
+}
+
+function isProviderCoolingDown(provider: string): boolean {
+  const h = providerHealth.get(provider);
+  if (!h) return false;
+  if (Date.now() >= h.cooldownUntil) {
+    // Cooldown elapsed — drop the entry so the next failure restarts the count.
+    providerHealth.delete(provider);
+    return false;
+  }
+  return true;
+}
+
+/** Filter the ordered candidate list through the breaker. */
+function applyCircuitBreaker(ordered: string[]): string[] {
+  const live = ordered.filter((p) => !isProviderCoolingDown(p));
+  if (live.length >= CIRCUIT_MIN_PROVIDERS) return live;
+  // Everything is cooling down. Rather than fail, try them all — a stale
+  // cooldown must never be the reason a user gets no answer.
+  return ordered;
+}
+
+// ========== CONTEXT BUDGETING ==========
+// The old limit was a flat message COUNT: CONVERSATION_HISTORY_LIMIT=1000.
+// Counting messages is the wrong unit. Measured on this system's own traffic,
+// the mean message is ~988 chars (~247 tokens) but p95 is 2,465 chars, so 1000
+// messages can be anywhere from ~247k to ~615k tokens depending on content.
+//
+// That matters because the cascade spans a 15x range of context windows:
+//   liquid/lfm-2.5-2.6b            65,536
+//   cohere/north-mini-code        256,000
+//   dots-3-note-preview           512,000
+//   nemotron-3-ultra-550b       1,000,000
+// A flat 1000-message slice (~247k tokens) already overflows the smallest
+// model in the cascade by ~4x. So history is now budgeted in TOKENS against
+// the window of the model that will actually answer.
+
+/** Rough token estimate. Errs generous (over-counts) so we under-fill windows. */
+function estimateTokens(text: unknown): number {
+  if (typeof text === 'string') return Math.ceil(text.length / CHARS_PER_TOKEN);
+  if (text == null) return 0;
+  try { return Math.ceil(JSON.stringify(text).length / CHARS_PER_TOKEN); }
+  catch { return 0; }
+}
+
+function estimateMessageTokens(msg: any): number {
+  if (!msg) return 0;
+  let n = estimateTokens(msg.content);
+  if (msg.tool_calls) n += estimateTokens(msg.tool_calls);
+  if (msg.tool_call_id) n += estimateTokens(msg.tool_call_id);
+  if (msg.name) n += estimateTokens(msg.name);
+  // Per-message framing overhead (role, delimiters) is real but small.
+  return n + 4;
+}
+
+function messageTextLength(msg: any): number {
+  if (!msg) return 0;
+  if (typeof msg.content === 'string') return msg.content.length;
+  if (msg.content == null) return 0;
+  try { return JSON.stringify(msg.content).length; } catch { return 0; }
+}
+
+/**
+ * Trim a message array so it fits a token budget, dropping the OLDEST
+ * non-system messages first. System messages (the prompt, tool rules, memory
+ * context) are never dropped — losing those breaks the model entirely.
+ *
+ * Returns the original array untouched when it already fits, so the common
+ * case costs nothing.
+ */
+export function fitMessagesToBudget(
+  messages: any[],
+  budgetTokens: number,
+  opts: { maxMessages?: number; label?: string } = {}
+): { messages: any[]; dropped: number; tokens: number; budget: number } {
+  const list = Array.isArray(messages) ? messages : [];
+  const maxMessages = opts.maxMessages ?? MAX_HISTORY_MESSAGES;
+
+  let total = list.reduce((sum, m) => sum + estimateMessageTokens(m), 0);
+
+  if (total <= budgetTokens && list.length <= maxMessages) {
+    return { messages: list, dropped: 0, tokens: total, budget: budgetTokens };
+  }
+
+  const kept: any[] = [];
+  let used = 0;
+  let dropped = 0;
+
+  // Pass 1 — always keep system messages; they carry the prompt and rules.
+  for (const m of list) {
+    if (m && m.role === 'system') {
+      const t = estimateMessageTokens(m);
+      kept.push(m);
+      used += t;
+    }
+  }
+
+  // Pass 2 — walk newest -> oldest, keeping what still fits.
+  for (let i = list.length - 1; i >= 0; i--) {
+    const m = list[i];
+    if (m && m.role === 'system') continue;
+    if (kept.length >= maxMessages) { dropped++; continue; }
+    const t = estimateMessageTokens(m);
+    if (used + t > budgetTokens) { dropped++; continue; }
+    kept.push(m);
+    used += t;
+  }
+
+  // Restore chronological order (system first is fine, but the rest must be
+  // oldest -> newest or the conversation reads inside-out).
+  kept.sort((a, b) => list.indexOf(a) - list.indexOf(b));
+
+  if (dropped > 0) {
+    console.log(
+      `✂️ ${opts.label || 'history'}: dropped ${dropped} message(s) to fit ` +
+      `${budgetTokens.toLocaleString()} token budget (~${used.toLocaleString()} used)`
+    );
+  }
+  return { messages: kept, dropped, tokens: used, budget: budgetTokens };
+}
+
+/** Token budget available to history for a given provider. */
+export function historyBudgetForProvider(providerName: string): number {
+  const cfg = AI_PROVIDERS_CONFIG[providerName];
+  const window = cfg?.contextWindow ?? DEFAULT_CONTEXT_WINDOW;
+  return Math.floor(window * HISTORY_BUDGET_FRACTION);
 }
 
 
@@ -3614,7 +4007,15 @@ class EnhancedConversationManager {
       const conversationRecord: any = {
         session_id: this.sessionId,
         ip_address: this.ipAddress,
-        messages: JSON.stringify(messages.slice(-50)),
+        // Persist the recent window of raw messages alongside the summary.
+        //
+        // Was slice(-50). The raw messages are what loadConversationHistory
+        // hands back as verbatim context, so this IS the durable memory — a
+        // 50-message cap silently truncated everything older on every save.
+        // Raised to MAX_HISTORY_MESSAGES (400) and bounded by the same budget
+        // that governs what we send, so the stored window can never be larger
+        // than the models can actually use.
+        messages: JSON.stringify(messages.slice(-MAX_HISTORY_MESSAGES)),
         tool_results: JSON.stringify(allToolResults),
         summary: summary,
         metadata: JSON.stringify({
@@ -3639,7 +4040,7 @@ class EnhancedConversationManager {
         'apikey': SUPABASE_LOCAL_ANON || 'local-anon-key',
         'Authorization': `Bearer ${SUPABASE_LOCAL_ANON || 'local-anon-key'}`,
       };
-      
+
       // Try upsert by session_id first (session_id is the canonical unique key)
       const upsertUrl = `${restUrl}?on_conflict=session_id`;
       const response = await fetch(upsertUrl, {
@@ -3648,30 +4049,84 @@ class EnhancedConversationManager {
         body: JSON.stringify(conversationRecord),
         signal: AbortSignal.timeout(10000),
       });
-      
+
       if (!response.ok) {
         const errText = await response.text().catch(() => 'unknown');
         console.warn('⚠️ Failed to save conversation (session_id upsert):', response.status, errText.slice(0, 200));
       } else {
-        console.log(`💾 Saved conversation (session-based): ${messages.length} messages, ${allToolResults.length} tool results`);
+        // Read back and confirm the row is really there.
+        //
+        // The old code trusted a 2xx and logged "Saved conversation". That is
+        // exactly how the delete-after-write bug hid for so long: every request
+        // logged a successful save, and the table still ended up empty. A
+        // write is only a success if the row reads back — task 4fbadf43 records
+        // the same principle for fleet_memory ("any write must be treated as
+        // failed until read back").
+        try {
+          const verifyUrl = `${restUrl}?session_id=eq.${encodeURIComponent(this.sessionId)}&select=session_id,updated_at`;
+          const vRes = await fetch(verifyUrl, { headers, signal: AbortSignal.timeout(5000) });
+          const vRows = vRes.ok ? await vRes.json().catch(() => []) : [];
+          if (Array.isArray(vRows) && vRows.length > 0) {
+            console.log(`💾 Saved conversation (session-based): ${messages.length} messages, ${allToolResults.length} tool results — verified present`);
+          } else {
+            console.warn(`⚠️ conversation_memory reported success but read-back found no row for session ${this.sessionId}`);
+          }
+        } catch (verifyErr: any) {
+          console.warn('⚠️ conversation_memory read-back failed (non-fatal):', verifyErr?.message || verifyErr);
+        }
       }
       
       await this.conversationPersistence.saveConversationSummary(messages, allToolResults, metadata);
       
-      // Cleanup old records via REST API
+      // Cleanup old records via REST API.
+      //
+      // BUG (found 2026-10-11): this ran `DELETE .../conversation_memory
+      // ?ip_address=eq.<ip>&order=updated_at.desc&limit=100&offset=10`
+      // immediately after the upsert above, and it DELETED THE ROW THAT WAS
+      // JUST WRITTEN. Verified against the live REST endpoint: a single-row
+      // table, one write, then this DELETE returned 200 and the row was gone.
+      //
+      // The cause is that `limit`+`offset` do not express "skip the newest 10"
+      // the way the original comment assumed — against this table the DELETE
+      // matched and removed the freshly-written row, so saveConversation()
+      // never persisted anything. That is why conversation_memory stayed empty
+      // (0 rows) while the logs cheerfully printed "Saved conversation" and
+      // "Cleaned up old conversation records" on every single request.
+      //
+      // The fix keeps the intent — bound how many rows one IP accumulates —
+      // but makes it actually correct and, critically, never touches the
+      // current session:
+      //   1. Select the ids of rows for this IP, newest first.
+      //   2. Take everything past the newest CONVERSATION_MEMORY_KEEP.
+      //   3. Filter out this.sessionId, so the live conversation is untouchable
+      //      even if the ordering is wrong.
+      //   4. DELETE by explicit id list, and only if there is something to do.
       try {
-        const cleanupUrl = `${restUrl}?ip_address=eq.${encodeURIComponent(this.ipAddress)}&order=updated_at.desc&limit=100&offset=10`;
-        const cleanupResponse = await fetch(cleanupUrl, {
-          method: 'DELETE',
-          headers,
-          signal: AbortSignal.timeout(5000),
-        });
-        if (cleanupResponse.ok) {
-          const deleted = await cleanupResponse.json();
-          console.log(`🧹 Cleaned up old conversation records`);
+        const KEEP = parseInt(Deno.env.get('CONVERSATION_MEMORY_KEEP') || '10');
+        const listUrl = `${restUrl}?ip_address=eq.${encodeURIComponent(this.ipAddress)}`
+          + `&select=id,session_id&order=updated_at.desc`;
+        const listRes = await fetch(listUrl, { headers, signal: AbortSignal.timeout(5000) });
+        if (listRes.ok) {
+          const rows = await listRes.json().catch(() => []);
+          if (Array.isArray(rows) && rows.length > KEEP) {
+            const stale = rows
+              .slice(KEEP)
+              .filter((r: any) => r && r.id && r.session_id !== this.sessionId)
+              .map((r: any) => r.id);
+            if (stale.length) {
+              const delRes = await fetch(
+                `${restUrl}?id=in.(${stale.join(',')})`,
+                { method: 'DELETE', headers, signal: AbortSignal.timeout(5000) }
+              );
+              if (delRes.ok) {
+                console.log(`🧹 Pruned ${stale.length} stale conversation_memory row(s) (keeping newest ${KEEP} per IP)`);
+              }
+            }
+          }
         }
       } catch (cleanupErr: any) {
-        // Non-fatal
+        // Non-fatal — never fail a save because pruning failed.
+        console.warn('⚠️ conversation_memory prune failed (non-fatal):', cleanupErr?.message || cleanupErr);
       }
       
     } catch (error: any) {
@@ -3922,9 +4377,17 @@ class EnhancedProviderCascade {
     // off by default — so a request that took 129s gave no clue where the
     // time went. Log the ordered candidate list and every attempt to stdout
     // (captured to logs/function-ai-chat.log by local-sb).
-    console.log(`🧭 Cascade candidates (${providers.length}): ${providers.join(' → ')}`);
+    //
+    // The breaker runs AFTER priority ordering so priority still decides who
+    // leads; it only removes providers that are known-broken right now.
+    const skipped = providers.filter((p) => isProviderCoolingDown(p));
+    const candidates = applyCircuitBreaker(providers);
+    if (skipped.length) {
+      console.log(`🚦 Skipping (in cooldown): ${skipped.join(', ')}`);
+    }
+    console.log(`🧭 Cascade candidates (${candidates.length}): ${candidates.join(' → ')}`);
 
-    for (const provider of providers) {
+    for (const provider of candidates) {
       const attemptStart = Date.now();
       const result = await this.callProvider(provider, messages, tools, images);
       const elapsed = Date.now() - attemptStart;
@@ -3941,10 +4404,12 @@ class EnhancedProviderCascade {
         hasToolCalls: !!result.tool_calls,
         latencyMs: result.latency,
       });
-      
+
       if (result.success) {
+        recordProviderSuccess(provider);
         return result;
       }
+      recordProviderFailure(provider, result.error || '');
     }
     
     console.log('🔄 Trying fallback providers...');
@@ -3990,7 +4455,24 @@ class EnhancedProviderCascade {
         error: `Provider ${provider} not configured or disabled`
       };
     }
-    
+
+    // Size the history to THIS provider's window before dispatch.
+    //
+    // The same message array is offered to every candidate in the cascade, but
+    // the windows differ by 15x (65,536 for liquid up to 1,000,000 for
+    // nemotron-ultra). Sending the full array to the small ones overflows
+    // their context; sending the small model's trimmed array to the large ones
+    // needlessly throws away history the model could have used. So the trim
+    // happens here, per provider, at the last possible moment.
+    //
+    // Tool definitions are separate from messages and are budgeted by the
+    // provider itself; this covers conversation history + system prompt.
+    const toolTokenEstimate = tools.length * 120;
+    const rawBudget = historyBudgetForProvider(provider);
+    const budget = Math.max(8192, rawBudget - toolTokenEstimate);
+    const fitted = fitMessagesToBudget(messages, budget, { label: provider });
+    messages = fitted.messages;
+
     const startTime = Date.now();
     
     try {
@@ -4023,6 +4505,11 @@ class EnhancedProviderCascade {
         case 'gemma_4_26b_free':
         case 'gemma_4_31b_free':
         case 'qwen3_8_27b_free':
+        case 'poolside_laguna_s':
+        case 'cohere_north_mini_code':
+        case 'apodex_1_1_mini':
+        case 'dots_3_note_preview':
+        case 'liquid_lfm_2_5_2_6b':
         case 'nemotron_3_nano_free':
         case 'nemotron_3_ultra_free':
         case 'nemotron_3_5_free':
@@ -4033,6 +4520,14 @@ class EnhancedProviderCascade {
           result = await this.callOpenCodeZen(provider, config.models[0], messages, tools, controller);
           break;
         case 'ollama':
+          result = await this.callOllama(messages, tools, controller, 'ollama');
+          break;
+        case 'ollama_pro_3rd':
+          // Separate weekly quota, so it is a genuinely distinct source. It
+          // previously had NO case here and fell through to
+          // "Unknown provider" — burning a 120s slot in the cascade to produce
+          // a guaranteed failure. callOllama already cycles every configured
+          // Ollama key, so route it through the same caller.
           result = await this.callOllama(messages, tools, controller, 'ollama');
           break;
         case 'ollama_hermes':
@@ -5009,7 +5504,13 @@ function generateSystemPrompt(
   if (historicalSummaries.length > 0) {
     historicalContext += "## 📜 HISTORICAL CONVERSATION SUMMARIES\n\n";
     
-    const recentSummaries = historicalSummaries.slice(0, 5);
+    // Was a hardcoded slice(0, 5) while loadHistoricalSummaries() fetched up
+    // to MAX_SUMMARIZED_CONVERSATIONS (100) — so ~95 fetched summaries were
+    // loaded, paid for in tokens, and discarded. Measured summary length is
+    // ~222 chars, so MAX_SUMMARIZED_CONVERSATIONS_IN_PROMPT of them costs
+    // ~1,400 tokens: negligible next to any window in the cascade, and worth
+    // far more in recall than the tokens it costs.
+    const recentSummaries = historicalSummaries.slice(0, MAX_SUMMARIES_IN_PROMPT);
     
     recentSummaries.forEach((summary, index) => {
       historicalContext += `**${index + 1}. ${summary.metadata?.conversation_date ? new Date(summary.metadata.conversation_date).toLocaleDateString() : 'Previous'}**\n`;
@@ -5026,7 +5527,9 @@ function generateSystemPrompt(
       historicalContext += '\n';
     });
     
-    historicalContext += `*Based on ${historicalSummaries.length} previous conversation summaries*\n\n`;
+    // Report how many were actually included, not how many were loaded — the
+    // old count said "based on N summaries" when only 5 were present.
+    historicalContext += `*Showing ${recentSummaries.length} of ${historicalSummaries.length} previous conversation summaries*\n\n`;
   }
   
   let followUpContext = '';

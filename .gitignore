@@ -78,3 +78,17 @@ supabase/.temp/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# ── Build outputs kept for reference, and scratch from working sessions ─────
+# The broken and backup dists are 1,160 files of a build that no longer
+# exists, and the .env.local backups hold live credentials.
+/dist-broken-*/
+/dist.bak-*/
+/dist-static-only-*/
+/index.html.bak-*
+/vite.config.min.ts
+/.env.local.bak-*
+/_*.mjs
+
+# Old copies of source files, kept on disk by habit.
+*.bak-*

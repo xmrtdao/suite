@@ -1,0 +1,15 @@
+{
+  "name": "XMRT AI Transformation Booth",
+  "version": "0.1.0",
+  "type": "standalone-module",
+  "status": "scaffolded",
+  "created": "2026-09-02T04:00:54.251044",
+  "themes": 7,
+  "components": [
+    "Flask web app",
+    "MuAPI image-gen pipeline",
+    "themed prompt library"
+  ],
+  "reference_spec": "Fun Frame Photo clean-room analysis (TooFlyRyGuy / ai_experience.html)",
+  "license_note": "Clean-room original implementation. Not a copy of FFP source."
+}

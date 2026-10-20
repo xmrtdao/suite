@@ -168,19 +168,6 @@ export const EXTENDED_TOOLS = [
     }
   },
   {
-    name: "agent-work-executor",
-    description: "Execute work assigned to an agent",
-    inputSchema: {
-      type: "object",
-      properties: {
-        agent_id: { type: "string", description: "Agent identifier" },
-        work_id: { type: "string", description: "Work item ID" },
-        payload: { type: "object", description: "Work payload" }
-      },
-      required: ["agent_id", "work_id"]
-    }
-  },
-  {
     name: "cleanup-duplicate-tasks",
     description: "Remove duplicate or stale tasks",
     inputSchema: {
@@ -1014,20 +1001,6 @@ export const EXTENDED_TOOLS = [
         metadata: { type: "object", description: "Stripe metadata" }
       },
       required: ["amount", "currency"]
-    }
-  },
-  {
-    name: "github-issue-scanner",
-    description: "Scan GitHub repository issues",
-    inputSchema: {
-      type: "object",
-      properties: {
-        owner: { type: "string", description: "Repository owner" },
-        repo: { type: "string", description: "Repository name" },
-        labels: { type: "array", items: { type: "string" }, description: "Issue labels" },
-        state: { type: "string", description: "Issue state" }
-      },
-      required: ["owner", "repo"]
     }
   },
   {

@@ -1,0 +1,13 @@
+{
+  "name": "party-favor-photo",
+  "version": "0.1.0",
+  "stack": [
+    "nextjs",
+    "supabase",
+    "muapi"
+  ],
+  "brand": "Party Favor Photo",
+  "tagline": "AI transformation booth for any party",
+  "description": "Clean-room AI photo transformation booth. Upload a photo, pick a themed transformation, get a share-ready AI image back via MuAPI.",
+  "status": "scaffolded"
+}

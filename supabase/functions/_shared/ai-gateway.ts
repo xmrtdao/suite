@@ -1,6 +1,6 @@
 // Unified AI Gateway with Comprehensive Fallback System
-// Priority: Ollama Pro Cloud (deepseek-v4-flash:cloud, OLLAMA_API_KEY) → Vertex AI → Gemini → DeepSeek → OpenAI → Kimi
-// Last updated: 2026-06-10 — Ollama is PRIMARY; all others are backup inference
+// Priority: OpenRouter free (MiniMax M3.1 Flash → Nemotron 3.5 Lightning → Gemma 4 31B) → OpenCode Zen → Ollama cloud → local Ollama → Vertex → Gemini → DeepSeek → OpenAI → Kimi
+// Last updated: 2026-10-19 — the free tier leads, and every model in this list was measured from this runtime before it was put here
 
 import { getVertexAuth, getVertexEndpoint } from './vertexAuthHelper.ts';
 
@@ -26,13 +26,116 @@ export interface GatewayConfig {
 // Only VERIFIED WORKING free models included; deepseek-v4-flash:cloud kept for funded keys
 const GATEWAY_CONFIG: GatewayConfig = {
   providers: [
-    // ── Ollama Pro Cloud (deepseek-v4-flash:cloud primary, gemma4:31b free fallback) ─────────────
+    // ── OpenRouter free tier ──────────────────────────────────────────────
+    // Verified live 2026-10-19 from this runtime, against the OpenRouter
+    // catalog AND the chat/completions endpoint:
+    //   minimax/minimax-m3.1-flash:free      200 in 1015ms, native tool_calls
+    //   nvidia/nemotron-3.5-lightning:free   200 in 1746ms, native tool_calls
+    //   google/gemma-4-31b-it:free           exists; 429 "rate-limited upstream"
+    //
+    // The free tier goes first on purpose: it is measured, it costs nothing,
+    // and it answers inside the 60 seconds the cron allows. The rest are
+    // fallbacks for when it does not.
+    {
+      name: 'openrouter-minimax',
+      endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+      model: 'minimax/minimax-m3.1-flash:free',
+      priority: 1,
+      rateLimit: 5000,
+      timeout: 25000,
+      available: true,
+    },
+    {
+      name: 'openrouter-nemotron',
+      endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+      model: 'nvidia/nemotron-3.5-lightning:free',
+      priority: 2,
+      rateLimit: 5000,
+      timeout: 25000,
+      available: true,
+    },
+    {
+      name: 'openrouter-gemma',
+      endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+      model: 'google/gemma-4-31b-it:free',
+      priority: 3,
+      rateLimit: 5000,
+      timeout: 25000,
+      available: true,
+    },
+
+    // ── OpenCode Zen ──────────────────────────────────────────────────────
+    // Configured because it is the requested combo, but measured from this
+    // runtime it cannot answer: the *-free slugs answer 403 "OpenCode's free
+    // tier can only be used from within OpenCode", and the paid slugs answer
+    // 402 "Insufficient account funds" on the account behind OPENCODE_API_KEY.
+    // It fails in about half a second, so it stays in the cascade - it will
+    // work the moment that account has funds - but it is tried late.
+    {
+      name: 'opencode',
+      endpoint: 'https://opencode.ai/inference/openai/v1/chat/completions',
+      model: Deno.env.get('OPENCODE_MODELS') || 'minimax-m3.1-flash-free',
+      priority: 4,
+      rateLimit: 5000,
+      timeout: 20000,
+      available: true,
+    },
+
+    // ── Ollama cloud ──────────────────────────────────────────────────────
+    // All three keys are currently out of quota (429 "You used all included
+    // Pro usage"), and the model this used to name is gone: Ollama retired
+    // deepseek-v4-flash:cloud on 2026-09-25 (410) and minimax/minimax-m3:free
+    // was never a cloud model (404 "try glm-5.3-flash:cloud"). They stay in
+    // the cascade because the quota resets, and a quota answer is a fast 429
+    // rather than a hang.
     {
       name: 'ollama-pro',
-      get apiKey() { return Deno.env.get('OLLAMA_API_KEY') || '' },\n      endpoint: 'https://ollama.com/v1/chat/completions',\\n      model: Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud',\\n      priority: 1,\\n      rateLimit: 1200,\\n      timeout: 120000,\\n      available: !!Deno.env.get('OLLAMA_API_KEY')\\n    },\\n    {\\n      name: 'ollama-pro-xmrt',\\n      get apiKey() { return Deno.env.get('OLLAMA_XMRT_API_KEY') || '' },\\n      endpoint: 'https://ollama.com/v1/chat/completions',\\n      model: Deno.env.get('OLLAMA_MODEL') || 'deepseek-v4-flash:cloud',\\n      priority: 2,\\n      rateLimit: 1200,\\n      timeout: 120000,\\n      available: !!Deno.env.get('OLLAMA_XMRT_API_KEY')\\n    },\\n    {\\n      name: 'ollama-pro-3rd',\\n      get apiKey() { return Deno.env.get('OLLAMA_3RD_API_KEY') || '' },\\n      endpoint: 'https://ollama.com/v1/chat/completions',\\n      model: 'gemma4:31b',\\n      priority: 3,\\n      rateLimit: 1200,\\n      timeout: 120000,\\n      available: !!Deno.env.get('OLLAMA_3RD_API_KEY')\\n    },\\n    {\\n      name: 'openrouter',\\n      endpoint: 'https://openrouter.ai/api/v1/chat/completions',\\n      model: 'nvidia/nemotron-3.5-lightning:free',\\n      priority: 4,\\n      rateLimit: 5000,\\n      timeout: 120000,\\n      available: true\\n    },\\n  ],\\n  fallbackStrategy: 'sequential',\\n  retryAttempts: 3,\\n  circuitBreakerThreshold: 5
-};
+      endpoint: 'https://ollama.com/v1/chat/completions',
+      model: Deno.env.get('OLLAMA_MODEL') || 'glm-5.3-flash:cloud',
+      priority: 5,
+      rateLimit: 1200,
+      timeout: 20000,
+      available: true,
+    },
+    {
+      name: 'ollama-pro-xmrt',
+      endpoint: 'https://ollama.com/v1/chat/completions',
+      model: Deno.env.get('OLLAMA_MODEL') || 'glm-5.3-flash:cloud',
+      priority: 6,
+      rateLimit: 1200,
+      timeout: 20000,
+      available: true,
+    },
+    {
+      name: 'ollama-pro-3rd',
+      endpoint: 'https://ollama.com/v1/chat/completions',
+      model: 'gemma4:31b',
+      priority: 7,
+      rateLimit: 1200,
+      timeout: 20000,
+      available: true,
+    },
+
+    // ── Local Ollama ─────────────────────────────────────────────────────
+    // The only provider here that does not depend on somebody else's quota.
+    // It is slow on this box - gemma3:1b answered in 21s on CPU - and the
+    // machine has about 0.7 GB free, so it is last and it uses the 1B model.
+    {
+      name: 'ollama-local',
+      endpoint: Deno.env.get('OLLAMA_LOCAL_URL') || 'http://127.0.0.1:11434/v1/chat/completions',
+      model: Deno.env.get('OLLAMA_LOCAL_MODEL') || 'gemma3:1b',
+      priority: 8,
+      rateLimit: 60,
+      timeout: 60000,
+      available: true,
+    },
+
+    // ── The paid providers, last, where they were ────────────────────────
+    {
+      name: 'vertex-pro',
+      endpoint: getVertexEndpoint('gemini-2.5-pro'),
       model: 'gemini-2.5-pro',
-      priority: 1,
+      priority: 9,
       rateLimit: 10000, // High — backed by $1000 GCP credits
       timeout: 60000,
       available: true
@@ -41,7 +144,7 @@ const GATEWAY_CONFIG: GatewayConfig = {
       name: 'vertex-flash',
       endpoint: getVertexEndpoint('gemini-2.5-flash'),
       model: 'gemini-2.5-flash',
-      priority: 2,
+      priority: 10,
       rateLimit: 10000,
       timeout: 30000,
       available: true
@@ -50,7 +153,7 @@ const GATEWAY_CONFIG: GatewayConfig = {
       name: 'gemini',
       endpoint: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent',
       model: 'gemini-2.5-flash',
-      priority: 3,
+      priority: 11,
       rateLimit: 2000, // Free tier — 15 RPM limit
       timeout: 30000,
       available: true
@@ -59,7 +162,7 @@ const GATEWAY_CONFIG: GatewayConfig = {
       name: 'deepseek',
       endpoint: 'https://api.deepseek.com/v1/chat/completions',
       model: 'deepseek-v4-pro',
-      priority: 4,
+      priority: 12,
       rateLimit: 1500,
       timeout: 30000,
       available: true
@@ -68,7 +171,7 @@ const GATEWAY_CONFIG: GatewayConfig = {
       name: 'openai',
       endpoint: 'https://api.openai.com/v1/chat/completions',
       model: 'gpt-4o-mini',
-      priority: 5,
+      priority: 13,
       rateLimit: 3000,
       timeout: 30000,
       available: true
@@ -77,20 +180,11 @@ const GATEWAY_CONFIG: GatewayConfig = {
       name: 'kimi',
       endpoint: 'https://api.kimi.com/coding/v1/chat/completions',
       model: 'kimi-for-coding',
-      priority: 6,
+      priority: 14,
       rateLimit: 1200, // ~300-1200 req per 5-hour window, shared quotas
       timeout: 60000,
       available: true
     },
-    {
-          name: 'openrouter',
-          endpoint: 'https://openrouter.ai/api/v1/chat/completions',
-          model: 'nvidia/nemotron-3-ultra-550b-a55b:free',
-          priority: 9,
-          rateLimit: 5000,
-          timeout: 60000,
-          available: true
-        }
   ],
   fallbackStrategy: 'sequential',
   retryAttempts: 3,
@@ -251,11 +345,15 @@ async function executeWithProvider(
         requestBody.tool_choice = options.tool_choice || 'auto';
       }
 
-      const apiKey = await getAPIKey(provider.name);
-      if (!apiKey) {
+      // A provider may carry its own key - as a getter, so a rotated key is
+      // read at call time - and otherwise its name maps to one. Local Ollama
+      // needs no key at all, which is the whole point of keeping it.
+      const apiKey = provider.apiKey ?? (await getAPIKey(provider.name));
+      if (apiKey) {
+        headers['Authorization'] = `Bearer ${apiKey}`;
+      } else if (provider.name !== 'ollama-local') {
         throw new AIGatewayError(`No API key for ${provider.name}`, provider.name, 401, 'service_unavailable');
       }
-      headers['Authorization'] = `Bearer ${apiKey}`;
       headers['User-Agent'] = 'DevGruGold-Suite/2.0';
     }
 
@@ -269,8 +367,17 @@ async function executeWithProvider(
     clearTimeout(timeoutId);
 
     if (!response.ok) {
-      const errorType = detectErrorType(response);
+      let errorType = detectErrorType(response);
       const errorText = await response.text();
+
+      // A quota answer is not a rate limit. Ollama says "You used all included
+      // Pro usage" with a 429, and OpenCode says "Insufficient account funds"
+      // with a 402. Neither recovers by itself, so both have to stop the
+      // provider being tried again - otherwise every request spends its
+      // budget re-discovering that the key is empty.
+      if (response.status === 429 && /quota|usage limit|credits|billing/i.test(errorText)) {
+        errorType = 'token_exhausted';
+      }
 
       if (errorType === 'token_exhausted') {
         console.log(`[Gateway] ${provider.name} token exhausted, marking unavailable`);
@@ -345,6 +452,18 @@ async function getAPIKey(providerName: string): Promise<string> {
     deepseek: Deno.env.get('DEEPSEEK_API_KEY') || '',
     openai: Deno.env.get('OPENAI_API_KEY') || '',
     kimi: Deno.env.get('KIMI_API_KEY') || '',
+    // The free provider set, added 2026-10-19. Three OpenRouter providers
+    // share one key; OpenCode and each Ollama quota have their own.
+    'openrouter-minimax': Deno.env.get('OPENROUTER_API_KEY') || '',
+    'openrouter-nemotron': Deno.env.get('OPENROUTER_API_KEY') || '',
+    'openrouter-gemma': Deno.env.get('OPENROUTER_API_KEY') || '',
+    opencode: Deno.env.get('OPENCODE_API_KEY') || '',
+    'ollama-pro': Deno.env.get('OLLAMA_API_KEY') || '',
+    'ollama-pro-xmrt': Deno.env.get('OLLAMA_XMRT_API_KEY') || '',
+    'ollama-pro-3rd': Deno.env.get('OLLAMA_3RD_API_KEY') || '',
+    // Local Ollama needs no key. It is the one provider on this machine that
+    // is not asking anybody else for quota.
+    'ollama-local': '',
   };
   return apiKeys[providerName] || '';
 }

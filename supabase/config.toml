@@ -3,9 +3,6 @@ project_id = "local-dev"
 [functions.ai-chat]
 verify_jwt = false
 
-[functions.agent-work-executor]
-verify_jwt = false
-
 [functions.deepseek-chat]
 verify_jwt = false
 
@@ -248,9 +245,6 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.get-lovable-key]
-verify_jwt = false
-
-[functions.github-issue-scanner]
 verify_jwt = false
 
 [functions.google-calendar]

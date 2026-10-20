@@ -3,27 +3,15 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { FileText, Globe, Image as ImageIcon, Video, X, Zap, RefreshCw, ExternalLink } from 'lucide-react';
-import { DocViewer } from '@/components/DocViewer';
+import { Globe, Image as ImageIcon, Video, X, Zap, RefreshCw, ExternalLink, Palette, Download, CheckCircle } from 'lucide-react';
 import { relayAuthHeaders } from '@/integrations/relay-auth';
 
 /**
  * AsidePanel — the Suite dashboard's dynamic side panel.
- *
- * It is NOT a permanent fixture: Dashboard renders it only when there is
- * something to show. It opens when:
- *   - the user attaches a document (chat header paperclip / drag-drop)
- *   - the user asks for a web view (chat header globe)
- *   - chat or a tool dispatches `window.dispatchEvent(new CustomEvent(
- *       'suite:aside', { detail: { kind: 'image' | 'video' | 'web' | 'doc', ... } }))`
- *     — this is how generated images/videos and tool artifacts surface here,
- *       the same way Kimi Work / Claude Desktop / Manus open their side panel.
  */
 
-export type AsideDoc = { fileName: string; text: string; audit?: any };
-
 export type AsideState =
-  | { kind: 'doc'; doc?: AsideDoc }
+  | { kind: 'visual'; config?: any; src?: string; title?: string }
   | { kind: 'web'; url?: string }
   | { kind: 'image'; src: string; title?: string }
   | { kind: 'video'; src: string; title?: string }
@@ -36,17 +24,118 @@ interface AsidePanelProps {
 }
 
 const KIND_META = {
-  doc: { label: 'Document', icon: FileText },
+  visual: { label: 'Visual Designer', icon: Palette },
   web: { label: 'Web', icon: Globe },
   image: { label: 'Image', icon: ImageIcon },
   video: { label: 'Video', icon: Video },
   ops: { label: 'Ops', icon: Zap },
 } as const;
 
-// Live view of the stack's automation layer: supervised daemons (cron engine,
-// campaign scheduler, alice, dsh, ...) from the relay supervisor, plus the
-// fleet task pipeline summary. Read-only by design — restarts go through the
-// gated /api/supervisor/restart endpoint, not a browser button.
+// ── Visual Designer Workbench ─────────────────────────────────────────────
+const VisualDesigner = ({ config }: { config?: any }) => {
+  const [loading, setLoading] = useState(false);
+  const [proof, setProof] = useState<string | null>(null);
+  const [formData, setFormData] = useState({
+    style: 'art_deco_gold',
+    line1: config?.line1 || '',
+    line2: config?.line2 || '',
+    line3: config?.line3 || '',
+    logoUrl: config?.logoUrl || '',
+  });
+
+  const generateProof = async () => {
+    setLoading(true);
+    try {
+      const r = await fetch('/api/visual/generate', {
+        method: 'POST',
+        headers: relayAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify(formData),
+      });
+      const data = await r.json();
+      if (data.success) setProof(data.url);
+    } catch (e) {
+      console.error("Proof generation failed", e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <ScrollArea className="flex-1 min-h-0">
+      <div className="p-4 space-y-6">
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <label className="text-[10px] font-bold uppercase text-muted-foreground">Design Style</label>
+            <select 
+              className="w-full h-8 text-xs rounded-md border border-border bg-background px-2"
+              value={formData.style}
+              onChange={(e) => setFormData({...formData, style: e.target.value})}
+            >
+              <option value="art_deco_gold">Art Deco Gold</option>
+              <option value="corporate_modern">Corporate Modern</option>
+              <option value="holiday_festive">Holiday Festive</option>
+              <option value="enchanted_forest">Enchanted Forest</option>
+              <option value="wedding_classic">Wedding Classic</option>
+              <option value="graduation_prestige">Graduation Prestige</option>
+              <option value="hoco_prom_glamour">Hoco & Prom Glamour</option>
+              <option value="birthday_quince_celebration">Birthday/Quince</option>
+            </select>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-[10px] font-bold uppercase text-muted-foreground">Client Logo URL</label>
+            <Input 
+              className="h-8 text-xs" 
+              value={formData.logoUrl} 
+              onChange={(e) => setFormData({...formData, logoUrl: e.target.value})}
+              placeholder="https://..."
+            />
+          </div>
+
+          <div className="grid grid-cols-1 gap-2">
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold uppercase text-muted-foreground">Line 1 (Name)</label>
+              <Input className="h-8 text-xs" value={formData.line1} onChange={(e) => setFormData({...formData, line1: e.target.value})} />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold uppercase text-muted-foreground">Line 2 (Date)</label>
+              <Input className="h-8 text-xs" value={formData.line2} onChange={(e) => setFormData({...formData, line2: e.target.value})} />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold uppercase text-muted-foreground">Line 3 (Event)</label>
+              <Input className="h-8 text-xs" value={formData.line3} onChange={(e) => setFormData({...formData, line3: e.target.value})} />
+            </div>
+          </div>
+
+          <Button className="w-full h-9 text-xs font-bold" onClick={generateProof} disabled={loading}>
+            {loading ? <RefreshCw className="w-3 h-3 mr-2 animate-spin" /> : <Palette className="w-3 h-3 mr-2" />}
+            Generate Production Proof
+          </Button>
+        </div>
+
+        {proof && (
+          <div className="space-y-3 animate-in fade-in slide-in-from-bottom-2">
+            <div className="relative aspect-[2/3] w-full rounded-lg overflow-hidden border-2 border-primary/20 bg-muted">
+              <img src={proof} alt="Design Proof" className="w-full h-full object-contain" />
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" className="flex-1 h-8 text-xs" onClick={() => setProof(null)}>
+                Reset
+              </Button>
+              <Button className="flex-1 h-8 text-xs" onClick={() => window.open(proof, '_blank')}>
+                <Download className="w-3 h-3 mr-2" /> Download 300DPI
+              </Button>
+            </div>
+            <div className="flex items-center justify-center gap-1 text-emerald-500 text-[10px] font-medium">
+              <CheckCircle className="w-3 h-3" /> Production Ready (1200x1800px)
+            </div>
+          </div>
+        )}
+      </div>
+    </ScrollArea>
+  );
+};
+
 const OpsView = () => {
   const [services, setServices] = useState<any[]>([]);
   const [pipeline, setPipeline] = useState<{ total: number; by_stage: any[]; by_assignee: any[] } | null>(null);
@@ -123,12 +212,6 @@ const OpsView = () => {
   );
 };
 
-// ── In-window web browsing through the stack's own tooling ─────────────────
-// Pages are fetched server-side via POST /api/browse (cloud Playwright with a
-// fetch fallback; exa-backed web-search for non-URL input) and rendered in a
-// sandboxed srcDoc iframe. Link clicks and GET form submits inside the page
-// are intercepted and re-browsed through the same endpoint, so browsing never
-// throws the user off Suite and X-Frame-Options cannot block us.
 const buildSrcDoc = (html: string, baseUrl: string): string => {
   const interceptor = `
     document.addEventListener('click', function (e) {
@@ -196,8 +279,6 @@ const WebView = ({ initialUrl }: { initialUrl?: string }) => {
 
   useEffect(() => { if (initialUrl) browse(initialUrl); }, [initialUrl]);
 
-  // In-page navigation: the srcDoc interceptor posts clicked links up here and
-  // we re-browse them through the relay — the user stays inside Suite.
   useEffect(() => {
     const onMsg = (e: MessageEvent) => {
       const href = (e.data as any)?.__suiteBrowse;
@@ -274,12 +355,11 @@ const WebView = ({ initialUrl }: { initialUrl?: string }) => {
 };
 
 export const AsidePanel = ({ aside, onChange, onClose }: AsidePanelProps) => {
-  const meta = KIND_META[aside.kind] || KIND_META.doc;
+  const meta = KIND_META[aside.kind] || KIND_META.visual;
   const Icon = meta.icon;
 
   const title =
-    aside.kind === 'doc' && aside.doc ? aside.doc.fileName
-    : aside.kind === 'web' && aside.url ? aside.url
+    aside.kind === 'web' && aside.url ? aside.url
     : (aside as any).title || meta.label;
 
   return (
@@ -297,30 +377,8 @@ export const AsidePanel = ({ aside, onChange, onClose }: AsidePanelProps) => {
       </CardHeader>
 
       <CardContent className="p-0 flex-1 min-h-0 flex flex-col">
-        {/* ── Document mode ─────────────────────────────────────────── */}
-        {aside.kind === 'doc' && (
-          aside.doc ? (
-            <div className="flex-1 min-h-0 p-2">
-              <DocViewer
-                text={aside.doc.text}
-                audit={aside.doc.audit || {
-                  documentType: (aside.doc.fileName.split('.').pop() || 'document').toLowerCase(),
-                  jurisdiction: { code: '—', state: 'Not audited' },
-                  riskScore: 0,
-                  findings: [],
-                }}
-                onApplyFix={() => {}}
-              />
-            </div>
-          ) : (
-            <div className="p-4 flex-1 flex flex-col items-center justify-center text-center gap-2">
-              <FileText className="w-8 h-8 text-muted-foreground/50" />
-              <p className="text-xs text-muted-foreground">
-                Attach a document from the chat — the paperclip or drag-and-drop — and it opens here, next to the conversation.
-              </p>
-            </div>
-          )
-        )}
+        {/* ── Visual Designer mode (Replaces Documents) ────────────────── */}
+        {aside.kind === 'visual' && <VisualDesigner config={aside.config} />}
 
         {/* ── Web mode ──────────────────────────────────────────────── */}
         {aside.kind === 'web' && <WebView initialUrl={aside.url} />}

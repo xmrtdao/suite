@@ -33,25 +33,92 @@ serve(async (req) => {
     // --- REUSABLE LOGIC ---
 
     const executeAutoAssign = async () => {
+      // The board is the truth, and the agents table is a cache of it.
+      //
+      // The cache drifts. An agent whose last task finished stays BUSY for
+      // ever, because nothing recomputed it - and a stale BUSY is invisible
+      // work: on 2026-10-20 nine agents held no tasks at all, said BUSY, and
+      // so the orchestrator saw no free agent and assigned nothing while
+      // thirteen unowned tasks sat on the board.
+      //
+      // So the workload is read from the tasks themselves, every cycle, and
+      // the cached column is corrected to match. The assignment then uses that
+      // count rather than the stored status, which means the board can never
+      // be blocked by a stale flag.
+      const { data: activeTasks } = await supabase
+        .from('tasks')
+        .select('assignee_agent_id, status')
+        .in('status', ['PENDING', 'CLAIMED', 'IN_PROGRESS']);
+
+      const liveWorkload = new Map<string, number>();
+      for (const t of activeTasks || []) {
+        if (!t.assignee_agent_id) continue;
+        liveWorkload.set(t.assignee_agent_id, (liveWorkload.get(t.assignee_agent_id) || 0) + 1);
+      }
+
+      const { data: allAgents } = await supabase.from('agents').select('*');
+      for (const agent of allAgents || []) {
+        const real = liveWorkload.get(agent.id) || 0;
+        const wanted = agent.status === 'OFFLINE' ? 'OFFLINE' : (real > 0 ? 'BUSY' : 'IDLE');
+        if (agent.status !== wanted || agent.current_workload !== real) {
+          await supabase
+            .from('agents')
+            .update({ status: wanted, current_workload: real })
+            .eq('id', agent.id);
+        }
+      }
+
+      // A task that an operator has held is not assignable. The old query took
+      // every PENDING row, so a task explicitly parked for review could be
+      // handed to the first idle agent.
+      //
+      // A task that already has an owner is not assignable either. The query
+      // ignored the owner, so the moment a second agent was free it could take
+      // a task Vex or Eliza was already working: the board would show two
+      // agents on one task and the first one's work was lost. Releasing the
+      // backlog means releasing UNOWNED work, not stealing owned work.
       const { data: pendingTasks } = await supabase
         .from('tasks')
         .select('*')
         .eq('status', 'PENDING')
+        .is('blocking_reason', null)
+        .is('assignee_agent_id', null)
         .order('priority', { ascending: false });
 
-      const { data: idleAgents } = await supabase
-        .from('agents')
-        .select('*')
-        .eq('status', 'IDLE');
+      // The registry is the roster. An agent row that is not in
+      // app.registry_agents is not a fleet agent and must never be handed
+      // work: "Eliza-Dev" is a local row with no registry entry, and it was
+      // the only row whose status the orchestrator could even see, because it
+      // was spelled 'idle' while the query asked for 'IDLE'.
+      const { data: registry } = await supabase
+        .from('registry_agents')
+        .select('name, lifecycle_status')
+        .eq('lifecycle_status', 'active');
+      const registered = new Set(
+        (registry || []).map((r) => String(r.name || '').trim().toLowerCase())
+      );
 
-      if (!pendingTasks || !idleAgents || idleAgents.length === 0) {
-        return { success: true, assignments: 0 };
+      // The join key is the id stem: 'vex-001' -> 'vex' -> registry 'vex'.
+      const eligible = (allAgents || []).filter((a) =>
+        a.status !== 'OFFLINE'
+        && (liveWorkload.get(a.id) || 0) === 0
+        && registered.has(String(a.id || '').replace(/-001$/, '').toLowerCase())
+      );
+
+      if (!pendingTasks || eligible.length === 0) {
+        return {
+          success: true,
+          assignments: 0,
+          candidates: pendingTasks?.length ?? 0,
+          idle_agents: eligible.length,
+          eligible_agents: eligible.length,
+        };
       }
 
       const assignments = [];
-      for (let i = 0; i < Math.min(pendingTasks.length, idleAgents.length); i++) {
+      for (let i = 0; i < Math.min(pendingTasks.length, eligible.length); i++) {
         const task = pendingTasks[i];
-        const agent = idleAgents[i];
+        const agent = eligible[i];
 
         await supabase
           .from('tasks')
@@ -61,14 +128,20 @@ serve(async (req) => {
           })
           .eq('id', task.id);
 
+        // Workload is a number that has to mean something: the count of active
+        // tasks this agent now holds. It used to be left at whatever it was,
+        // so an agent working seven tasks still read as 0.
+        const workload = (liveWorkload.get(agent.id) || 0) + 1;
+        liveWorkload.set(agent.id, workload);
         await supabase
           .from('agents')
-          .update({ status: 'BUSY' })
+          .update({ status: 'BUSY', current_workload: workload })
           .eq('id', agent.id);
+        agent.current_workload = workload;
 
         assignments.push({ task_id: task.id, agent_id: agent.id });
 
-        await supabase.from('eliza_activity_log').insert({
+        await supabase.schema('public').from('eliza_activity_log').insert({
           activity_type: 'task_assigned',
           title: `Auto-Assigned: ${task.title}`,
           description: `Assigned to ${agent.name}`,
@@ -77,7 +150,13 @@ serve(async (req) => {
         });
       }
 
-      return { success: true, assignments: assignments.length, details: assignments };
+      return {
+        success: true,
+        assignments: assignments.length,
+        candidates: pendingTasks.length,
+        eligible_agents: eligible.length,
+        details: assignments,
+      };
     };
 
     const executeIdentifyBlockers = async () => {
@@ -141,7 +220,7 @@ serve(async (req) => {
           github_status: githubConnectionValid ? 'CONNECTED' : 'DISCONNECTED'
         });
 
-        await supabase.from('eliza_activity_log').insert({
+        await supabase.schema('public').from('eliza_activity_log').insert({
           activity_type: 'task_blocked',
           title: `⚠️ ${canClear ? 'FALSE BLOCK' : 'Task Blocked'}: ${task.title}`,
           description: `Specific Reason: ${specificReason}\nClear Action: ${clearAction}`,
@@ -331,13 +410,21 @@ serve(async (req) => {
         break;
 
       case 'clear_all_workloads':
-        console.log('🧹 Clearing all workloads...');
-        const { error: deleteTasksError, count: deletedCount } = await supabase.from('tasks').delete().neq('id', '');
-        if (deleteTasksError) throw deleteTasksError;
-        const { error: resetAgentsError, count: resetCount } = await supabase.from('agents').update({ status: 'IDLE' }).neq('id', '');
-        if (resetAgentsError) throw resetAgentsError;
-        await supabase.from('eliza_activity_log').insert({ activity_type: 'cleanup', title: '🧹 Cleared All Workloads', description: `Deleted ${deletedCount || 0} tasks and reset ${resetCount || 0} agents to IDLE`, metadata: { tasks_deleted: deletedCount || 0, agents_reset: resetCount || 0 }, status: 'completed' });
-        result = { success: true, tasks_deleted: deletedCount || 0, agents_reset: resetCount || 0, message: `Successfully cleared ${deletedCount || 0} tasks and reset ${resetCount || 0} agents to IDLE` };
+        // REFUSED. This action deleted every task on the board and reset every
+        // agent to IDLE, and it was reachable by any caller of this function -
+        // one request was equivalent to losing the pipeline's memory, with no
+        // record of what was deleted and nothing to restore from.
+        //
+        // The board is cleaned by cancelling the tasks that should not run,
+        // one at a time, with a reason recorded on each. That is auditable and
+        // reversible. This was neither.
+        result = {
+          success: false,
+          error: 'clear_all_workloads is disabled: it deleted the entire board with no record. '
+            + 'Cancel the tasks you do not want, one at a time, with a cancel_reason.',
+          deleted: 0,
+          agents_reset: 0,
+        };
         break;
 
       default:

@@ -1,0 +1,75 @@
+{
+  "hollywood": {
+    "name": "Hollywood Red Carpet",
+    "description": "A-lister glamour, paparazzi flash, red carpet elegance",
+    "prompt_template": "Cinematic Hollywood red carpet portrait. {subject} styled in glamorous evening wear, dramatic warm spotlights, bokeh paparazzi flashes in background, shallow depth of field, high-end fashion photography, ultra-detailed, 8k",
+    "style": "glamorous warm cinematic lighting, high fashion editorial",
+    "enhancements": [
+      "lighting_adjust",
+      "skin_softening",
+      "cinematic_grade"
+    ]
+  },
+  "enchanted_forest": {
+    "name": "Enchanted Forest",
+    "description": "Magical woodland with glowing flora and ethereal light",
+    "prompt_template": "Enchanted mystical forest portrait. {subject} surrounded by glowing bioluminescent plants, floating fireflies, ethereal god rays through misty trees, fantasy concept art, magical atmosphere, ultra-detailed",
+    "style": "fantasy, ethereal glow, bioluminescent, misty",
+    "enhancements": [
+      "color_pop",
+      "glow_effects",
+      "fantasy_grade"
+    ]
+  },
+  "steampunk": {
+    "name": "Steampunk",
+    "description": "Victorian industrial with brass, gears, and steam",
+    "prompt_template": "Steampunk portrait. {subject} in Victorian industrial attire with brass goggles and gears, warm sepia tones, copper and bronze machinery, steam and cogs in background, detailed mechanical aesthetic",
+    "style": "steampunk, sepia, copper brass machinery, industrial victorian",
+    "enhancements": [
+      "sepia_grade",
+      "mechanical_detail",
+      "vintage_texture"
+    ]
+  },
+  "psychedelic": {
+    "name": "Psychedelic",
+    "description": "Vibrant, swirling, mind-bending color",
+    "prompt_template": "Psychedelic surreal portrait. {subject} with vibrant swirling rainbow colors, melting dreamlike background, kaleidoscopic patterns, trippy 60s retro aesthetic, intense saturated hues, mind-bending",
+    "style": "psychedelic, vibrant swirling, kaleidoscopic, surreal",
+    "enhancements": [
+      "high_saturation",
+      "swirl_effect",
+      "trippy_grade"
+    ]
+  },
+  "fairy": {
+    "name": "Fairy",
+    "description": "Ethereal fairy tale with wings and shimmering light",
+    "prompt_template": "Enchanting fairy portrait. {subject} with delicate translucent wings, shimmering sparkles, soft pastel dreamy background, golden hour glow, ethereal fantasy beauty, magical dust motes",
+    "style": "fairy, pastel, ethereal glow, shimmering, dreamy",
+    "enhancements": [
+      "sparkle_effects",
+      "soft_glow",
+      "pastel_grade"
+    ]
+  },
+  "superhero": {
+    "name": "Superhero",
+    "description": "Bold comic-book hero energy and dynamic action",
+    "prompt_template": "Epic superhero portrait. {subject} in heroic dynamic pose, dramatic comic-book action, bold primary colors, city skyline background with energy bursts, dynamic lighting, comic book illustration style, powerful",
+    "style": "comic book, bold primary colors, dynamic action, heroic",
+    "enhancements": [
+      "contrast_boost",
+      "halftone_dots",
+      "comic_grade"
+    ]
+  },
+  "custom": {
+    "name": "Custom Prompt",
+    "description": "Fully custom AI transformation",
+    "prompt_template": "{custom_prompt} of {subject}",
+    "style": "custom",
+    "enhancements": []
+  }
+}

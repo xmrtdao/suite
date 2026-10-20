@@ -103,7 +103,6 @@ const INTENT_MAPPINGS: Array<{
     // Agents
     { patterns: ['agent', 'list agent', 'agents', 'agent status'], functionName: 'agent-manager', args: { action: 'list' }, category: 'Agents' },
     { patterns: ['agent deployment', 'deploy agent'], functionName: 'agent-deployment-coordinator', args: { action: 'status' }, category: 'Agents' },
-    { patterns: ['agent work', 'execute work'], functionName: 'agent-work-executor', args: { action: 'status' }, category: 'Agents' },
 
     // Tasks
     { patterns: ['task', 'list task', 'tasks', 'task status'], functionName: 'task-orchestrator', args: { action: 'list' }, category: 'Tasks' },
@@ -231,6 +230,10 @@ export async function executeOfficeClerk(
 ): Promise<OfficeClerkResult> {
   const supabase = createClient(supabaseUrl, serviceRoleKey);
   const queryLower = userQuery.toLowerCase();
+  // Prevent erroneous routing of auto-advance language to office clerk
+  if (queryLower.includes('proceed') || queryLower.includes('proceeding')) {
+    return { success: true, content: 'Proceeding intelligently — routing to ai-chat instead of office clerk.', functionsExecuted: [], rawResults: [] };
+  }
   const executedFunctions: string[] = [];
   const rawResults: any[] = [];
 

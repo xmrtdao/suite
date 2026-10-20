@@ -837,13 +837,6 @@ export const FUNCTION_KNOWLEDGE: Record<string, FunctionKnowledge> = {
         example_payload: { event: 'task_completed', data: {} }
     },
 
-    'agent-work-executor': {
-        description: 'Execute agent work items — runs tool calls on behalf of agents.',
-        required_params: ['tool_name', 'payload'],
-        optional_params: ['agent_id', 'task_id'],
-        example_payload: { tool_name: 'python-executor', payload: { code: 'print("work")' }, agent_id: 'uuid' }
-    },
-
     'extract-knowledge': {
         description: 'Extract entities and knowledge from text sources into knowledge_entities table.',
         required_params: [],

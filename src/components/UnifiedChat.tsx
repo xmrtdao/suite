@@ -653,7 +653,7 @@ const [messages, setMessages] = useState<UnifiedMessage[]>([]);
   const [automationEnabled, setAutomationEnabled] = useState(false);
   const [automationCountdown, setAutomationCountdown] = useState<number | null>(null);
   const automationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const AUTOMATION_ADVANCE_SECONDS = 15;
+  const AUTOMATION_ADVANCE_SECONDS = 60;
 
   const clearAutomationTimer = useCallback(() => {
     if (automationTimerRef.current) {
@@ -2604,7 +2604,7 @@ const [messages, setMessages] = useState<UnifiedMessage[]>([]);
                   </p>
                   <p className="text-xs text-muted-foreground">
                     When on, the chat presses "Proceed Intelligently" by itself
-                    15s after each response. Toggle off to take back manual control.
+                    60s after each response. Toggle off to take back manual control.
                   </p>
                 </TooltipContent>
               </Tooltip>
