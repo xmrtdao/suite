@@ -610,6 +610,35 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     retryDelayMs: 1000
   },
 
+  // MiniMax M3.1 Flash, served by Ollama - the same free model OpenRouter
+  // serves, out of a different quota pool. Measured 2026-10-20 against all
+  // three Ollama accounts: 200 in 790-1403ms with native tool_calls, while
+  // Ollama's own free-plan gemma4:31b was at its weekly limit (429) and the
+  // paid models were refused for want of credits (402).
+  //
+  // It sits directly after the OpenRouter copy of the same model on purpose.
+  // If OpenRouter's shared free tier rate-limits, this answers the same
+  // request from a different pool rather than the cascade dropping to a
+  // slower model.
+  //
+  // There is no "-free" slug on Ollama: minimax-m3.1-flash-free is 404. The
+  // plain name is the one that answers.
+  ollama_minimax_m3_1_flash: {
+    name: 'MiniMax M3.1 Flash (Ollama) — FREE, supports tools',
+    enabled: !!OLLAMA_XMRT_API_KEY,
+    apiKey: OLLAMA_XMRT_API_KEY,
+    endpoint: 'https://ollama.com/v1/chat/completions',
+    models: ['minimax-m3.1-flash'],
+    supportsTools: true,
+    // Not published by Ollama's catalogue for this model.
+    contextWindow: undefined,
+    timeoutMs: 45000,
+    priority: 0.04,  // same model, second pool — tried right after OpenRouter
+    fallbackOnly: false,
+    maxRetries: 2,
+    retryDelayMs: 1000
+  },
+
   poolside_laguna_s: {
     name: 'Poolside Laguna S 2.1 (OpenRouter) — FREE, supports tools',
     enabled: !!OPENROUTER_API_KEY,
@@ -834,18 +863,23 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
   // when OLLAMA_MODEL ends in ':free' or contains '/' (those models are not on
   // ollama.com and 404 there — wastes timeout budget).
   //
-  // The default model was wrong: minimax/minimax-m3:free is not an ollama.com
-  // model and answers 404 ("model not found. Try glm-5.3-flash:cloud").
-  // Re-probed 2026-10-19: all three Ollama cloud keys are out of quota (429
-  // "You used all included Pro usage"), and deepseek-v4-flash:cloud was retired
-  // on 2026-09-25 (410). The entry stays because the quota resets; a quota
-  // answer is a fast 429, not a hang.
+  // Re-probed 2026-10-20: the three Ollama cloud keys are NOT out of quota.
+  // What has run out is the weekly allowance of gemma4:31b (429 "you have
+  // reached your weekly usage limit"), while the paid models are refused for
+  // want of credits (402 "not included in your free usage"). Ollama serves
+  // minimax-m3.1-flash inside the free allowance on every account: 200 in
+  // 790-1403ms with native tool_calls.
+  //
+  // The old default model was wrong twice over: minimax/minimax-m3:free is
+  // not an ollama.com model (404 "Try glm-5.3-flash:cloud"), and
+  // glm-5.3-flash:cloud is a paid model (402). The plain name is what
+  // answers, and there is no "-free" slug on Ollama.
   ollama: {
-    name: 'Ollama Pro Cloud',
+    name: 'MiniMax M3.1 Flash (Ollama cloud) — FREE',
     enabled: true,
     apiKey: OLLAMA_API_KEY,
     endpoint: 'https://ollama.com/v1/chat/completions',
-    models: [Deno.env.get('OLLAMA_MODEL') || 'glm-5.3-flash:cloud'],
+    models: [Deno.env.get('OLLAMA_MODEL') || 'minimax-m3.1-flash'],
     supportsTools: true,
     // Ollama Cloud does not publish a per-model window through our config
     // path, and the model in use varies with OLLAMA_MODEL, so this stays on
@@ -857,17 +891,16 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     maxRetries: 2,
     retryDelayMs: 1000
   },
-  
+
   // TERTIARY: direct ollama.com via the 3rd Ollama account key — separate weekly quota.
   // Same OpenRouter-only guard: skipped if OLLAMA_MODEL is a ':free' or contains '/'.
-  // Default model corrected 2026-10-19: minimax/minimax-m3:free is not an
-  // ollama.com model (404). All three keys are currently quota-exhausted (429).
+  // Re-probed 2026-10-20: this account serves minimax-m3.1-flash for free too.
   ollama_pro_3rd: {
-    name: 'Ollama Pro 3rd (alternate quota)',
+    name: 'MiniMax M3.1 Flash (Ollama 3rd account) — FREE, separate quota',
     enabled: !!OLLAMA_3RD_API_KEY,
     apiKey: OLLAMA_3RD_API_KEY,
     endpoint: 'https://ollama.com/v1/chat/completions',
-    models: [Deno.env.get('OLLAMA_MODEL') || 'glm-5.3-flash:cloud'],
+    models: [Deno.env.get('OLLAMA_MODEL') || 'minimax-m3.1-flash'],
     supportsTools: true,
     contextWindow: undefined,
     timeoutMs: 120000,
@@ -1337,9 +1370,18 @@ async function generateAISummary(messages: any[], toolResults: any[]): Promise<s
       }
     ];
     
+    // Ollama, with a model it actually serves.
+    //
+    // This used to send the OpenAI and DeepSeek keys to ollama.com with the
+    // models "gpt-4o-mini" and "deepseek-chat" - neither of which exists in
+    // Ollama's catalogue, so both attempts 404'd and every summary fell
+    // through to the local heuristic. Ollama serves minimax-m3.1-flash on
+    // these accounts (200, native tool_calls, measured 2026-10-20), so that
+    // is what it gets.
     const providers = [
-      { name: 'openai', apiKey: OPENAI_API_KEY, endpoint: 'https://ollama.com/v1/chat/completions' },
-      { name: 'deepseek', apiKey: DEEPSEEK_API_KEY, endpoint: 'https://ollama.com/v1/chat/completions' },
+      { name: 'ollama-minimax', apiKey: OLLAMA_XMRT_API_KEY || OLLAMA_API_KEY, endpoint: 'https://ollama.com/v1/chat/completions', model: 'minimax-m3.1-flash' },
+      { name: 'openai', apiKey: OPENAI_API_KEY, endpoint: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4o-mini' },
+      { name: 'deepseek', apiKey: DEEPSEEK_API_KEY, endpoint: 'https://api.deepseek.com/v1/chat/completions', model: 'deepseek-chat' },
     ];
 
     for (const provider of providers) {
@@ -1356,7 +1398,7 @@ async function generateAISummary(messages: any[], toolResults: any[]): Promise<s
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({
-            model: provider.name === 'openai' ? 'gpt-4o-mini' : 'deepseek-chat',
+            model: provider.model,
             messages: summaryPrompts,
             temperature: 0.3,
             max_tokens: 300
@@ -4522,6 +4564,12 @@ class EnhancedProviderCascade {
         case 'ollama':
           result = await this.callOllama(messages, tools, controller, 'ollama');
           break;
+        case 'ollama_minimax_m3_1_flash':
+          // The same free model OpenRouter serves, out of Ollama's pool. It
+          // cycles the configured Ollama keys and uses this entry's own slug,
+          // so the provider list cannot drift from the model that answers.
+          result = await this.callOllama(messages, tools, controller, provider, config.models[0]);
+          break;
         case 'ollama_pro_3rd':
           // Separate weekly quota, so it is a genuinely distinct source. It
           // previously had NO case here and fell through to
@@ -4561,7 +4609,7 @@ class EnhancedProviderCascade {
     }
   }
   
-  private async callOllama(messages: any[], tools: any[], controller: AbortController, providerName: 'ollama' | 'ollama_hermes' = 'ollama'): Promise<CascadeResult> {
+  private async callOllama(messages: any[], tools: any[], controller: AbortController, providerName: 'ollama' | 'ollama_hermes' | 'ollama_minimax_m3_1_flash' = 'ollama', modelOverride?: string): Promise<CascadeResult> {
     // Cascade through all configured Ollama keys (primary, hermes, 3rd) —
     // mirrors the relay's tryOllamaCloud() in relay/tools/ollama-chat.mjs so
     // the suite chat uses the SAME Ollama Cloud sources and fallbacks as the
@@ -4583,7 +4631,10 @@ class EnhancedProviderCascade {
                (msg.content?.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n') || '')
     }));
 
-    const model = Deno.env.get('OLLAMA_MODEL') || 'minimax/minimax-m3:free';
+    // The default was "minimax/minimax-m3:free" - a slug OpenRouter retired
+    // and Ollama never had (404 "try glm-5.3-flash:cloud"). The plain name is
+    // what Ollama actually serves, and it answers on the free allowance.
+    const model = modelOverride || Deno.env.get('OLLAMA_MODEL') || 'minimax-m3.1-flash';
     const needsTools = tools.length > 0 && needsDataRetrieval(messages);
     let lastError: string | null = null;
     for (const { key, label } of keys) {

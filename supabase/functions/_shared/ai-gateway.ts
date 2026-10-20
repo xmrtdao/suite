@@ -58,7 +58,7 @@ const GATEWAY_CONFIG: GatewayConfig = {
       name: 'openrouter-gemma',
       endpoint: 'https://openrouter.ai/api/v1/chat/completions',
       model: 'google/gemma-4-31b-it:free',
-      priority: 3,
+      priority: 6,
       rateLimit: 5000,
       timeout: 25000,
       available: true,
@@ -75,42 +75,58 @@ const GATEWAY_CONFIG: GatewayConfig = {
       name: 'opencode',
       endpoint: 'https://opencode.ai/inference/openai/v1/chat/completions',
       model: Deno.env.get('OPENCODE_MODELS') || 'minimax-m3.1-flash-free',
-      priority: 4,
+      priority: 7,
       rateLimit: 5000,
       timeout: 20000,
       available: true,
     },
 
     // ── Ollama cloud ──────────────────────────────────────────────────────
-    // All three keys are currently out of quota (429 "You used all included
-    // Pro usage"), and the model this used to name is gone: Ollama retired
-    // deepseek-v4-flash:cloud on 2026-09-25 (410) and minimax/minimax-m3:free
-    // was never a cloud model (404 "try glm-5.3-flash:cloud"). They stay in
-    // the cascade because the quota resets, and a quota answer is a fast 429
-    // rather than a hang.
+    // Re-probed 2026-10-20 from this runtime, against all three accounts:
+    //
+    //   minimax-m3.1-flash    200 in 790-1403ms, native tool_calls (all 3 keys)
+    //   minimax-m3.1-flash:cloud  200, native tool_calls
+    //   gemma4:31b            429 "you have reached your weekly usage limit"
+    //   glm-5.3-flash:cloud   402 "not included in your free usage"
+    //   deepseek-v4-pro       402 "not included in your free usage"
+    //
+    // So the free plan on these accounts is alive. What has run out is the
+    // weekly allowance of the free-plan MODEL that used to be named here
+    // (OLLAMA_MODEL was gemma4:31b), and the paid models are refused for
+    // want of credits - neither of which is the same thing as the free tier
+    // being gone. Ollama serves MiniMax M3.1 Flash inside the free
+    // allowance, on every account, with real tool calls.
+    //
+    // The model name matters: there is no "-free" slug on Ollama.
+    // minimax-m3.1-flash-free is 404 ("Try gemma4:31b-cloud, which is in the
+    // Free plan"). The plain name is the one that answers.
+    //
+    // Three accounts, one model, three keys: they are tried in turn, so a
+    // weekly limit on one of them is the next one's problem rather than a
+    // dead provider.
     {
-      name: 'ollama-pro',
+      name: 'ollama-minimax',
       endpoint: 'https://ollama.com/v1/chat/completions',
-      model: Deno.env.get('OLLAMA_MODEL') || 'glm-5.3-flash:cloud',
+      model: Deno.env.get('OLLAMA_MODEL') || 'minimax-m3.1-flash',
+      priority: 3,
+      rateLimit: 1200,
+      timeout: 20000,
+      available: true,
+    },
+    {
+      name: 'ollama-minimax-xmrt',
+      endpoint: 'https://ollama.com/v1/chat/completions',
+      model: Deno.env.get('OLLAMA_MODEL') || 'minimax-m3.1-flash',
+      priority: 4,
+      rateLimit: 1200,
+      timeout: 20000,
+      available: true,
+    },
+    {
+      name: 'ollama-minimax-3rd',
+      endpoint: 'https://ollama.com/v1/chat/completions',
+      model: Deno.env.get('OLLAMA_MODEL') || 'minimax-m3.1-flash',
       priority: 5,
-      rateLimit: 1200,
-      timeout: 20000,
-      available: true,
-    },
-    {
-      name: 'ollama-pro-xmrt',
-      endpoint: 'https://ollama.com/v1/chat/completions',
-      model: Deno.env.get('OLLAMA_MODEL') || 'glm-5.3-flash:cloud',
-      priority: 6,
-      rateLimit: 1200,
-      timeout: 20000,
-      available: true,
-    },
-    {
-      name: 'ollama-pro-3rd',
-      endpoint: 'https://ollama.com/v1/chat/completions',
-      model: 'gemma4:31b',
-      priority: 7,
       rateLimit: 1200,
       timeout: 20000,
       available: true,
@@ -458,9 +474,11 @@ async function getAPIKey(providerName: string): Promise<string> {
     'openrouter-nemotron': Deno.env.get('OPENROUTER_API_KEY') || '',
     'openrouter-gemma': Deno.env.get('OPENROUTER_API_KEY') || '',
     opencode: Deno.env.get('OPENCODE_API_KEY') || '',
-    'ollama-pro': Deno.env.get('OLLAMA_API_KEY') || '',
-    'ollama-pro-xmrt': Deno.env.get('OLLAMA_XMRT_API_KEY') || '',
-    'ollama-pro-3rd': Deno.env.get('OLLAMA_3RD_API_KEY') || '',
+    // Three Ollama accounts, one model. The keys are read at call time, so a
+    // rotated key is picked up without editing this file.
+    'ollama-minimax': Deno.env.get('OLLAMA_API_KEY') || '',
+    'ollama-minimax-xmrt': Deno.env.get('OLLAMA_XMRT_API_KEY') || '',
+    'ollama-minimax-3rd': Deno.env.get('OLLAMA_3RD_API_KEY') || '',
     // Local Ollama needs no key. It is the one provider on this machine that
     // is not asking anybody else for quota.
     'ollama-local': '',
