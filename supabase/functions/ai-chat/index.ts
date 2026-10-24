@@ -39,6 +39,12 @@ const OLLAMA_API_KEY = Deno.env.get('OLLAMA_API_KEY') || '';
 const OLLAMA_XMRT_API_KEY = Deno.env.get('OLLAMA_XMRT_API_KEY') || '';  // XMRT account — the WORKING key (matches relay ollama-chat.mjs getOllamaXmrtKey); primary OLLAMA_API_KEY is past-due/403
 const OLLAMA_HERMES_API_KEY = Deno.env.get('OLLAMA_HERMES_API_KEY') || '';  // second Ollama account (separate weekly quota) — failover on 429
 const OLLAMA_3RD_API_KEY = Deno.env.get('OLLAMA_3RD_API_KEY') || '';  // third Ollama account — matches relay ollama-chat.mjs cascade
+// Fourth Ollama account. Measured 2026-10-22: it is the account that still has
+// free-plan capacity for the non-MiniMax models (gemma4, gpt-oss, nemotron,
+// beam), all with native tool calls. The relay already read it; ai-chat did
+// not, which is why the Suite cascade dropped straight from MiniMax to the
+// OpenRouter free tier instead of using the seven models this key can serve.
+const TTCR_OLLAMA_API_KEY = Deno.env.get('TTCR_OLLAMA_API_KEY') || Deno.env.get('OLLAMA_TTCR_API_KEY') || '';
 const OLLAMA_LOCAL_HOST = Deno.env.get('OLLAMA_HOST') || 'http://localhost:11434';
 const OLLAMA_LOCAL_MODEL = Deno.env.get('OLLAMA_LOCAL_MODEL') || '';  // explicit override for local Ollama model (e.g. gemma3:1b)
 const OLLAMA_LOCAL_API_KEY = Deno.env.get('OLLAMA_LOCAL_API_KEY') || '';
@@ -137,6 +143,13 @@ const RELAY_API_KEY = Deno.env.get('RELAY_API_KEY') || '';
 const SUPABASE_LOCAL_URL = Deno.env.get('SUPABASE_URL') || 'http://127.0.0.1:54321';
 const SUPABASE_LOCAL_ANON = Deno.env.get('SUPABASE_ANON_KEY') || Deno.env.get('LOCAL_SUPABASE_ANON_KEY') || '';
 const LOCAL_CONTEXT_TIMEOUT_MS = parseInt(Deno.env.get('LOCAL_CONTEXT_TIMEOUT_MS') || '30000');
+// Relay TOOL calls may legitimately outlive local-context fetches: the
+// relay's shell-exec and python-exec handlers clamp their own timeout at
+// 120s. Bounding every /tools/run call at LOCAL_CONTEXT_TIMEOUT_MS (30s)
+// aborted real tool calls mid-flight, surfaced as Deno's "The signal has
+// been aborted", and got diagnosed by Eliza as the relay's execution
+// substrate being OOM-killed. The abort was here, client-side.
+const RELAY_TOOL_TIMEOUT_MS = parseInt(Deno.env.get('RELAY_TOOL_TIMEOUT_MS') || '120000');
 
 if (AI_CHAT_DEBUG_LOG) debugLog('local_ollama_only.config', { LOCAL_OLLAMA_ONLY, RELAY_BASE_URL, SUPABASE_LOCAL_URL, hasAnon: !!SUPABASE_LOCAL_ANON });
 
@@ -196,7 +209,7 @@ async function callRelayTool(tool: string, args: Record<string, unknown> = {}): 
       method: 'POST',
       headers,
       body: JSON.stringify({ tool, args }),
-    });
+    }, RELAY_TOOL_TIMEOUT_MS);
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
       await debugLog('local_context.tool_http_error', { tool, status: res.status });
@@ -586,25 +599,43 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
   // just because it appears in the catalog; verify it answers with real
   // tool_calls first (see _probe_candidates.py in the repo root).
 
-  // MiniMax M3.1 Flash — the free slug OpenRouter now serves. Added 2026-10-19.
-  // The older minimax/minimax-m3:free was retired (404), and the replacement
-  // name that 404 pointed at — minimax/minimax-m3 — is paid.
+  // MiniMax M3.1 Flash — RETIRED FROM OPENROUTER'S FREE TIER 2026-10-22.
+  // A live probe returns 404: "The free launch period for MiniMax M3.1 Flash
+  // ended on Oct 22, 2026. The `:free` variant has been retired; use
+  // minimax/minimax-m3.1-flash (list price)". The paid slug needs founder
+  // approval, so this entry is disabled rather than silently spending.
   //
-  // Probed live from this runtime before being added, per the rule above:
-  //   200 in 1015ms, native tool_calls confirmed (a real function call came
-  //   back, not prose), 1,000,000 token context per the OpenRouter catalog.
-  // That makes it the fastest verified slug in the cascade.
+  // The Ollama copy of the same model is still served inside the free
+  // allowance (see ollama_minimax_m3_1_flash), so the cascade does not lose
+  // MiniMax. It simply must not depend on the OpenRouter free slug.
   minimax_m3_1_flash_free: {
-    name: 'MiniMax M3.1 Flash (OpenRouter) — FREE, supports tools',
-    enabled: !!OPENROUTER_API_KEY,
+    name: 'MiniMax M3.1 Flash (OpenRouter) — FREE tier retired 2026-10-22',
+    enabled: false,
     apiKey: OPENROUTER_API_KEY,
     endpoint: 'https://openrouter.ai/api/v1/chat/completions',
     models: ['minimax/minimax-m3.1-flash:free'],
     supportsTools: true,
-    // Verified against OpenRouter /models on 2026-10-19.
     contextWindow: 1000000,
     timeoutMs: 45000,
-    priority: 0.03,  // fastest verified slug — tried before the rest
+    priority: 0.03,
+    fallbackOnly: false,
+    maxRetries: 2,
+    retryDelayMs: 1000
+  },
+
+  // The OpenRouter free-models router. Verified 2026-10-22: 200, native
+  // tool_calls. It is the tier's catch-all — if every explicit slug is
+  // rate-limited or retired, this reaches whatever free model is healthy.
+  openrouter_free_router: {
+    name: 'OpenRouter Free Models Router — FREE, supports tools',
+    enabled: !!OPENROUTER_API_KEY,
+    apiKey: OPENROUTER_API_KEY,
+    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    models: ['openrouter/free'],
+    supportsTools: true,
+    contextWindow: 200000,
+    timeoutMs: 45000,
+    priority: 0.36,
     fallbackOnly: false,
     maxRetries: 2,
     retryDelayMs: 1000
@@ -672,16 +703,17 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
   },
 
   apodex_1_1_mini: {
-    name: 'Apexd Apex 1.1 Mini (OpenRouter) — FREE, supports tools',
-    enabled: !!OPENROUTER_API_KEY,
+    name: 'Apexd Apex 1.1 Mini (OpenRouter) — retired slug',
+    // Re-checked against the live /models catalog on 2026-10-22: the slug is
+    // gone. A 404 is permanent, so probing it only burns a cascade slot.
+    enabled: false,
     apiKey: OPENROUTER_API_KEY,
     endpoint: 'https://openrouter.ai/api/v1/chat/completions',
     models: ['apodex/apodex-1.1-mini:free'],
     supportsTools: true,
-    // Verified against OpenRouter /models on 2026-10-11.
     contextWindow: 262144,
     timeoutMs: 45000,
-    priority: 0.08,  // verified 2406ms + native tool_calls
+    priority: 0.08,
     fallbackOnly: false,
     maxRetries: 2,
     retryDelayMs: 1000
@@ -698,6 +730,55 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     contextWindow: 512000,
     timeoutMs: 45000,
     priority: 0.09,  // verified 3501ms + native tool_calls
+    fallbackOnly: false,
+    maxRetries: 2,
+    retryDelayMs: 1000
+  },
+
+  // Additional free slugs verified live on 2026-10-22. They are kept after
+  // the consistently-fast models: laguna-xs answered text in 1.5s but was
+  // 429 for tool calls on the same probe, and xingchen/gemma-4-26b were 429
+  // upstream. A 429 is transient, so they remain genuine fallbacks.
+  laguna_xs_free: {
+    name: 'Poolside Laguna XS 2.1 (OpenRouter) — FREE',
+    enabled: !!OPENROUTER_API_KEY,
+    apiKey: OPENROUTER_API_KEY,
+    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    models: ['poolside/laguna-xs-2.1:free'],
+    supportsTools: true,
+    contextWindow: 262144,
+    timeoutMs: 45000,
+    priority: 0.12,
+    fallbackOnly: false,
+    maxRetries: 2,
+    retryDelayMs: 1000
+  },
+
+  flint_v1_free: {
+    name: 'Recursive Flint 1.0 (OpenRouter) — FREE, supports tools',
+    enabled: !!OPENROUTER_API_KEY,
+    apiKey: OPENROUTER_API_KEY,
+    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    models: ['recursive/flint-v1.0:free'],
+    supportsTools: true,
+    contextWindow: 262144,
+    timeoutMs: 45000,
+    priority: 0.13,
+    fallbackOnly: false,
+    maxRetries: 2,
+    retryDelayMs: 1000
+  },
+
+  xingchen_4_free: {
+    name: 'Xingchen Xing4.0 29B (OpenRouter) — FREE',
+    enabled: !!OPENROUTER_API_KEY,
+    apiKey: OPENROUTER_API_KEY,
+    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    models: ['xingchen-agi/xing4.0-29b-a4b:free'],
+    supportsTools: true,
+    contextWindow: 262144,
+    timeoutMs: 45000,
+    priority: 0.14,
     fallbackOnly: false,
     maxRetries: 2,
     retryDelayMs: 1000
@@ -782,21 +863,19 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
   
   // TIER 1: Nemotron 3 Nano Omni via OpenRouter — FREE, supports tool calling
   nemotron_3_nano_free: {
-    name: 'Nvidia Nemotron 3 Nano Omni (OpenRouter) — FREE, supports tools',
-    enabled: !!OPENROUTER_API_KEY,
+    name: 'Nvidia Nemotron 3 Nano Omni (OpenRouter) — empty responses',
+    // Re-probed 2026-10-22: the endpoint returns 200 but the message has
+    // neither content nor tool_calls (twice, with and without tools). An
+    // empty 200 is treated as a failure by the cascade, so leaving it enabled
+    // only wastes a slot and trips the breaker.
+    enabled: false,
     apiKey: OPENROUTER_API_KEY,
     endpoint: 'https://openrouter.ai/api/v1/chat/completions',
     models: ['nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free'],
     supportsTools: true,
-    // Cut 120s -> 45s on 2026-10-11. Measured twice in one request: 3316ms
-    // when healthy, but it also hung to the full abort (120011ms, then
-    // 120005ms on the synthesis pass) — roughly 240s of a 336s request spent
-    // on a provider that returned nothing. 45s keeps ample headroom over the
-    // observed healthy latency while capping the damage when it wedges.
-    // Verified against OpenRouter /models on 2026-10-11.
     contextWindow: 256000,
     timeoutMs: 45000,
-    priority: 0.25,  // tier 1 — free model with tool support
+    priority: 0.25,
     fallbackOnly: false,
     maxRetries: 2,
     retryDelayMs: 1000
@@ -837,23 +916,39 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     retryDelayMs: 1000
   },
   
-  // TIER 4: Nemotron 3 Super via OpenRouter — FREE, supports tool calling.
-  // Primary daily driver with broadest capability.
-  // NOTE 2026-09-26: minimax/minimax-m3:free was RETIRED by OpenRouter
-  // (404: "use this slug instead: minimax/minimax-m3" — paid). Key renamed
-  // in spirit but `minimax_m3` identifier kept for log continuity. To go
-  // back to paid minimax, set models to ['minimax/minimax-m3'] (founder spend OK required).
-  minimax_m3: {
-    name: 'Nvidia Nemotron 3 Super 120B (OpenRouter) — FREE, supports tools',
+  // Nemotron 3.5 Super VL — verified 2026-10-22: 200 in ~4s, native
+  // tool_calls, 1M context, text+image+video input. It is the vision-capable
+  // free model that is actually answering, so it follows the text leaders.
+  nemotron_3_5_super_vl: {
+    name: 'Nvidia Nemotron 3.5 Super VL (OpenRouter) — FREE, vision + tools',
     enabled: !!OPENROUTER_API_KEY,
+    apiKey: OPENROUTER_API_KEY,
+    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    models: ['nvidia/nemotron-3.5-super-vl:free'],
+    supportsTools: true,
+    contextWindow: 1000000,
+    timeoutMs: 45000,
+    priority: 0.31,
+    fallbackOnly: false,
+    maxRetries: 2,
+    retryDelayMs: 1000
+  },
+
+  // TIER 4: Nemotron 3 Super 120B via OpenRouter — DISABLED 2026-10-22.
+  // The slug still appears in /models but a live chat completion returns
+  // 404 "Not Found" from the upstream provider. The probe was repeated with
+  // and without tools; both 404. It is not a rate limit, so it must not sit
+  // in the hot path. `minimax_m3` is kept as the key for log continuity.
+  minimax_m3: {
+    name: 'Nvidia Nemotron 3 Super 120B (OpenRouter) — upstream 404',
+    enabled: false,
     apiKey: OPENROUTER_API_KEY,
     endpoint: 'https://openrouter.ai/api/v1/chat/completions',
     models: ['nvidia/nemotron-3-super-120b-a12b:free'],
     supportsTools: true,
-    // Verified against OpenRouter /models on 2026-10-11.
     contextWindow: 262144,
     timeoutMs: 120000,
-    priority: 0.4,  // tier 4 — primary daily driver
+    priority: 0.4,
     fallbackOnly: false,
     maxRetries: 2,
     retryDelayMs: 1000
@@ -909,18 +1004,123 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     maxRetries: 2,
     retryDelayMs: 1000
   },
-  
-  // LOCAL Ollama — talks to http://localhost:11434. Disabled on this 6GB laptop.
+
+  // TTCR account: the free models the first three accounts cannot serve.
+  // Every entry below was measured on 2026-10-22 with a get_weather tool and
+  // returned a native tool_call. They sit after OpenRouter because they are
+  // the deeper fallback, but before local Ollama.
+  ollama_ttcr_gemma4: {
+    name: 'Gemma 4 31B (Ollama TTCR) — FREE, vision + tools',
+    enabled: !!TTCR_OLLAMA_API_KEY,
+    apiKey: TTCR_OLLAMA_API_KEY,
+    endpoint: 'https://ollama.com/v1/chat/completions',
+    models: ['gemma4:31b'],
+    supportsTools: true,
+    contextWindow: undefined,
+    timeoutMs: 45000,
+    priority: 0.46,
+    fallbackOnly: false,
+    maxRetries: 2,
+    retryDelayMs: 1000
+  },
+  ollama_ttcr_gpt_oss_120b: {
+    name: 'GPT-OSS 120B (Ollama TTCR) — FREE, supports tools',
+    enabled: !!TTCR_OLLAMA_API_KEY,
+    apiKey: TTCR_OLLAMA_API_KEY,
+    endpoint: 'https://ollama.com/v1/chat/completions',
+    models: ['gpt-oss:120b'],
+    supportsTools: true,
+    contextWindow: undefined,
+    timeoutMs: 45000,
+    priority: 0.47,
+    fallbackOnly: false,
+    maxRetries: 2,
+    retryDelayMs: 1000
+  },
+  ollama_ttcr_gpt_oss_20b: {
+    name: 'GPT-OSS 20B (Ollama TTCR) — FREE, supports tools',
+    enabled: !!TTCR_OLLAMA_API_KEY,
+    apiKey: TTCR_OLLAMA_API_KEY,
+    endpoint: 'https://ollama.com/v1/chat/completions',
+    models: ['gpt-oss:20b'],
+    supportsTools: true,
+    contextWindow: undefined,
+    timeoutMs: 45000,
+    priority: 0.48,
+    fallbackOnly: false,
+    maxRetries: 2,
+    retryDelayMs: 1000
+  },
+  ollama_ttcr_nemotron_nano: {
+    name: 'Nemotron 3 Nano 30B (Ollama TTCR) — FREE, supports tools',
+    enabled: !!TTCR_OLLAMA_API_KEY,
+    apiKey: TTCR_OLLAMA_API_KEY,
+    endpoint: 'https://ollama.com/v1/chat/completions',
+    models: ['nemotron-3-nano:30b'],
+    supportsTools: true,
+    contextWindow: undefined,
+    timeoutMs: 45000,
+    priority: 0.49,
+    fallbackOnly: false,
+    maxRetries: 2,
+    retryDelayMs: 1000
+  },
+  ollama_ttcr_nemotron_super: {
+    name: 'Nemotron 3 Super (Ollama TTCR) — FREE, supports tools',
+    enabled: !!TTCR_OLLAMA_API_KEY,
+    apiKey: TTCR_OLLAMA_API_KEY,
+    endpoint: 'https://ollama.com/v1/chat/completions',
+    models: ['nemotron-3-super'],
+    supportsTools: true,
+    contextWindow: undefined,
+    timeoutMs: 45000,
+    priority: 0.51,
+    fallbackOnly: false,
+    maxRetries: 2,
+    retryDelayMs: 1000
+  },
+  ollama_ttcr_nemotron_ultra: {
+    name: 'Nemotron 3 Ultra (Ollama TTCR) — FREE, supports tools',
+    enabled: !!TTCR_OLLAMA_API_KEY,
+    apiKey: TTCR_OLLAMA_API_KEY,
+    endpoint: 'https://ollama.com/v1/chat/completions',
+    models: ['nemotron-3-ultra'],
+    supportsTools: true,
+    contextWindow: undefined,
+    timeoutMs: 45000,
+    priority: 0.52,
+    fallbackOnly: false,
+    maxRetries: 2,
+    retryDelayMs: 1000
+  },
+  ollama_ttcr_beam: {
+    name: 'Beam (Ollama TTCR) — FREE, supports tools',
+    enabled: !!TTCR_OLLAMA_API_KEY,
+    apiKey: TTCR_OLLAMA_API_KEY,
+    endpoint: 'https://ollama.com/v1/chat/completions',
+    models: ['beam'],
+    supportsTools: true,
+    contextWindow: undefined,
+    timeoutMs: 45000,
+    priority: 0.53,
+    fallbackOnly: false,
+    maxRetries: 2,
+    retryDelayMs: 1000
+  },
+
+  // LOCAL Ollama — the only provider that does not depend on somebody else's
+  // quota. Measured 2026-10-22: gemma3:1b answers text in ~36s on this CPU
+  // and rejects native tools; callOllamaLocal injects a text tool manifest,
+  // so it can still attempt a tool call. Last, with its own long timeout.
   ollama_local: {
-    name: 'Ollama Local',
-    enabled: false,
+    name: 'Ollama Local (gemma3:1b) — last resort',
+    enabled: true,
     apiKey: OLLAMA_LOCAL_API_KEY,
     endpoint: `${OLLAMA_LOCAL_HOST}/v1/chat/completions`,
-    models: [],
+    models: ['gemma3:1b'],
     supportsTools: true,
-    // Local models are typically small; keep the conservative default.
     contextWindow: undefined,
-    timeoutMs: 10000,
+    timeoutMs: 75000,
     priority: 99,
     fallbackOnly: false,
     maxRetries: 1,
@@ -1300,13 +1500,18 @@ function summarizeArray(arr: any[], max = 8) {
 
 async function logFunctionUsage(entry: any) {
   try {
-    await supabase.from(DATABASE_CONFIG.tables.function_usage_logs).insert(entry);
+    // Bounded at the boundary, not at the call site. `parameters` and
+    // `error_message` are whatever the caller passed, and a tool argument can
+    // be a whole conversation. This table reached 1.4 GB from that alone.
+    await supabase.from(DATABASE_CONFIG.tables.function_usage_logs).insert(boundForStorage(entry));
   } catch (_) {}
 }
 
 async function logActivity(entry: any) {
   try {
-    await supabase.from(DATABASE_CONFIG.tables.eliza_activity_log).insert(entry);
+    // Same boundary rule. A `tool_execution` row carries the arguments and
+    // the error, and both are unbounded.
+    await supabase.from(DATABASE_CONFIG.tables.eliza_activity_log).insert(boundForStorage(entry));
   } catch (_) {}
 }
 
@@ -1338,6 +1543,80 @@ function parseToolArguments(args: string): any {
 function truncateString(str: string, maxLength: number): string {
   if (str.length <= maxLength) return str;
   return str.substring(0, maxLength) + '...';
+}
+
+// ========== BOUNDED TEXT ==========
+//
+// A row that a human (or a panel) has to read must be small enough to read.
+// Two fields used to be as long as whatever the caller passed:
+//
+//   * `args` — the arguments a tool was called with, and
+//   * `error` — the error a tool failed with.
+//
+// An agent that searched the knowledge base with a whole conversation as the
+// search term produced an error message of 935,775 characters: the text of a
+// URL that was too long for `fetch` to send. That string was written to
+// `eliza_activity_log` and `function_usage_logs` verbatim — 93 such rows a
+// day, 55 MB a day, and the activity feed grew to 4.3 GB because of it.
+//
+// So every string bound for storage is cut, and a cut string says how long
+// it was. Nothing is silently lost: the reader is told the real length, so a
+// truncated fact is never passed off as a whole one.
+//
+// The same rule applies to a URL. A search term is a term, not a document.
+// The relay already cut these at 200 characters; this function had no cut at
+// all, so the URL became two megabytes long and the request was refused
+// before it was sent.
+//
+// `relay/lib/text-caps.mjs` carries the same rules for the relay. The two
+// runtimes cannot share an import, so the two copies must agree — and
+// `relay/tests/text-caps.test.mjs` checks that they do.
+const MAX_ROW_STRING = 2000;
+const MAX_SEARCH_TERM = 200;
+
+/**
+ * Cut a string to a length, and say how long it was.
+ *
+ * The marker is not decoration: a reader who sees a cut string must be able
+ * to tell that it was cut, or a 2,000-character prefix of a 935,775-character
+ * error reads exactly like a complete error.
+ */
+function boundText(value: any, max: number = MAX_ROW_STRING): any {
+  if (typeof value !== 'string' || value.length <= max) return value;
+  return `${value.slice(0, max)}… [truncated: ${value.length} chars total]`;
+}
+
+/**
+ * Cut every string inside a value, however deeply nested.
+ *
+ * Used at the storage boundary, so a field nobody thought about is still
+ * bounded.
+ */
+function boundForStorage(value: any, max: number = MAX_ROW_STRING): any {
+  if (typeof value === 'string') return boundText(value, max);
+  if (Array.isArray(value)) return value.map((v) => boundForStorage(v, max));
+  if (value && typeof value === 'object') {
+    const out: any = {};
+    for (const [k, v] of Object.entries(value)) out[k] = boundForStorage(v, max);
+    return out;
+  }
+  return value;
+}
+
+/**
+ * Cut a search term to something that can travel in a URL.
+ *
+ * Returns the facts about the cut as well as the term, so the caller can
+ * record that a cut happened rather than quietly searching for something the
+ * caller did not ask for.
+ */
+function boundSearchTerm(value: any, max: number = MAX_SEARCH_TERM) {
+  const text = typeof value === 'string' ? value : '';
+  const original_length = text.length;
+  if (original_length <= max) {
+    return { term: text, truncated: false, original_length };
+  }
+  return { term: text.slice(0, max), truncated: true, original_length };
 }
 
 function extractLastUserMessage(messages: any[]): string {
@@ -2602,7 +2881,7 @@ async function logToolActivity(
         'Authorization': 'Bearer local-anon-key',
         'apikey': 'local-anon-key',
       },
-      body: JSON.stringify({
+      body: JSON.stringify(boundForStorage({
         activity_type: activityType,
         title,
         description: details?.description || `${toolName} ${status}`,
@@ -2612,11 +2891,20 @@ async function logToolActivity(
         metadata: {
           tool_name: toolName,
           session_id: sessionId,
+          // Which function ran the tool.
+          //
+          // The Activity Intelligence panel attributes an error to a file, and
+          // a tool failure that happened here has no HTTP route to point at.
+          // Without this the panel could say "search_knowledge failed" and
+          // nothing else — no file, no version, no line. Every error the
+          // panel could not attribute was an error raised inside an edge
+          // function, and 235 of them landed in one day.
+          edge_function: FUNCTION_NAME,
           result: details?.result,
           error: details?.error,
           duration_ms: details?.durationMs,
         }
-      }),
+      })),
     });
   } catch (e) {
     // Don't let logging failures break tool execution
@@ -2815,7 +3103,10 @@ async function executeRealToolCall(
           .eq('is_active', true);
         
         if (query) {
-          dbQuery = dbQuery.or(`name.ilike.%${query}%,description.ilike.%${query}%`);
+          // The filter rides in a query string, so it is cut to a length that
+          // can travel in one — same rule as every other term in this file.
+          const { term: boundedQuery } = boundSearchTerm(query);
+          dbQuery = dbQuery.or(`name.ilike.%${boundedQuery}%,description.ilike.%${boundedQuery}%`);
         }
         
         if (category) {
@@ -2927,8 +3218,21 @@ async function executeRealToolCall(
       }
       
     } else if (name === 'search_knowledge') {
-      const search_term = parsedArgs.search_term || parsedArgs.query;
+      const rawSearchTerm = parsedArgs.search_term || parsedArgs.query;
       const limit = parsedArgs.limit || 10;
+
+      // The term is cut to a length that can travel in a URL.
+      //
+      // This is the fault the whole activity feed was made of. An agent
+      // searched with a whole conversation as the term; the URL became
+      // 935,775 characters long; `fetch` refused it ("Invalid URL"); and the
+      // refusal — which IS the URL — was written to the activity feed and to
+      // the function-usage log verbatim. 93 rows a day, 55 MB a day, and the
+      // activity feed reached 4.3 GB.
+      //
+      // The cut is recorded, so a partial search is never read as a whole one.
+      const { term: search_term, truncated: searchTermTruncated, original_length: searchTermLength } =
+        boundSearchTerm(rawSearchTerm);
       
       // Use direct fetch to local-sb REST API with local anon key
       const restUrl = `${SUPABASE_LOCAL_URL}/rest/v1/knowledge_entities`;
@@ -2953,7 +3257,12 @@ async function executeRealToolCall(
         throw new Error(`search_knowledge HTTP ${response.status}: ${errText.slice(0, 200)}`);
       }
       const knowledge = await response.json();
-      result = { success: true, knowledge: knowledge || [] };
+      result = {
+        success: true,
+        knowledge: knowledge || [],
+        search_term_truncated: searchTermTruncated,
+        search_term_length: searchTermLength,
+      };
       
     } else if (name === 'store_knowledge') {
       const knowledgeData = {
@@ -3003,7 +3312,10 @@ async function executeRealToolCall(
       if (entity_id) {
         recallUrl += `&id=eq.${entity_id}`;
       } else if (entityName) {
-        const encoded = encodeURIComponent(entityName);
+        // Same rule as search_knowledge: the name rides in a URL, so it is cut
+        // to a length that can travel in one.
+        const { term: boundedEntityName } = boundSearchTerm(entityName);
+        const encoded = encodeURIComponent(boundedEntityName);
         recallUrl += `&name=ilike.%25${encoded}%25`;
       }
       recallUrl += '&limit=5';
@@ -3306,9 +3618,15 @@ async function executeRealToolCall(
     };
     
   } catch (error: any) {
-    error_message = error?.message || String(error);
-    return { 
-      success: false, 
+    // Bounded HERE, at the point the error is born, not only at the point it
+    // is stored. An error message is the text of what went wrong; when what
+    // went wrong was "the URL was too long to send", that text IS the URL.
+    // Bounding it here keeps the 935 KB string out of the return value, out
+    // of the log rows, and out of the synthesis prompt that is built from
+    // this result and handed back to the model.
+    error_message = boundText(error?.message || String(error));
+    return {
+      success: false,
       error: error_message,
       tool_name: name,
       timestamp,
@@ -3316,7 +3634,7 @@ async function executeRealToolCall(
     };
   } finally {
     const duration = Math.round(performance.now() - startTime);
-    const parsedToolArgs = parseToolArguments(args);
+    const parsedToolArgs = boundForStorage(parseToolArguments(args));
     
     const logEntry = {
       function_name: name,
@@ -3353,12 +3671,15 @@ async function executeRealToolCall(
       title: `🔧 ${executiveName} executed ${name}`,
       description: `${executiveName} executed tool: ${name}`,
       status: success ? 'completed' : 'error',
-      metadata: { 
-        name, 
-        args: parsedToolArgs, 
+      metadata: {
+        name,
+        args: parsedToolArgs,
         result: success ? 'ok' : error_message,
         duration_ms: duration,
-        ip_address: ipAddress
+        ip_address: ipAddress,
+        // Which function ran the tool — so the panel can name the file and
+        // the version that threw, even though no HTTP route was involved.
+        edge_function: FUNCTION_NAME,
       },
       function_name: name,
       created_at: new Date().toISOString()
@@ -4331,6 +4652,39 @@ interface CascadeResult {
   error?: string;
 }
 
+/**
+ * Compact prompt for local Ollama.
+ *
+ * The agent system prompt is tens of thousands of characters, and gemma3:1b
+ * runs on this CPU. Sending the whole thing plus an 8k tool manifest made the
+ * last-resort call exceed its deadline and return the canned "technical
+ * difficulties" reply (measured 2026-10-22). A short system line plus the
+ * recent turns answers in tens of seconds, which is the point of a last
+ * resort: a real answer, not a timeout.
+ */
+function compactLocalMessages(messages: any[]): any[] {
+  const textOfMsg = (m: any) => typeof m.content === 'string'
+    ? m.content
+    : (Array.isArray(m.content)
+      ? m.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n')
+      : '');
+  const recent = messages.filter(m => m.role !== 'system').slice(-4);
+  const out: any[] = [{
+    role: 'system',
+    content: 'You are a helpful, honest assistant. Answer the user concisely. Do not claim to have fetched live data you do not have.',
+  }];
+  for (const m of recent) {
+    const content = textOfMsg(m);
+    if (!content) continue;
+    out.push({ role: m.role, content: content.slice(0, 2000) });
+  }
+  if (!out.some(m => m.role === 'user')) {
+    const lastUser = [...messages].reverse().find(m => m.role === 'user');
+    if (lastUser) out.push({ role: 'user', content: textOfMsg(lastUser).slice(0, 2000) });
+  }
+  return out;
+}
+
 class EnhancedProviderCascade {
   private attempts: any[] = [];
   
@@ -4548,13 +4902,18 @@ class EnhancedProviderCascade {
         case 'gemma_4_31b_free':
         case 'qwen3_8_27b_free':
         case 'poolside_laguna_s':
+        case 'laguna_xs_free':
         case 'cohere_north_mini_code':
         case 'apodex_1_1_mini':
         case 'dots_3_note_preview':
+        case 'flint_v1_free':
+        case 'xingchen_4_free':
         case 'liquid_lfm_2_5_2_6b':
         case 'nemotron_3_nano_free':
         case 'nemotron_3_ultra_free':
         case 'nemotron_3_5_free':
+        case 'nemotron_3_5_super_vl':
+        case 'openrouter_free_router':
           result = await this.callOpenRouterFree(provider, config.models[0], messages, tools, controller);
           break;
         case 'opencode_zen_free':
@@ -4580,6 +4939,17 @@ class EnhancedProviderCascade {
           break;
         case 'ollama_hermes':
           result = await this.callOllama(messages, tools, controller, 'ollama_hermes');
+          break;
+        case 'ollama_ttcr_gemma4':
+        case 'ollama_ttcr_gpt_oss_120b':
+        case 'ollama_ttcr_gpt_oss_20b':
+        case 'ollama_ttcr_nemotron_nano':
+        case 'ollama_ttcr_nemotron_super':
+        case 'ollama_ttcr_nemotron_ultra':
+        case 'ollama_ttcr_beam':
+          // The TTCR account holds these models. callOllama tries TTCR first
+          // for these provider names, then the other accounts as a last check.
+          result = await this.callOllama(messages, tools, controller, provider, config.models[0]);
           break;
         case 'ollama_local':
           result = await this.callOllamaLocal(messages, tools, controller);
@@ -4609,19 +4979,27 @@ class EnhancedProviderCascade {
     }
   }
   
-  private async callOllama(messages: any[], tools: any[], controller: AbortController, providerName: 'ollama' | 'ollama_hermes' | 'ollama_minimax_m3_1_flash' = 'ollama', modelOverride?: string): Promise<CascadeResult> {
-    // Cascade through all configured Ollama keys (primary, hermes, 3rd) —
-    // mirrors the relay's tryOllamaCloud() in relay/tools/ollama-chat.mjs so
-    // the suite chat uses the SAME Ollama Cloud sources and fallbacks as the
-    // relay fleet chat. Each key is a separate weekly quota; try them in order.
+  private async callOllama(messages: any[], tools: any[], controller: AbortController, providerName: 'ollama' | 'ollama_hermes' | 'ollama_minimax_m3_1_flash' | 'ollama_ttcr_gemma4' | 'ollama_ttcr_gpt_oss_120b' | 'ollama_ttcr_gpt_oss_20b' | 'ollama_ttcr_nemotron_nano' | 'ollama_ttcr_nemotron_super' | 'ollama_ttcr_nemotron_ultra' | 'ollama_ttcr_beam' = 'ollama', modelOverride?: string): Promise<CascadeResult> {
+    // Cascade through all configured Ollama keys (primary, xmrt, hermes, 3rd,
+    // ttcr) — mirrors the relay's tryOllamaCloud() in
+    // relay/tools/ollama-chat.mjs so the suite chat uses the SAME Ollama
+    // Cloud sources and fallbacks as the relay fleet chat. Each key is a
+    // separate weekly quota; try them in order.
     const keys = [
       { key: OLLAMA_API_KEY, label: 'primary' },
       { key: OLLAMA_XMRT_API_KEY, label: 'xmrt' },
       { key: OLLAMA_HERMES_API_KEY, label: 'hermes' },
       { key: OLLAMA_3RD_API_KEY, label: '3rd' },
+      { key: TTCR_OLLAMA_API_KEY, label: 'ttcr' },
     ].filter(k => k.key);
     if (keys.length === 0) {
       return { success: false, provider: providerName, error: 'No OLLAMA_API_KEY configured' };
+    }
+    // The TTCR models are served by the TTCR account. The first three keys
+    // answer 429/402 for them, so probe TTCR first for those providers instead
+    // of spending three round-trips per model discovering that.
+    if (providerName.startsWith('ollama_ttcr')) {
+      keys.sort((a, b) => (a.label === 'ttcr' ? -1 : b.label === 'ttcr' ? 1 : 0));
     }
 
     // Normalize messages (strip non-text content parts for Ollama API)
@@ -4657,6 +5035,17 @@ class EnhancedProviderCascade {
           body.tool_choice = 'auto';
         }
 
+        // Per-key budget, separate from the provider's total budget. The
+        // controller used to be shared by every key: if the first account
+        // hung, it aborted at the provider timeout and every later account
+        // was already cancelled, so the cascade skipped the healthy key and
+        // moved to a slower provider (measured: an 80s reply that MiniMax on
+        // the primary key could answer in 1s). A fresh 20s signal per key lets
+        // the next account actually try.
+        const perKeySignal = AbortSignal.any([
+          controller.signal,
+          AbortSignal.timeout(Number(Deno.env.get('OLLAMA_KEY_TIMEOUT_MS')) || 20000),
+        ]);
         const response = await fetch('https://ollama.com/v1/chat/completions', {
           method: 'POST',
           headers: {
@@ -4664,7 +5053,7 @@ class EnhancedProviderCascade {
             'Content-Type': 'application/json'
           },
           body: JSON.stringify(body),
-          signal: controller.signal
+          signal: perKeySignal
         });
 
         if (!response.ok) {
@@ -4734,10 +5123,15 @@ class EnhancedProviderCascade {
   private async callOllamaLocal(messages: any[], tools: any[], controller: AbortController): Promise<CascadeResult> {
     const localUrl = AI_PROVIDERS_CONFIG.ollama_local?.endpoint || 'http://localhost:11434/v1/chat/completions';
 
-    // Detect model: use OLLAMA_LOCAL_MODEL env override if set, otherwise
-    // try /api/tags to find the best available model.
-    let model = OLLAMA_LOCAL_MODEL || 'llama3.2';
-    if (!OLLAMA_LOCAL_MODEL) {
+    // Detect model: use OLLAMA_LOCAL_MODEL env override if set, then the
+    // provider's configured model, then /api/tags. The configured model is
+    // gemma3:1b — the one measured to answer on this 6GB box. The old
+    // auto-detect preferred gemma4, which is a *cloud* tag here and is not the
+    // local model we want the last resort to load.
+    let model = OLLAMA_LOCAL_MODEL
+      || AI_PROVIDERS_CONFIG.ollama_local?.models?.[0]
+      || 'gemma3:1b';
+    if (!OLLAMA_LOCAL_MODEL && !AI_PROVIDERS_CONFIG.ollama_local?.models?.length) {
       try {
         const tagRes = await fetch(`${OLLAMA_LOCAL_HOST}/api/tags`, { signal: AbortSignal.timeout(3000) });
         if (tagRes.ok) {
@@ -4756,38 +5150,11 @@ class EnhancedProviderCascade {
       }
     }  // end OLLAMA_LOCAL_MODEL override guard
 
-    // Build messages with tool definitions injected into system prompt
-    const toolInjectedMessages = messages.map((msg: any) => {
-      if (msg.role === 'system' && tools.length > 0) {
-        // Append tool definitions as a text manifest
-        const toolDescriptions = tools.map((t: any, i: number) => {
-          const fn = t.function || t;
-          return `${i + 1}. ${fn.name}: ${fn.description || 'No description'}
-   Parameters: ${JSON.stringify(fn.parameters || {})}`;
-        }).join('\n\n');
-
-        const toolCallInstructions = `
-You have access to the following functions that you can call to retrieve live data or perform actions.
-
-FUNCTIONS:
-${toolDescriptions}
-
-To call a function, respond with a tool_code block like this:
-\`\`\`tool_code
-functionName({ "param1": "value1" })
-\`\`\`
-
-You may call MULTIPLE functions in a single response. After receiving the results, synthesize them into a natural answer.
-
-IMPORTANT: When the user asks about fleet state, mining data, system status, tasks, agents, browsing the web, sending emails, or any live/current data — you MUST use one of these functions to get the information. Do not guess or fabricate data. If a function returns an error, say so honestly.`;
-
-        return {
-          role: 'system',
-          content: msg.content + '\n\n' + toolCallInstructions
-        };
-      }
-      return msg;
-    });
+    // Last resort: a compact prompt, not the full agent system prompt. The
+    // previous version injected every tool definition and asked for 8k
+    // tokens; on gemma3:1b that exceeded the local deadline and the function
+    // returned the canned "technical difficulties" reply instead of an answer.
+    const localMessages = compactLocalMessages(messages);
 
     try {
       const response = await fetch(localUrl, {
@@ -4795,9 +5162,9 @@ IMPORTANT: When the user asks about fleet state, mining data, system status, tas
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model,
-          messages: toolInjectedMessages,
-          max_tokens: 8192,
-          temperature: 0.7,
+          messages: localMessages,
+          max_tokens: 1024,
+          temperature: 0.5,
           stream: false
         }),
         signal: controller.signal
@@ -5794,53 +6161,37 @@ async function callOllamaFallback(messages: any[], tools?: any[]): Promise<any> 
   try {
     console.log('Trying local Ollama fallback...');
 
-    let model = 'llama3.2';
-    try {
-      const tagRes = await fetch(`${OLLAMA_LOCAL_HOST}/api/tags`, { signal: AbortSignal.timeout(2000) });
-      if (tagRes.ok) {
-        const tagData = await tagRes.json();
-        const models = tagData.models || [];
-        const preferred = ['gemma4', 'gemma3', 'llama3.2', 'mistral', 'qwen2.5', 'deepseek'];
-        for (const p of preferred) {
-          const found = models.find((m: any) => m.name?.startsWith(p));
-          if (found) { model = found.name; break; }
+    let model = OLLAMA_LOCAL_MODEL
+      || AI_PROVIDERS_CONFIG.ollama_local?.models?.[0]
+      || 'gemma3:1b';
+    if (!OLLAMA_LOCAL_MODEL && !AI_PROVIDERS_CONFIG.ollama_local?.models?.length) {
+      try {
+        const tagRes = await fetch(`${OLLAMA_LOCAL_HOST}/api/tags`, { signal: AbortSignal.timeout(2000) });
+        if (tagRes.ok) {
+          const tagData = await tagRes.json();
+          const models = tagData.models || [];
+          const preferred = ['gemma3:1b', 'gemma3', 'llama3.2', 'mistral', 'qwen2.5', 'deepseek'];
+          for (const p of preferred) {
+            const found = models.find((m: any) => m.name?.startsWith(p));
+            if (found) { model = found.name; break; }
+          }
+          if (!model && models.length > 0) model = models[0].name;
         }
-        if (!model && models.length > 0) model = models[0].name;
-      }
-    } catch { /* host down */ }
+      } catch { /* host down */ }
+    }
 
-    // Inject tool definitions into system prompt if tools are provided
-    const toolInjectedMessages = messages.map((msg: any) => {
-      if (msg.role === 'system' && tools && tools.length > 0) {
-        const toolDescriptions = tools.map((t: any, i: number) => {
-          const fn = t.function || t;
-          return `${i + 1}. ${fn.name}: ${fn.description || 'No description'}
-   Parameters: ${JSON.stringify(fn.parameters || {})}`;
-        }).join('\n\n');
-
-        return {
-          role: 'system',
-          content: msg.content + `\n\nYou have access to the following functions:
-${toolDescriptions}
-
-To call a function, respond with a tool_code block like this:
-\`\`\`tool_code
-functionName({ "param1": "value1" })
-\`\`\`
-You may call MULTIPLE functions in a single response.`
-        };
-      }
-      return msg;
-    });
+    // Same compact prompt as callOllamaLocal. This is a second last-resort
+    // path; sending the full agent prompt here had the same timeout failure.
+    const localMessages = compactLocalMessages(messages);
 
     const response = await fetch(localUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model,
-        messages: toolInjectedMessages,
-        max_tokens: 4096,
-        temperature: 0.7,
+        messages: localMessages,
+        max_tokens: 1024,
+        temperature: 0.5,
         stream: false
       }),
       signal: AbortSignal.timeout(60000)
@@ -5870,13 +6221,17 @@ You may call MULTIPLE functions in a single response.`
   // Fall back to cloud Ollama Pro if local fails
   console.log('Local Ollama failed, trying Ollama Pro fallback...');
 
-  // Cascade through all configured Ollama keys (primary, hermes, 3rd) —
-  // mirrors the relay's tryOllamaCloud() so the suite uses the SAME sources.
+  // Cascade through all configured Ollama keys (primary, xmrt, hermes, 3rd,
+  // ttcr) — mirrors the relay's tryOllamaCloud() so the suite uses the SAME
+  // sources. The TTCR account is the one with free capacity for the
+  // non-MiniMax models; without it this fallback had nothing left to try
+  // when the first three accounts hit their weekly limits.
   const keys = [
     { key: OLLAMA_API_KEY, label: 'primary' },
     { key: OLLAMA_XMRT_API_KEY, label: 'xmrt' },
     { key: OLLAMA_HERMES_API_KEY, label: 'hermes' },
     { key: OLLAMA_3RD_API_KEY, label: '3rd' },
+    { key: TTCR_OLLAMA_API_KEY, label: 'ttcr' },
   ].filter(k => k.key);
   if (keys.length === 0) {
     console.warn('OLLAMA_API_KEY not configured');
@@ -5898,11 +6253,14 @@ You may call MULTIPLE functions in a single response.`
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          model: Deno.env.get('OLLAMA_MODEL') || 'minimax/minimax-m3:free',
+          // Plain Ollama model name. The old default was an OpenRouter slug
+          // (minimax/minimax-m3:free), which Ollama 404s.
+          model: Deno.env.get('OLLAMA_MODEL') || 'minimax-m3.1-flash',
           messages: cleanMessages,
           max_tokens: 4096,
           temperature: 0.7,
-          stream: false
+          stream: false,
+          ...((tools?.length || 0) > 0 ? { tools, tool_choice: 'auto' } : {})
         }),
         signal: AbortSignal.timeout(60000)
       });
@@ -5914,9 +6272,13 @@ You may call MULTIPLE functions in a single response.`
       }
 
       const data = await response.json();
-      const content = data.choices?.[0]?.message?.content || '';
+      const message = data.choices?.[0]?.message;
+      const content = message?.content || '';
+      const tool_calls = Array.isArray(message?.tool_calls) ? message.tool_calls : [];
 
-      if (!content) {
+      // A tool-call-only turn is a valid response. The old check treated it
+      // as empty and moved to the next key, discarding a real tool call.
+      if (!content && tool_calls.length === 0) {
         console.warn(`Ollama Pro fallback returned empty content (${label})`);
         continue; // try next key
       }
@@ -5924,9 +6286,9 @@ You may call MULTIPLE functions in a single response.`
       console.log('Ollama Pro fallback successful');
       return {
         content,
-        tool_calls: [],
+        tool_calls,
         provider: 'ollama-pro',
-        model: Deno.env.get('OLLAMA_MODEL') || 'minimax/minimax-m3:free'
+        model: Deno.env.get('OLLAMA_MODEL') || 'minimax-m3.1-flash'
       };
     } catch (error: any) {
       console.warn(`Ollama Pro fallback failed (${label}): ` + (error.message || error));

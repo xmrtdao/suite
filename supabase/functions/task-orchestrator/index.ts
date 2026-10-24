@@ -4,6 +4,29 @@ import { startUsageTracking } from "../_shared/functionUsageLogger.ts";
 
 const FUNCTION_NAME = 'task-orchestrator';
 
+/**
+ * A short, stable hash of a string.
+ *
+ * Used to make a dedupe key out of a blocking reason: the key has to change
+ * when the reason changes (that is new information and has to be said
+ * again) and to stay the same when it does not (that is the same information
+ * and must not be said twice). The reason itself is too long for a key, and
+ * a hash is enough — this is a de-duplication key, not a security boundary.
+ *
+ * FNV-1a, 32-bit. Collisions between two reasons on the SAME task would
+ * mean one report is suppressed; the task id is part of the key too, so a
+ * collision would have to be between two reasons of one task.
+ */
+function hashText(text: string): string {
+  let h = 0x811c9dc5;
+  const s = String(text ?? '');
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, '0');
+}
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -165,6 +188,18 @@ serve(async (req) => {
         .select('*')
         .eq('status', 'BLOCKED');
 
+      // GitHub connectivity is tested ONLY when a block actually mentions
+      // GitHub.
+      //
+      // It used to be tested on every cycle, for every blocker, whether or
+      // not one of them had anything to do with GitHub. On 2026-10-23 all 54
+      // blocked tasks had a NULL blocking_reason, so the answer the test
+      // could give was always "not applicable" — and it was still paying for
+      // an outbound HTTPS round trip 96 times a day, inside a function with a
+      // 60-second ceiling. This job timed out 40 times a day at 60,012ms.
+      const needsGithub = (blockedTasks || []).some((t: any) =>
+        String(t.blocking_reason || '').toLowerCase().includes('github'));
+
       const githubToken = Deno.env.get('GITHUB_TOKEN');
       const githubOwner = Deno.env.get('GITHUB_OWNER');
       const githubRepo = Deno.env.get('GITHUB_REPO');
@@ -172,7 +207,7 @@ serve(async (req) => {
       const hasGitHubAccess = githubToken && githubOwner && githubRepo;
 
       let githubConnectionValid = false;
-      if (hasGitHubAccess) {
+      if (needsGithub && hasGitHubAccess) {
         try {
           const testResponse = await fetch(`https://api.github.com/repos/${githubOwner}/${githubRepo}`, {
             headers: {
@@ -186,7 +221,32 @@ serve(async (req) => {
         }
       }
 
+      // Which of these blockers have already been reported?
+      //
+      // Every run used to write a fresh row for every blocked task, so the
+      // same 54 tasks produced 3,634 activity rows a day — 96 copies of each
+      // — and the feed's "warnings" were 20% of every window the panel
+      // showed. None of the 96 copies said anything the first one had not.
+      //
+      // So a blocker is reported once per (task, reason). The reason is part
+      // of the key because a reason that CHANGED is new information and has
+      // to be said again. The rows carry a dedupe_key, and the table has a
+      // unique index on it, so a second run cannot write a duplicate even if
+      // this check is wrong.
+      const REPORT_ONCE_PERIOD_MS = 24 * 60 * 60 * 1000;
+      const cutoff = new Date(Date.now() - REPORT_ONCE_PERIOD_MS).toISOString();
+      const { data: alreadySaid } = await supabase
+        .schema('public')
+        .from('eliza_activity_log')
+        .select('dedupe_key')
+        .eq('activity_type', 'task_blocked')
+        .gte('created_at', cutoff);
+      const saidAlready = new Set(
+        (alreadySaid || []).map((r: any) => r.dedupe_key).filter(Boolean) as string[]
+      );
+
       const detailedBlockers = [];
+      const rowsToInsert: any[] = [];
       for (const task of blockedTasks || []) {
         let specificReason = task.blocking_reason || 'Unknown';
         let canClear = false;
@@ -220,19 +280,27 @@ serve(async (req) => {
           github_status: githubConnectionValid ? 'CONNECTED' : 'DISCONNECTED'
         });
 
-        await supabase.schema('public').from('eliza_activity_log').insert({
-          activity_type: 'task_blocked',
-          title: `⚠️ ${canClear ? 'FALSE BLOCK' : 'Task Blocked'}: ${task.title}`,
-          description: `Specific Reason: ${specificReason}\nClear Action: ${clearAction}`,
-          metadata: {
+        const dedupeKey = `task_blocked:${task.id}:${hashText(specificReason)}`;
+        if (!saidAlready.has(dedupeKey)) {
+          rowsToInsert.push({
+            activity_type: 'task_blocked',
+            title: `⚠️ ${canClear ? 'FALSE BLOCK' : 'Task Blocked'}: ${task.title}`,
+            description: `Specific Reason: ${specificReason}\nClear Action: ${clearAction}`,
+            // The task id is on the row itself, not only inside the metadata,
+            // so the (task_id, created_at) index can find it and the panel
+            // can filter by task.
             task_id: task.id,
-            can_auto_clear: canClear,
-            clear_action: clearAction,
-            github_connected: githubConnectionValid,
-            original_reason: task.blocking_reason
-          },
-          status: canClear ? 'info' : 'warning'
-        });
+            dedupe_key: dedupeKey,
+            metadata: {
+              task_id: task.id,
+              can_auto_clear: canClear,
+              clear_action: clearAction,
+              github_connected: githubConnectionValid,
+              original_reason: task.blocking_reason
+            },
+            status: canClear ? 'info' : 'warning'
+          });
+        }
 
         if (canClear) {
           await supabase
@@ -247,14 +315,34 @@ serve(async (req) => {
         }
       }
 
+      // One insert for the whole batch, not one per task. 54 round trips
+      // inside a function with a 60-second ceiling is how this job started
+      // timing out.
+      if (rowsToInsert.length > 0) {
+        const { error: insertError } = await supabase
+          .schema('public')
+          .from('eliza_activity_log')
+          .insert(rowsToInsert);
+        if (insertError) {
+          console.error('Failed to write blocker reports:', insertError.message);
+        } else {
+          console.log(`📝 Reported ${rowsToInsert.length} blocker(s); ${saidAlready.size} already said.`);
+        }
+      } else {
+        console.log(`📝 No new blockers to report (${saidAlready.size} already said).`);
+      }
+
       return {
         success: true,
         blocked_count: blockedTasks?.length || 0,
+        reported_now: rowsToInsert.length,
+        already_reported: saidAlready.size,
         auto_cleared: detailedBlockers.filter(t => t.can_auto_clear).length,
         tasks: detailedBlockers,
         github_status: {
           has_credentials: hasGitHubAccess,
-          connection_valid: githubConnectionValid
+          connection_valid: githubConnectionValid,
+          tested: needsGithub && !!hasGitHubAccess
         }
       };
     };
