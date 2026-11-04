@@ -3346,10 +3346,11 @@ async function executeRealToolCall(
       };
       
     } else if (name === 'store_knowledge') {
+      const knowledgeName = parsedArgs.name || parsedArgs.entity_name || parsedArgs.title || 'unnamed';
       const knowledgeData = {
-        name: parsedArgs.name || parsedArgs.entity_name,
+        name: knowledgeName,
         entity: {
-          name: parsedArgs.name || parsedArgs.entity_name,
+          name: knowledgeName,
           description: parsedArgs.description || '',
           content: parsedArgs.content || '',
           type: parsedArgs.type || 'general',

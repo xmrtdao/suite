@@ -394,13 +394,25 @@ const ChatMessage = React.memo(({ message }: { message: UnifiedMessage }) => {
         </div>
       )}
 
+      {message.sender === 'assistant' && message.isCouncilDeliberation && message.content && (
+        <div className="max-w-[80%] sm:max-w-[75%]">
+          <div className="group p-3 rounded-xl bg-gray-50 text-gray-900 rounded-bl-sm border border-gray-300">
+            <div className="text-sm leading-relaxed prose prose-sm max-w-none text-gray-900 prose-headings:text-gray-900 prose-p:text-gray-900 prose-strong:text-gray-900 prose-li:text-gray-900 prose-code:text-gray-900 prose-a:text-blue-700">
+              <ReactMarkdown components={markdownComponents}>
+                {message.content}
+              </ReactMarkdown>
+            </div>
+          </div>
+        </div>
+      )}
+
       {message.sender === 'assistant' && message.reasoning && message.reasoning.length > 0 && (
         <div className="max-w-[85%]">
           <ReasoningSteps steps={message.reasoning} />
         </div>
       )}
 
-      {!message.isCouncilDeliberation && (
+      {!message.isCouncilDeliberation && message.content && (
         <div className="max-w-[80%] sm:max-w-[75%]">
           <div
             className={`group p-3 rounded-xl ${message.sender === 'user'
@@ -1962,42 +1974,8 @@ const [messages, setMessages] = useState<UnifiedMessage[]>([]);
       console.log('Conversation persistence error:', error);
     }
 
-    // ⚡ Office Clerk — deterministic first responder (zero-AI, offline-capable).
-    // The relay's clerk router matches the message against its wired intent
-    // table (status, tasks, mining, resources, remember/recall, aside, …).
-    // A confident match renders instantly and skips the cloud cascade — this
-    // is what keeps the chat useful with no internet. On a miss we keep the
-    // clerk's offline menu and surface it only if Eliza also fails below.
+    // Office Clerk endpoint removed (2026-11-01). No client-side call to /api/clerk/chat.
     let clerkOfflineMenu: string | null = null;
-    if (currentAttachments.length === 0) {
-      try {
-        const clerkRes = await fetch('/api/clerk/chat', {
-          method: 'POST',
-          headers: relayAuthHeaders({ 'Content-Type': 'application/json' }),
-          // l1:false keeps this call millisecond-fast (deterministic table
-          // only). The slow local-model path is reserved for when the cloud
-          // cascade fails — see the catch block below.
-          body: JSON.stringify({ message: trimmedInput, l1: false }),
-          signal: AbortSignal.timeout(8000),
-        });
-        if (clerkRes.ok) {
-          const clerkOut = await clerkRes.json();
-          if (clerkOut && !clerkOut.miss && clerkOut.text) {
-            const clerkMessage: UnifiedMessage = {
-              id: `clerk-${Date.now()}`,
-              content: clerkOut.text,
-              sender: 'assistant',
-              timestamp: new Date(),
-              provenance: clerkOut.provenance === 'local' ? 'local' : 'deterministic',
-            };
-            setMessages(prev => [...prev, clerkMessage]);
-            setIsProcessing(false);
-            return;
-          }
-          clerkOfflineMenu = clerkOut?.text || null;
-        }
-      } catch { /* relay unreachable — Eliza path below handles it */ }
-    }
 
     try {
       console.log('💬 Starting message processing:', messageText);
@@ -2359,32 +2337,7 @@ const [messages, setMessages] = useState<UnifiedMessage[]>([]);
     } catch (error) {
       console.error('❌ Chat error:', error);
 
-      // 🏢 Cloud cascade failed — give the Office Clerk's tiny local model a
-      // shot before showing an error. Slow (CPU inference, up to ~75s) but
-      // fully offline, which is exactly the situation we're in when the
-      // cascade is unreachable.
-      try {
-        const l1Res = await fetch('/api/clerk/chat', {
-          method: 'POST',
-          headers: relayAuthHeaders({ 'Content-Type': 'application/json' }),
-          body: JSON.stringify({ message: trimmedInput, l1: true }),
-          signal: AbortSignal.timeout(75000),
-        });
-        if (l1Res.ok) {
-          const l1Out = await l1Res.json();
-          if (l1Out && !l1Out.miss && l1Out.text) {
-            const l1Message: UnifiedMessage = {
-              id: `clerk-l1-${Date.now()}`,
-              content: l1Out.text,
-              sender: 'assistant',
-              timestamp: new Date(),
-              provenance: l1Out.provenance === 'local' ? 'local' : 'deterministic',
-            };
-            setMessages(prev => [...prev, l1Message]);
-            return;
-          }
-        }
-      } catch { /* local model also unavailable — fall through to the error */ }
+      // Office Clerk endpoint removed (2026-11-01); no /api/clerk/chat fallback.
 
       // Import intelligent error handler
       const { IntelligentErrorHandler } = await import('@/services/intelligentErrorHandler');
