@@ -199,6 +199,28 @@ export class UnifiedElizaService {
     return null;
   }
 
+  // ── Response Cleaning ──────────────────────────────────────────────────────
+  // Strip verbose thinking, preamble, and tool-syntax from LLM responses
+  // so that internal "thinking" does not leak into the UI.
+  private static cleanResponseContent(content: string): string {
+    if (!content) return '';
+    let clean = content;
+    // 1. Remove thinking-like blocks: "I'll analyze", "Here's my reasoning", etc.
+    clean = clean.replace(/^(Let me analyze|I('ll| will) (analyze|break down|work through|start by|check on|look into|need to|should|can |have |could )|Here('s| is) (my|the) (analysis|reasoning|breakdown|summary|verdict)|We need to|I need to|The user|I don't have a tool|I could use|Alternatively|Let me do that|I'll call|I have the).*?(?=\n[A-Z])/ims, '');
+    // 2. Remove internal reasoning patterns: "I have a tool X", "I don't have a tool", etc.
+    clean = clean.replace(/I (don't have|do not have|have|could use|can use|will call|have the)[^\n.]*\n/gi, '');
+    // 3. Collapse "Oh wait", "Actually", "Hmm", "Well", "So", "Okay", "Alright" preamble words
+    clean = clean.replace(/^(Oh wait|Actually|Hmm|Well|So|Okay|Alright)[,\s]+/gim, '');
+    // 4. Remove tool/syntax artifacts: **tool_name**: {args}
+    clean = clean
+      .replace(/\*\*[a-z_]+\*\*:\s*\{[^}]*\}/gs, '')
+      .replace(/\*\*[a-z_]+\*\*:\s*<!DOCTYPE[^>]*>[^]*?(?=\n\*\*|$)/g, '')
+      .replace(/^\*\*[a-z_]+\*\*:\s*.*$/gm, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+    return clean;
+  }
+
   /**
    * Convert a browser File object to base64 string (without data: prefix).
    */
@@ -360,7 +382,7 @@ export class UnifiedElizaService {
     // Ensure we have a valid array
     const safeExecutives = Array.isArray(healthyExecutives) && healthyExecutives.length > 0
       ? healthyExecutives
-      : ['ai-chat', 'vertex-ai-chat', 'deepseek-chat', 'gemini-chat'];
+      : ['ai-chat', 'deepseek-chat', 'gemini-chat'];
 
     console.log('🔒 Safe executives:', safeExecutives.length, 'available');
 
@@ -438,8 +460,10 @@ export class UnifiedElizaService {
           continue;
         }
 
-        // CRITICAL FIX: Extract content properly
-        const content = this.extractResponseContent(data);
+        // CRITICAL FIX: Extract and clean content
+        const rawContent = this.extractResponseContent(data);
+        const content = this.cleanResponseContent(rawContent || '');
+
 
         if (content && content.length > 0) {
           console.log(`✅ ${executive} SUCCESS! Extracted content:`, content.substring(0, 100) + '...');
@@ -625,7 +649,7 @@ export class UnifiedElizaService {
       // They answer as their specific persona and should NEVER be Eliza's voice.
       const executiveFallbacks = await this.getHealthyExecutives();
       const elizaFirstRouting = hasVisualOrAttachmentInput
-        ? ['vertex-ai-chat', 'ai-chat', ...executiveFallbacks.filter(e => e !== 'ai-chat' && e !== 'vertex-ai-chat')]
+        ? ['ai-chat', ...executiveFallbacks.filter(e => e !== 'ai-chat')]
         : ['ai-chat', ...executiveFallbacks.filter(e => e !== 'ai-chat')];
       console.log('💚 Routing order (Eliza first):', elizaFirstRouting);
 

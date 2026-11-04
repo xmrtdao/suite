@@ -189,14 +189,6 @@ const executiveButtonSets: Record<string, {
       { label: "Coordinate with the council", emoji: "👥" },
       { label: "Help me plan this out", emoji: "📋" }
     ]
-  },
-  'lovable-chat': { // Default Eliza
-    feedbackButton: { label: "Good job, please proceed", emoji: "✅" },
-    contextualButtons: [
-      { label: "Tell me more", emoji: "🔄" },
-      { label: "What else can you help with?", emoji: "❓" },
-      { label: "Show me system status", emoji: "📊" }
-    ]
   }
 };
 
@@ -343,8 +335,8 @@ const getContextualButtons = (
   // After AI response - build dynamic buttons
   const buttons: ButtonConfig[] = [];
   
-  // Get executive config or default to lovable-chat
-  const execConfig = executiveButtonSets[lastExecutive || 'lovable-chat'] || executiveButtonSets['lovable-chat'];
+  // Get executive config or default to ai-chat
+  const execConfig = executiveButtonSets[lastExecutive || 'ai-chat'] || executiveButtonSets['vercel-ai-chat'] || executiveButtonSets['deepseek-chat'];
   
   // Check if AI is offering to do something
   const hasActionIntent = detectActionIntent(lastMessageContent || '');

@@ -23,44 +23,36 @@ export interface EdgeFunctionCapability {
 
 export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
   {
-    name: 'lovable-chat',
-    url: `${EF_BASE}lovable-chat`,
-    description: '✅ PRIMARY AI - Model-agnostic chat via Lovable AI Gateway (Gemini 2.5 Flash default, Kimi K2 OpenRouter fallback, supports OpenAI GPT-5)',
+    name: 'ai-chat',
+    url: `${EF_BASE}ai-chat`,
+    description: '✅ PRIMARY AI - Multiple provider/model cascade (OpenRouter, Ollama, Vertex, OpenAI) — inference via the open routing layer, not a single gateway',
     capabilities: ['Advanced AI chat', 'Context awareness', 'Multi-model support', 'Memory integration', 'Tool calling', 'Multi-step workflows'],
     category: 'ai',
-    example_use: 'Main intelligent chat endpoint with full context and memory - use this for all AI chat needs'
-  },
-  {
-    name: 'kimi-chat',
-    url: `${EF_BASE}kimi-chat`,
-    description: '✅ FALLBACK AI - Model-agnostic chat via Kimi k2 AI Gateway (OpenRouter API)',
-    capabilities: ['Advanced AI chat', 'Context awareness', 'Multi-model support', 'Memory integration', 'Tool calling', 'Multi-step workflows'],
-    category: 'ai',
-    example_use: 'Fallback intelligent chat endpoint with full context and memory - use this for all AI chat needs when primary fails'
+    example_use: 'Main intelligent chat endpoint with full context and memory — use this for all AI chat needs via the inference cascade'
   },
   {
     name: 'gemini-chat',
     url: `${EF_BASE}gemini-chat`,
-    description: '⚠️ LEGACY - Use lovable-chat instead. Kept for backward compatibility.',
+    description: '⚠️ LEGACY - Deprecated endpoint. Use ai-chat instead.',
     capabilities: ['AI conversation', 'Context-aware responses', 'Memory integration'],
     category: 'ai',
-    example_use: 'DEPRECATED: Use lovable-chat with model parameter instead'
+    example_use: 'DEPRECATED: Use ai-chat instead.'
   },
   {
     name: 'openai-chat',
     url: `${EF_BASE}openai-chat`,
-    description: '⚠️ LEGACY - Use lovable-chat instead. Kept for backward compatibility.',
+    description: '⚠️ LEGACY - Deprecated endpoint. Use ai-chat instead.',
     capabilities: ['AI conversation', 'OpenAI GPT-4/GPT-5', 'Fallback AI'],
     category: 'ai',
-    example_use: 'DEPRECATED: Use lovable-chat with model parameter instead'
+    example_use: 'DEPRECATED: Use ai-chat instead.'
   },
   {
     name: 'deepseek-chat',
     url: `${EF_BASE}deepseek-chat`,
-    description: '⚠️ LEGACY - Use lovable-chat instead. Kept for backward compatibility.',
+    description: '⚠️ LEGACY - Deprecated endpoint. Use ai-chat instead.',
     capabilities: ['Code generation', 'Technical reasoning', 'Code fixing'],
     category: 'ai',
-    example_use: 'DEPRECATED: Use lovable-chat with model parameter instead'
+    example_use: 'DEPRECATED: Use ai-chat instead.'
   },
   {
     name: 'xmrt-mcp-server',
@@ -503,7 +495,7 @@ export const EDGE_FUNCTIONS_REGISTRY: EdgeFunctionCapability[] = [
     description: '📈 Function Version Analytics - Compare versions',
     capabilities: ['Version comparison', 'Regression detection', 'Performance metrics'],
     category: 'monitoring',
-    example_use: '{"function_name":"lovable-chat","compare_versions":true}'
+    example_use: '{"function_name":"ai-chat","compare_versions":true}'
   },
   {
     name: 'sync-function-logs',
