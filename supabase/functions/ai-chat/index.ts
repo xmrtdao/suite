@@ -105,7 +105,7 @@ async function debugLog(event: string, data: Record<string, unknown> = {}) {
 // These used to hard-cap uploaded document text at 5,000 / 4,000 / 800 chars,
 // which silently condensed full contracts (e.g. leases) before they reached
 // downstream analysis — stripping clauses and jurisdiction signals. Raised to
-// generous high caps so full documents flow through. 200,000 chars ≈ a large
+// generous high caps so full documents flow through. 200,000 chars â‰ˆ a large
 // contract; guards Deno memory/token budgets without truncating real docs.
 const MAX_ATTACHMENT_PREVIEW_CHARS = 200000;
 const MAX_ATTACHMENT_INGEST_CHARS = 200000;
@@ -201,7 +201,11 @@ function announceFleetPresence(): void {
     }),
   }, 5000).catch(() => { /* presence is best-effort */ });
 }
-async function callRelayTool(tool: string, args: Record<string, unknown> = {}): Promise<unknown | null> {
+async function callRelayTool(
+  tool: string,
+  args: Record<string, unknown> = {},
+  timeoutMs: number = RELAY_TOOL_TIMEOUT_MS,
+): Promise<unknown | null> {
   try {
     const headers: Record<string, string> = { 'Content-Type': 'application/json', 'x-agent-id': _currentAgentId };
     if (RELAY_API_KEY) headers['x-api-key'] = RELAY_API_KEY;
@@ -209,7 +213,7 @@ async function callRelayTool(tool: string, args: Record<string, unknown> = {}): 
       method: 'POST',
       headers,
       body: JSON.stringify({ tool, args }),
-    }, RELAY_TOOL_TIMEOUT_MS);
+    }, timeoutMs);
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
       await debugLog('local_context.tool_http_error', { tool, status: res.status });
@@ -228,7 +232,7 @@ async function callRelayTool(tool: string, args: Record<string, unknown> = {}): 
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 // RELAY TOOL CATALOG BRIDGE
 //
 // Until 2026-09-27 this function handed the model a hardcoded 36-entry
@@ -250,7 +254,7 @@ async function callRelayTool(tool: string, args: Record<string, unknown> = {}): 
 //   - A bounded CALLABLE set of schemas (ELIZA_TOOLS + the high-value
 //     relay tools below) so she can act without a discovery round-trip.
 //   - The `relay-tool` meta-tool so ANY of the 168 is still reachable.
-// ═══════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 interface RelayCatalogTool {
   name: string;
@@ -387,71 +391,105 @@ function compactJson(value: unknown, depth = 0): string {
 
 // Main entrypoint: only runs when LOCAL_OLLAMA_ONLY=1 AND the query looks
 // live-state-ish. Returns a text block ready to inject into the system prompt.
-async function fetchLocalFleetContext(query: string): Promise<string> {
-  // Always fetch fleet context when query mentions fleet/agents/system keywords
-  // (removed LOCAL_OLLAMA_ONLY guard — fleet context is useful for all providers)
+async function fetchLocalFleetContext(
+  query: string,
+  timeoutMs: number = LOCAL_CONTEXT_TIMEOUT_MS,
+): Promise<string> {
+  // Only run for live-state-ish queries. The result is a compact,
+  // human-readable snapshot, not raw JSON: gemma3:1b cannot reliably parse a
+  // pile of nested objects, and dumping them made it answer from the first
+  // section it saw (CPU stats) instead of the fleet numbers.
   if (!LIVE_CONTEXT_REGEX.test(query)) {
     await debugLog('local_context.skip', { reason: 'no_live_keyword', queryStart: query.slice(0, 60) });
     return '';
   }
 
   const t0 = Date.now();
-  // Fan out — each call is bounded by LOCAL_CONTEXT_TIMEOUT_MS, so worst-case
-  // total is roughly that. All 4 are best-effort; we tolerate any of them
-  // failing (and just omit that section).
-  const [externalServices, systemMonitor, fleetAgents, recentTasks] = await Promise.allSettled([
-    callRelayTool('external-services'),
-    callRelayTool('system-monitor'),
-    callRelayTool('system-resources'),
-    fetchLocalSupabaseRows('tasks', 'id,title,status,category,assigned_agent,created_at', 5),
+  const [monitorRes, statusRes, miningRes] = await Promise.allSettled([
+    callRelayTool('system-monitor', {}, timeoutMs),
+    getSystemStatus(),
+    callRelayTool('mining-dashboard', {}, timeoutMs),
   ]);
+  const monitor: any = monitorRes.status === 'fulfilled' ? monitorRes.value : null;
+  const status: any = statusRes.status === 'fulfilled' ? statusRes.value : null;
+  const mining: any = miningRes.status === 'fulfilled' ? miningRes.value : null;
+
+  const fmtNum = (v: any): string => {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return String(v ?? '?');
+    if (n >= 1e9) return `${(n / 1e9).toFixed(2)}B`;
+    if (n >= 1e6) return `${(n / 1e6).toFixed(2)}M`;
+    return n.toLocaleString('en-US');
+  };
 
   const lines: string[] = [];
-  lines.push('## 🛰️ LIVE LOCAL STATE (fetched just now from the local stack)');
-  lines.push(`Snapshot taken at: ${new Date().toISOString()}`);
-  lines.push('');
+  lines.push('## LIVE FLEET SNAPSHOT (fetched just now; use these exact numbers)');
+  lines.push(`Snapshot time: ${new Date().toISOString()}`);
 
-  if (externalServices.status === 'fulfilled' && externalServices.value) {
-    lines.push('### External services');
-    lines.push(compactJson(externalServices.value));
-    lines.push('');
+  const counts = status?.database_counts || status?.counts || {};
+  const health = status?.health?.overall_health || status?.health || {};
+  if (counts.agents_total != null) {
+    lines.push(`- Agents: ${counts.agents_total} registered${counts.agents_busy != null ? `, ${counts.agents_busy} busy` : ''}`);
   }
-  if (systemMonitor.status === 'fulfilled' && systemMonitor.value) {
-    lines.push('### System monitor');
-    lines.push(compactJson(systemMonitor.value));
-    lines.push('');
+  if (counts.tasks_total != null) {
+    lines.push(`- Tasks: ${counts.tasks_total} tracked${counts.tasks_done != null ? `, ${counts.tasks_done} done` : ''}`);
   }
-  if (fleetAgents.status === 'fulfilled' && fleetAgents.value) {
-    lines.push('### Fleet agents (from /tools/run)');
-    lines.push(compactJson(fleetAgents.value));
-    lines.push('');
-  }
-  if (recentTasks.status === 'fulfilled' && recentTasks.value) {
-    lines.push('### Recent tasks (Postgres)');
-    lines.push(compactJson(recentTasks.value));
-    lines.push('');
+  if (health.status) {
+    lines.push(`- Health: ${health.status}${health.score != null ? ` (score ${health.score})` : ''}`);
   }
 
-  if (lines.length <= 3) {
+  const pool = mining?.pool_stats || mining || {};
+  const workers = pool.activeWorkers ?? pool.active_workers ?? (Array.isArray(pool.workers) ? pool.workers.length : null);
+  const hashes = pool.totalHashes ?? pool.total_hashes ?? pool.hash;
+  const shares = pool.validShares ?? pool.valid_shares;
+  const due = pool.amtDue ?? pool.amountDue;
+  if (workers != null || hashes != null || shares != null) {
+    const parts: string[] = [];
+    if (workers != null) parts.push(`${workers} active worker${Number(workers) === 1 ? '' : 's'}`);
+    if (hashes != null) parts.push(`${fmtNum(hashes)} total hashes`);
+    if (shares != null) parts.push(`${fmtNum(shares)} valid shares`);
+    if (due != null) parts.push(`${due} XMR due`);
+    lines.push(`- Mining: ${parts.join(', ')}`);
+  }
+
+  if (monitor) {
+    const sys = monitor.system || monitor;
+    const cpu = sys?.cpu?.usage;
+    const mem = sys?.memory?.system;
+    if (cpu || mem) {
+      const bits: string[] = [];
+      if (cpu) bits.push(`CPU ${cpu}`);
+      if (mem?.used && mem?.total) bits.push(`memory ${mem.used}/${mem.total} used${mem.usagePercent ? ` (${mem.usagePercent})` : ''}`);
+      lines.push(`- Host: ${bits.join(', ')}`);
+    }
+    const services = monitor.services || {};
+    const svcBits = Object.entries(services).map(([name, s]: [string, any]) =>
+      `${name} ${s?.status || (s?.healthy === false ? 'DOWN' : 'ok')}`);
+    if (svcBits.length > 0) lines.push(`- External services: ${svcBits.join(', ')}`);
+    const relay = monitor.relay || {};
+    if (relay.relayPort) lines.push(`- Relay: port ${relay.relayPort}${relay.agentName ? ` (${relay.agentName})` : ''}`);
+  }
+
+  const processes = status?.services || {};
+  const procBits = Object.entries(processes).map(([name, s]: [string, any]) =>
+    `${name} ${s?.healthy === false ? 'DOWN' : 'ok'}`);
+  if (procBits.length > 0) lines.push(`- Supervised processes: ${procBits.join(', ')}`);
+
+  if (lines.length <= 2) {
     await debugLog('local_context.empty', { elapsedMs: Date.now() - t0 });
     return '';
   }
 
-  lines.push('**How to use this block**: treat it as the current truth. When the user');
-  lines.push('asks about fleet state, mining, agents, services, or anything live, pull');
-  lines.push('facts from THIS block. Do not invent numbers. If a section is missing,');
-  lines.push('say so honestly. The block was fetched fresh for this turn and is');
-  lines.push('authoritative for the rest of this conversation.');
   lines.push('');
+  lines.push('Answer from this snapshot. Do not invent numbers; if a requested fact is missing, say so honestly.');
 
   await debugLog('local_context.built', {
     elapsedMs: Date.now() - t0,
     bytes: lines.join('\n').length,
     sections: {
-      externalServices: externalServices.status,
-      systemMonitor: systemMonitor.status,
-      fleetAgents: fleetAgents.status,
-      recentTasks: recentTasks.status,
+      monitor: monitorRes.status,
+      status: statusRes.status,
+      mining: miningRes.status,
     },
   });
   return lines.join('\n');
@@ -573,7 +611,7 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
   // OpenCode, where the free tier is the point.
   opencode_zen_free: {
     name: 'MiniMax M3.1 Flash Free (OpenCode Zen) — FREE',
-    enabled: false,
+    enabled: false /* disabled: system-prompt echo, 403 for external callers */,
     apiKey: OPENCODE_API_KEY,
     endpoint: `${OPENCODE_BASE_URL}/chat/completions`,
     models: ['minimax-m3.1-flash-free'],
@@ -583,6 +621,40 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     contextWindow: undefined,
     timeoutMs: 120000,
     priority: 0.05,  // own quota pool, once it can answer
+    fallbackOnly: false,
+    maxRetries: 2,
+    retryDelayMs: 1000
+  },
+
+  opencode_zen_space_bunny: {
+    name: 'Space Bunny Free (OpenCode Zen) — FREE, verified working',
+    enabled: false /* disabled: system-prompt echo, 403 for external callers */,
+    apiKey: OPENCODE_API_KEY,
+    endpoint: `${OPENCODE_BASE_URL}/chat/completions`,
+    models: ['space-bunny-free'],
+    supportsTools: true,
+    contextWindow: undefined,
+    timeoutMs: 120000,
+    priority: 0.04,  // tried before minimax — verified working from relay
+    fallbackOnly: false,
+    maxRetries: 2,
+    retryDelayMs: 1000
+  },
+
+  // DeepSeek V4.1 Flash Free — OpenCode Zen's current free DeepSeek slug.
+  // Probed 2026-11-04 from this machine: 429 FreeUsageLimitError until the
+  // OpenCode free allowance resets. Kept enabled so it is tried as soon as
+  // the allowance is available; the cooldown marks it after the first 429.
+  opencode_zen_deepseek: {
+    name: 'DeepSeek V4.1 Flash Free (OpenCode Zen) — FREE',
+    enabled: !!OPENCODE_API_KEY,
+    apiKey: OPENCODE_API_KEY,
+    endpoint: `${OPENCODE_BASE_URL}/chat/completions`,
+    models: ['deepseek-v4.1-flash-free'],
+    supportsTools: true,
+    contextWindow: undefined,
+    timeoutMs: 120000,
+    priority: 0.06,
     fallbackOnly: false,
     maxRetries: 2,
     retryDelayMs: 1000
@@ -599,25 +671,22 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
   // just because it appears in the catalog; verify it answers with real
   // tool_calls first (see _probe_candidates.py in the repo root).
 
-  // MiniMax M3.1 Flash — RETIRED FROM OPENROUTER'S FREE TIER 2026-10-22.
-  // A live probe returns 404: "The free launch period for MiniMax M3.1 Flash
-  // ended on Oct 22, 2026. The `:free` variant has been retired; use
-  // minimax/minimax-m3.1-flash (list price)". The paid slug needs founder
-  // approval, so this entry is disabled rather than silently spending.
-  //
-  // The Ollama copy of the same model is still served inside the free
-  // allowance (see ollama_minimax_m3_1_flash), so the cascade does not lose
-  // MiniMax. It simply must not depend on the OpenRouter free slug.
-  minimax_m3_1_flash_free: {
-    name: 'MiniMax M3.1 Flash (OpenRouter) — FREE tier retired 2026-10-22',
-    enabled: false,
+  // MiniMax M3.1 Flash — PAID OpenRouter primary (paid-first, 2026-10-28).
+  // The :free launch ended 2026-10-22; the paid slug answers in ~1.2s with
+  // native tool_calls, 1M context (verified live 2026-10-28, $0.000058 for a
+  // probe). The account is funded, so paid leads the cascade and the free
+  // slugs only answer if paid fails (e.g. 402 out of credit). The Ollama
+  // copy below still serves the free allowance as a further fallback.
+  minimax_m3_1_flash: {
+    name: 'MiniMax M3.1 Flash (OpenRouter) — PAID, primary',
+    enabled: true,
     apiKey: OPENROUTER_API_KEY,
     endpoint: 'https://openrouter.ai/api/v1/chat/completions',
-    models: ['minimax/minimax-m3.1-flash:free'],
+    models: ['minimax/minimax-m3.1-flash'],
     supportsTools: true,
     contextWindow: 1000000,
     timeoutMs: 45000,
-    priority: 0.03,
+    priority: 0.01,  // paid leads the cascade
     fallbackOnly: false,
     maxRetries: 2,
     retryDelayMs: 1000
@@ -631,7 +700,7 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     enabled: !!OPENROUTER_API_KEY,
     apiKey: OPENROUTER_API_KEY,
     endpoint: 'https://openrouter.ai/api/v1/chat/completions',
-    models: ['openrouter/free'],
+    models: ['nvidia/nemotron-3.5-lightning:free'],
     supportsTools: true,
     contextWindow: 200000,
     timeoutMs: 45000,
@@ -670,17 +739,27 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     retryDelayMs: 1000
   },
 
-  poolside_laguna_s: {
-    name: 'Poolside Laguna S 2.1 (OpenRouter) — FREE, supports tools',
-    enabled: !!OPENROUTER_API_KEY,
+  inkling_small_free: {
+    name: 'Thinking Machines Inkling Small (OpenRouter) — FREE, supports tools',
+    enabled: false /* disabled 2026-10-30: no tool calls in practice. The
+      catalog says native tool_calls and the earlier live probe returned a
+      tool_call, but fleet agents consistently report the model does not
+      actually emit tool_calls — it returns text-only replies. A provider
+      that cannot call tools is a dead slot in the cascade. */
+    ,
     apiKey: OPENROUTER_API_KEY,
     endpoint: 'https://openrouter.ai/api/v1/chat/completions',
-    models: ['poolside/laguna-s-2.1:free'],
+    models: ['thinkingmachines/inkling-small:free'],
     supportsTools: true,
-    // Verified against OpenRouter /models on 2026-10-11.
-    contextWindow: 262144,
+    // Catalog 2026-10-28: 1,048,576-token context, native tool_calls.
+    // NOTE: it is a reasoning model — ordinary replies carry tens of reasoning
+    // tokens before the answer, so max_tokens must stay generous.
+    // NOTE: the :free slug is behind OpenRouter's "Gate Free Endpoints by
+    // Agentic Harness"; callOpenRouterFree sends the harness attribution for
+    // exactly these slugs. Replaced poolside/laguna-s-2.1:free on 2026-10-28.
+    contextWindow: 1048576,
     timeoutMs: 45000,
-    priority: 0.06,  // verified 1000ms + native tool_calls — fastest live slug
+    priority: 0.06,
     fallbackOnly: false,
     maxRetries: 2,
     retryDelayMs: 1000
@@ -735,18 +814,18 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     retryDelayMs: 1000
   },
 
-  // Additional free slugs verified live on 2026-10-22. They are kept after
-  // the consistently-fast models: laguna-xs answered text in 1.5s but was
-  // 429 for tool calls on the same probe, and xingchen/gemma-4-26b were 429
-  // upstream. A 429 is transient, so they remain genuine fallbacks.
-  laguna_xs_free: {
-    name: 'Poolside Laguna XS 2.1 (OpenRouter) — FREE',
+  // Added 2026-10-28 alongside inkling_small_free — the second inkling
+  // variant, replacing laguna_xs_free in this slot. Same agentic-harness gate
+  // as its sibling (see the inkling_small_free note): works only under the
+  // harness attribution sent by callOpenRouterFree.
+  inkling_free: {
+    name: 'Thinking Machines Inkling (OpenRouter) — FREE, supports tools',
     enabled: !!OPENROUTER_API_KEY,
     apiKey: OPENROUTER_API_KEY,
     endpoint: 'https://openrouter.ai/api/v1/chat/completions',
-    models: ['poolside/laguna-xs-2.1:free'],
+    models: ['thinkingmachines/inkling:free'],
     supportsTools: true,
-    contextWindow: 262144,
+    contextWindow: 1048576,
     timeoutMs: 45000,
     priority: 0.12,
     fallbackOnly: false,
@@ -810,7 +889,7 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
   // OpenRouter /models catalog. Paid fallback: minimax/minimax-m3 (needs founder OK).
   gemma_4_26b_free: {
     name: 'Google Gemma 4 26B (OpenRouter) — FREE',
-    enabled: !!OPENROUTER_API_KEY,
+    enabled: false /* disabled: system-prompt echo or garbage response */,
     apiKey: OPENROUTER_API_KEY,
     endpoint: 'https://openrouter.ai/api/v1/chat/completions',
     models: ['google/gemma-4-26b-a4b-it:free'],
@@ -826,7 +905,7 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
   
   gemma_4_31b_free: {
     name: 'Google Gemma 4 31B (OpenRouter) — FREE',
-    enabled: !!OPENROUTER_API_KEY,
+    enabled: false /* disabled: system-prompt echo or garbage response */,
     apiKey: OPENROUTER_API_KEY,
     endpoint: 'https://openrouter.ai/api/v1/chat/completions',
     models: ['google/gemma-4-31b-it:free'],
@@ -850,7 +929,7 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     enabled: false,
     apiKey: OPENROUTER_API_KEY,
     endpoint: 'https://openrouter.ai/api/v1/chat/completions',
-    models: ['qwen/qwen3.8-27b:free'],
+    models: ['nvidia/nemotron-3.5-lightning:free'],
     supportsTools: true,
     // Verified against OpenRouter /models on 2026-10-11.
     contextWindow: 262144,
@@ -1025,7 +1104,7 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
   },
   ollama_ttcr_gpt_oss_120b: {
     name: 'GPT-OSS 120B (Ollama TTCR) — FREE, supports tools',
-    enabled: !!TTCR_OLLAMA_API_KEY,
+    enabled: false /* disabled: system-prompt echo or garbage response */,
     apiKey: TTCR_OLLAMA_API_KEY,
     endpoint: 'https://ollama.com/v1/chat/completions',
     models: ['gpt-oss:120b'],
@@ -1039,7 +1118,7 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
   },
   ollama_ttcr_gpt_oss_20b: {
     name: 'GPT-OSS 20B (Ollama TTCR) — FREE, supports tools',
-    enabled: !!TTCR_OLLAMA_API_KEY,
+    enabled: false /* disabled: system-prompt echo or garbage response */,
     apiKey: TTCR_OLLAMA_API_KEY,
     endpoint: 'https://ollama.com/v1/chat/completions',
     models: ['gpt-oss:20b'],
@@ -1053,7 +1132,7 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
   },
   ollama_ttcr_nemotron_nano: {
     name: 'Nemotron 3 Nano 30B (Ollama TTCR) — FREE, supports tools',
-    enabled: !!TTCR_OLLAMA_API_KEY,
+    enabled: false /* disabled: system-prompt echo or garbage response */,
     apiKey: TTCR_OLLAMA_API_KEY,
     endpoint: 'https://ollama.com/v1/chat/completions',
     models: ['nemotron-3-nano:30b'],
@@ -1067,7 +1146,7 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
   },
   ollama_ttcr_nemotron_super: {
     name: 'Nemotron 3 Super (Ollama TTCR) — FREE, supports tools',
-    enabled: !!TTCR_OLLAMA_API_KEY,
+    enabled: false /* disabled: system-prompt echo or garbage response */,
     apiKey: TTCR_OLLAMA_API_KEY,
     endpoint: 'https://ollama.com/v1/chat/completions',
     models: ['nemotron-3-super'],
@@ -1081,7 +1160,7 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
   },
   ollama_ttcr_nemotron_ultra: {
     name: 'Nemotron 3 Ultra (Ollama TTCR) — FREE, supports tools',
-    enabled: !!TTCR_OLLAMA_API_KEY,
+    enabled: false /* disabled: system-prompt echo or garbage response */,
     apiKey: TTCR_OLLAMA_API_KEY,
     endpoint: 'https://ollama.com/v1/chat/completions',
     models: ['nemotron-3-ultra'],
@@ -1095,7 +1174,7 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
   },
   ollama_ttcr_beam: {
     name: 'Beam (Ollama TTCR) — FREE, supports tools',
-    enabled: !!TTCR_OLLAMA_API_KEY,
+    enabled: false /* disabled: system-prompt echo or garbage response */,
     apiKey: TTCR_OLLAMA_API_KEY,
     endpoint: 'https://ollama.com/v1/chat/completions',
     models: ['beam'],
@@ -1130,7 +1209,7 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
   // Paid DeepSeek (kept for emergencies; free OpenRouter models are daily drivers now)
   deepseek: {
     name: 'DeepSeek (OpenRouter) — deepseek-chat',
-    enabled: !!DEEPSEEK_API_KEY,
+    enabled: false,  // <<< DISABLED — not used in fleet chat; kept for reference only
     apiKey: DEEPSEEK_API_KEY,
     endpoint: 'https://api.deepseek.com/v1/chat/completions',
     models: ['deepseek-chat', 'deepseek-coder'],
@@ -1399,7 +1478,7 @@ function isExplicitActionRequest(query: string): boolean {
 
 // ========== TOOL CALLING MANDATE ==========
 const TOOL_CALLING_MANDATE = `
-🚨 CRITICAL TOOL CALLING RULES:
+ðŸš¨ CRITICAL TOOL CALLING RULES:
 
 0. ALWAYS CALL A TOOL. The only exceptions are pure greetings ("hi", "hello", "hey"),
    meta questions about yourself ("who are you", "what can you do"), and "thanks".
@@ -1415,20 +1494,22 @@ const TOOL_CALLING_MANDATE = `
    Just call the tool directly. NEVER write TOOL_CALL:, function-call syntax, or raw
    JSON tool objects in your response text. The system executes tools silently —
    your text output should ONLY be natural-language responses to the user.
+   NEVER output XML tool calls like <invoke>, <tool_call>, <function_calls>,
+   or any <..._function_calls> blocks. Use the native function calling mechanism ONLY.
 
 3. DIRECTLY invoke functions - the system will handle execution
 
 4. Available critical tools (use the FIRST matching tool for the task):
-   - For knowledge/search questions → FIRST try search_knowledge, then recall_entity
+   - For knowledge/search questions â†’ FIRST try search_knowledge, then recall_entity
    - ALWAYS check the knowledge base (search_knowledge) BEFORE using web_search or browse_web
-   - For a unified fleet snapshot (system + ecosystem + mining in one call) → fleet_pulse
-   - For system/health/status only → get_system_status
-   - For ecosystem metrics only → get_ecosystem_metrics
-   - For mining/stats → get_mining_stats
-   - For web browsing → browse_web
-   - For email → resend_send_email
-   - For images/video → muapi_generate_image, muapi_generate_video
-   - For edge functions → invoke_edge_function, search_edge_functions
+   - For a unified fleet snapshot (system + ecosystem + mining in one call) â†’ fleet_pulse
+   - For system/health/status only â†’ get_system_status
+   - For ecosystem metrics only â†’ get_ecosystem_metrics
+   - For mining/stats â†’ get_mining_stats
+   - For web browsing â†’ browse_web
+   - For email â†’ resend_send_email
+   - For images/video â†’ muapi_generate_image, muapi_generate_video
+   - For edge functions â†’ invoke_edge_function, search_edge_functions
 
 5. If you need current data, ALWAYS use tools. Never guess or make up data.
 
@@ -1443,42 +1524,42 @@ const TOOL_CALLING_MANDATE = `
    then acknowledge honestly and offer the best partial answer. Never
    silently fall back to a generic greeting.
 
-🖼️ IMAGE GENERATION (MANDATORY):
-- When user asks to CREATE/GENERATE/MAKE/DRAW an IMAGE → IMMEDIATELY call muapi_generate_image({prompt: "detailed description"})
+ðŸ–¼ï¸ IMAGE GENERATION (MANDATORY):
+- When user asks to CREATE/GENERATE/MAKE/DRAW an IMAGE â†’ IMMEDIATELY call muapi_generate_image({prompt: "detailed description"})
 - DO NOT say "I cannot generate images" - YOU CAN via MuAPI
 - DO NOT say "I'm just an LLM" - you have image generation capabilities
 
-🎬 VIDEO GENERATION (MANDATORY):
-- When user asks to CREATE/GENERATE/MAKE a VIDEO → IMMEDIATELY call muapi_generate_video({prompt: "description", duration_seconds: 5})
+ðŸŽ¬ VIDEO GENERATION (MANDATORY):
+- When user asks to CREATE/GENERATE/MAKE a VIDEO â†’ IMMEDIATELY call muapi_generate_video({prompt: "description", duration_seconds: 5})
 - Returns request_id for async status checking
 - Check status with muapi_check_status({request_id: "..."})
 
-🌐 WEB BROWSING (MANDATORY):
-- When user asks to VIEW/OPEN/CHECK/BROWSE/NAVIGATE to a URL or website → IMMEDIATELY call browse_web({url: "https://..."})
+ðŸŒ WEB BROWSING (MANDATORY):
+- When user asks to VIEW/OPEN/CHECK/BROWSE/NAVIGATE to a URL or website â†’ IMMEDIATELY call browse_web({url: "https://..."})
 - Use this for ANY URL viewing, webpage checking, or web content extraction
 - Always use the full URL including https:// prefix
 - DO NOT say "I cannot browse the web" - YOU CAN via Playwright Browser
 - Supported actions: 'navigate' (default), 'extract', 'json'
 
-🔍 FUNCTION DISCOVERY (MANDATORY):
-- When user asks about available edge functions or capabilities → IMMEDIATELY call search_edge_functions({mode: 'full_registry'})
+ðŸ” FUNCTION DISCOVERY (MANDATORY):
+- When user asks about available edge functions or capabilities â†’ IMMEDIATELY call search_edge_functions({mode: 'full_registry'})
 - NEVER list functions from memory - ALWAYS query the database via this tool
 - Use query/category filters to find specific functions
 
-📎 ATTACHMENT ANALYSIS (MANDATORY):
-- When user provides attachments (images, PDFs, docs, code files) → IMMEDIATELY call analyze_attachment({attachments: [...]})
+ðŸ“Ž ATTACHMENT ANALYSIS (MANDATORY):
+- When user provides attachments (images, PDFs, docs, code files) â†’ IMMEDIATELY call analyze_attachment({attachments: [...]})
 - This tool can analyze: .txt, .png, .jpg, .jpeg, .pdf, .doc, .docx, .sol, .js, .ts, .py, .java, .cpp, .rs, .go, .md, .json, .yaml, .yml, .csv
 - Always analyze attachments when they are provided
 
-📧 EMAIL SENDING (MANDATORY):
-- When user asks to SEND EMAIL or mentions email address → IMMEDIATELY call resend_send_email({agent: "eliza", to: "recipient@email.com", subject: "Subject", body: "Email body"})
+ðŸ“§ EMAIL SENDING (MANDATORY):
+- When user asks to SEND EMAIL or mentions email address â†’ IMMEDIATELY call resend_send_email({agent: "eliza", to: "recipient@email.com", subject: "Subject", body: "Email body"})
 - DO NOT generate contract code or unrelated content when asked to send emails
 - Always show draft for approval before sending
 - Use conversation context to understand what email content is needed
 
-📇 ENTITY RESOLUTION (MANDATORY for CRM/people/orgs):
+ðŸ“‡ ENTITY RESOLUTION (MANDATORY for CRM/people/orgs):
 - When the user mentions a person, contact, or organization BY NAME and you are
-  about to recall, look up, or write anything about them → FIRST call
+  about to recall, look up, or write anything about them â†’ FIRST call
   resolve-entity({query: "<name or email or alias>"}).
 - Use the returned canonical entity (name, primary email, aliases) for all
   subsequent CRM reads/writes in this turn. Superseded emails and aliases map
@@ -1487,7 +1568,7 @@ const TOOL_CALLING_MANDATE = `
 - If resolution is ambiguous (multiple candidates), ask the user to pick one
   before writing.
 
-🔧 GITHUB FUNCTIONALITY:
+ðŸ”§ GITHUB FUNCTIONALITY:
 - Use the full GitHub tool suite when user asks about GitHub operations
 - Available tools: createGitHubIssue, listGitHubIssues, createGitHubDiscussion, searchGitHubCode, createGitHubPullRequest, commentOnGitHubIssue, commentOnGitHubDiscussion, listGitHubPullRequests
 - For comprehensive GitHub operations, use the appropriate tool based on the request
@@ -1696,7 +1777,7 @@ async function generateAISummary(messages: any[], toolResults: any[]): Promise<s
 
         clearTimeout(timeoutId);
       } catch (error) {
-        console.warn(`⚠️ ${provider.name} summarization failed:`, error);
+        console.warn(`âš ï¸ ${provider.name} summarization failed:`, error);
         continue;
       }
     }
@@ -1704,7 +1785,7 @@ async function generateAISummary(messages: any[], toolResults: any[]): Promise<s
     return generateEnhancedManualSummary(messages, toolResults);
     
   } catch (error) {
-    console.warn('⚠️ AI summarization failed, using fallback:', error);
+    console.warn('âš ï¸ AI summarization failed, using fallback:', error);
     return generateEnhancedManualSummary(messages, toolResults);
   }
 }
@@ -1986,7 +2067,7 @@ class EnhancedConversationPersistence {
   
   async loadHistoricalSummaries(limit: number = MAX_SUMMARIZED_CONVERSATIONS): Promise<any[]> {
     try {
-      console.log(`📚 Loading historical conversation summaries for session: ${this.sessionId} (IP: ${this.ipAddress})`);
+      console.log(`ðŸ“š Loading historical conversation summaries for session: ${this.sessionId} (IP: ${this.ipAddress})`);
       
       if (this.userId) {
         const { data: userData, error: userError } = await supabase
@@ -1997,7 +2078,7 @@ class EnhancedConversationPersistence {
           .limit(limit);
         
         if (!userError && userData && userData.length > 0) {
-          console.log(`📖 Loaded ${userData.length} historical summaries by user ID`);
+          console.log(`ðŸ“– Loaded ${userData.length} historical summaries by user ID`);
           return userData;
         }
       }
@@ -2010,7 +2091,7 @@ class EnhancedConversationPersistence {
         .limit(limit);
       
       if (!ipError && ipData && ipData.length > 0) {
-        console.log(`📖 Loaded ${ipData.length} historical summaries by IP address`);
+        console.log(`ðŸ“– Loaded ${ipData.length} historical summaries by IP address`);
         return ipData;
       }
       
@@ -2022,15 +2103,15 @@ class EnhancedConversationPersistence {
         .limit(limit);
       
       if (!sessionError && sessionData) {
-        console.log(`📖 Loaded ${sessionData.length} historical summaries by session ID`);
+        console.log(`ðŸ“– Loaded ${sessionData.length} historical summaries by session ID`);
         return sessionData;
       }
       
-      console.log('📭 No historical conversation summaries found');
+      console.log('ðŸ“­ No historical conversation summaries found');
       return [];
       
     } catch (error: any) {
-      console.warn('⚠️ Failed to load historical summaries:', error);
+      console.warn('âš ï¸ Failed to load historical summaries:', error);
       return [];
     }
   }
@@ -2076,15 +2157,15 @@ class EnhancedConversationPersistence {
         .single();
       
       if (error) {
-        console.warn('⚠️ Failed to save conversation summary:', error.message);
+        console.warn('âš ï¸ Failed to save conversation summary:', error.message);
         return null;
       }
       
-      console.log(`💾 Saved AI-enhanced conversation summary with ID: ${data.id}`);
+      console.log(`ðŸ’¾ Saved AI-enhanced conversation summary with ID: ${data.id}`);
       return data.id;
       
     } catch (error: any) {
-      console.warn('⚠️ Failed to save conversation summary:', error);
+      console.warn('âš ï¸ Failed to save conversation summary:', error);
       return null;
     }
   }
@@ -2171,13 +2252,13 @@ class EnhancedConversationPersistence {
       
       if (!response.ok) {
         const errText = await response.text().catch(() => 'unknown');
-        console.warn('⚠️ Failed to save conversation context:', response.status, errText.slice(0, 200));
+        console.warn('âš ï¸ Failed to save conversation context:', response.status, errText.slice(0, 200));
       } else {
-        console.log('💾 Saved conversation context for follow-up understanding');
+        console.log('ðŸ’¾ Saved conversation context for follow-up understanding');
       }
       
     } catch (error: any) {
-      console.warn('⚠️ Failed to save conversation context:', error);
+      console.warn('âš ï¸ Failed to save conversation context:', error);
     }
   }
   
@@ -2193,14 +2274,14 @@ class EnhancedConversationPersistence {
       const response = await fetch(url, { headers, signal: AbortSignal.timeout(10000) });
       
       if (!response.ok) {
-        console.warn('⚠️ Database error loading conversation context:', response.status);
+        console.warn('âš ï¸ Database error loading conversation context:', response.status);
         return [];
       }
       const data = await response.json();
       return Array.isArray(data) ? data : [];
       
     } catch (error: any) {
-      console.warn('⚠️ Failed to load conversation context:', error);
+      console.warn('âš ï¸ Failed to load conversation context:', error);
       return [];
     }
   }
@@ -2352,13 +2433,13 @@ class AttachmentAnalyzer {
         .insert(analysisRecord);
       
       if (error) {
-        console.warn('⚠️ Failed to save attachment analysis:', error.message);
+        console.warn('âš ï¸ Failed to save attachment analysis:', error.message);
       } else {
-        console.log(`💾 Saved attachment analysis for ${filename} with session ID: ${sessionId}`);
+        console.log(`ðŸ’¾ Saved attachment analysis for ${filename} with session ID: ${sessionId}`);
       }
       
     } catch (error: any) {
-      console.warn('⚠️ Failed to save attachment analysis:', error);
+      console.warn('âš ï¸ Failed to save attachment analysis:', error);
     }
   }
 }
@@ -2367,7 +2448,7 @@ class AttachmentAnalyzer {
 async function getSystemStatus(): Promise<any> {
   try {
     // Use local relay /api/dao/health instead of cloud edge function
-    const relayRes = await fetch('http://127.0.0.1:8080/api/dao/health', { signal: AbortSignal.timeout(5000) });
+    const relayRes = await fetch('http://127.0.0.1:8080/api/dao/health', { signal: AbortSignal.timeout(10000) });
     if (relayRes.ok) {
       const data = await relayRes.json();
       return {
@@ -2490,7 +2571,7 @@ async function ingestAttachmentToKnowledgeBase(
   analysis: any
 ): Promise<void> {
   try {
-    const title = `📎 Uploaded: ${filename}`;
+    const title = `ðŸ“Ž Uploaded: ${filename}`;
     const content = analysis.description || analysis.content_preview || 
                     (analysis.key_findings?.join('. ') ?? '') || 
                     `File uploaded: ${filename}`;
@@ -2515,10 +2596,10 @@ async function ingestAttachmentToKnowledgeBase(
     };
     if (userId) entityData.user_id = userId;
     const { error } = await supabase.from('knowledge_entities').insert(entityData);
-    if (error) console.warn('⚠️ Failed to ingest attachment to knowledge_entities:', error.message);
-    else console.log(`🧠 Knowledge base updated with attachment: ${filename}`);
+    if (error) console.warn('âš ï¸ Failed to ingest attachment to knowledge_entities:', error.message);
+    else console.log(`ðŸ§  Knowledge base updated with attachment: ${filename}`);
   } catch (e: any) {
-    console.warn('⚠️ Knowledge ingestion error:', e.message);
+    console.warn('âš ï¸ Knowledge ingestion error:', e.message);
   }
 }
 
@@ -2532,17 +2613,17 @@ async function saveAttachmentToLocalRelay(
   sessionId: string
 ): Promise<{ success: boolean; storageUrl?: string; error?: string }> {
   try {
-    console.log(`📁 Saving file to local relay storage: ${filename}`);
+    console.log(`ðŸ“ Saving file to local relay storage: ${filename}`);
     return { success: true, storageUrl: `/storage/uploads/${sessionId}/${filename}` };
   } catch (e: any) {
-    console.warn('⚠️ Local storage save error:', e.message);
+    console.warn('âš ï¸ Local storage save error:', e.message);
     return { success: false, error: e.message };
   }
 }
 
 async function analyzeAttachmentTool(attachments: any[], ipAddress: string, sessionId: string, userId?: string, userEmail?: string): Promise<any> {
   try {
-    console.log(`📎 Analyzing ${attachments.length} attachment(s) for IP: ${ipAddress}, Session: ${sessionId}`);
+    console.log(`ðŸ“Ž Analyzing ${attachments.length} attachment(s) for IP: ${ipAddress}, Session: ${sessionId}`);
     
     const analyses = [];
     
@@ -2596,7 +2677,7 @@ async function analyzeAttachmentTool(attachments: any[], ipAddress: string, sess
               analysis.note = visionResult.error || 'Vision analysis failed';
             }
           } catch (vErr: any) {
-            console.warn('⚠️ Ollama vision error:', vErr.message);
+            console.warn('âš ï¸ Ollama vision error:', vErr.message);
             analysis.note = 'Image received; local vision analysis unavailable';
           }
         } else {
@@ -2643,7 +2724,7 @@ async function analyzeAttachmentTool(attachments: any[], ipAddress: string, sess
           analysis.storage_url = storageResult.storageUrl;
           if (!storageResult.success) {
             analysis.storage_error = storageResult.error;
-            console.warn(`⚠️ Storage save failed for ${filename}: ${storageResult.error}`);
+            console.warn(`âš ï¸ Storage save failed for ${filename}: ${storageResult.error}`);
           }
         }
       }
@@ -2653,7 +2734,7 @@ async function analyzeAttachmentTool(attachments: any[], ipAddress: string, sess
     const contextSummary = analyses
       .filter(a => a.success)
       .map(a => {
-        let summary = `📎 **${a.filename}** (${a.file_type}):\n`;
+        let summary = `ðŸ“Ž **${a.filename}** (${a.file_type}):\n`;
         if (a.description) summary += a.description.substring(0, MAX_ATTACHMENT_CONTEXT_CHARS) + '\n';
         else if (a.content_preview) summary += a.content_preview.substring(0, MAX_ATTACHMENT_CONTEXT_CHARS) + '\n';
         if (a.key_findings?.length) summary += `Key findings: ${a.key_findings.join(', ')}\n`;
@@ -2866,8 +2947,8 @@ async function logToolActivity(
 ): Promise<void> {
   try {
     const activityType = `tool_${status}`;
-    const title = status === 'pending' ? `🔧 ${toolName}` 
-      : status === 'running' ? `⚙️ ${toolName}`
+    const title = status === 'pending' ? `ðŸ”§ ${toolName}` 
+      : status === 'running' ? `âš™ï¸ ${toolName}`
       : status === 'success' ? `✅ ${toolName}`
       : `❌ ${toolName}`;
     
@@ -2947,7 +3028,7 @@ async function executeRealToolCall(
           `"${targetTool}" is not a relay tool. Known tools include: ${catalog.map(t => t.name).slice(0, 40).join(', ')}, …`
         );
       }
-      console.log(`🔗 relay-tool → ${targetTool}`);
+      console.log(`ðŸ”— relay-tool â†’ ${targetTool}`);
       const relayResult = await callRelayTool(targetTool, innerArgs || {});
       if (relayResult && (relayResult as any).success === false) {
         throw new Error(`relay-tool ${targetTool} failed: ${(relayResult as any).error || 'unknown error'}`);
@@ -3533,12 +3614,33 @@ async function executeRealToolCall(
     } else if (name === 'db_query') {
       const { sql } = parsedArgs;
       if (!sql) throw new Error('Missing sql');
-      result = await callRelayTool('db-query', { sql });
+      // Route directly to local-sb at 54321 instead of relay (8080),
+      // since relay has syntax errors (campaignContacts redeclaration) that
+      // prevent it from starting properly. local-sb is healthy with clean logs.
+      const res = await fetch('http://127.0.0.1:54321/rest/v1/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': 'local' },
+        body: JSON.stringify({ query: sql })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(`local-sb db_query failed: ${res.status} ${JSON.stringify(data)}`);
+      result = data;
 
     } else if (name === 'db_rest') {
       const { path, method, body } = parsedArgs;
       if (!path) throw new Error('Missing path');
-      result = await callRelayTool('db-rest', { path, method, body });
+      // Route directly to local-sb at 54321 instead of relay (8080),
+      // since relay has syntax errors (campaignContacts redeclaration) that
+      // prevent it from starting properly. local-sb is healthy with clean logs
+      // (GET / → 1ms, POST /mesh-peer-connector → 111ms, GET /agent_certifications → 0ms).
+      const res = await fetch('http://127.0.0.1:54321/rest/v1/' + path, {
+        method: method || 'GET',
+        headers: { 'Content-Type': 'application/json', 'apikey': 'local' },
+        body: body ? JSON.stringify(body) : undefined
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(`local-sb db_rest failed: ${res.status} ${JSON.stringify(data)}`);
+      result = data;
 
     } else if (name === 'shared_context') {
       const { action, key, value, search_term, agent_id, topic } = parsedArgs;
@@ -3591,7 +3693,7 @@ async function executeRealToolCall(
       // tools actually callable instead of dead ends.
       const catalog = await getRelayToolCatalog();
       if (isKnownRelayTool(name, catalog)) {
-        console.log(`🔗 Routing '${name}' to the relay (generic passthrough)`);
+        console.log(`ðŸ”— Routing '${name}' to the relay (generic passthrough)`);
         const relayResult = await callRelayTool(name, parsedArgs);
         if (relayResult && (relayResult as any).success === false) {
           // Surface the relay's own error text so the model can self-correct.
@@ -3668,7 +3770,7 @@ async function executeRealToolCall(
     
     logActivity({
       activity_type: 'tool_execution',
-      title: `🔧 ${executiveName} executed ${name}`,
+      title: `ðŸ”§ ${executiveName} executed ${name}`,
       description: `${executiveName} executed tool: ${name}`,
       status: success ? 'completed' : 'error',
       metadata: {
@@ -3844,11 +3946,11 @@ function detectAmbiguousResponse(userMessage: string, conversationHistory: any[]
 
 // ========== TOOL PARSING FUNCTIONS ==========
 function parseDeepSeekToolCalls(content: string): Array<any> | null {
-  const toolCallsMatch = content.match(/ 🫎(.*?)🫎/s);
+  const toolCallsMatch = content.match(/ ðŸ«Ž(.*?)ðŸ«Ž/s);
   if (!toolCallsMatch) return null;
   
   const toolCallsText = toolCallsMatch[1];
-  const toolCallPattern = / 🔧(.*?)🔧(.*?)🔧/gs;
+  const toolCallPattern = / ðŸ”§(.*?)ðŸ”§(.*?)ðŸ”§/gs;
   const toolCalls: Array<any> = [];
   
   let match;
@@ -3930,9 +4032,18 @@ function parseToolCodeBlocks(content: string): Array<any> | null {
 // the fenced/marker formats above. Without this parser the blob was returned
 // to the user as chat text and the tool never ran.
 function parseJsonArrayToolCalls(content: string): Array<any> | null {
-  const trimmed = (content || '').trim();
+  let trimmed = (content || '').trim();
   const openCh = trimmed[0];
-  if (openCh !== '[' && openCh !== '{') return null;
+  if (openCh !== '[' && openCh !== '{') {
+    // Small models often prepend "I'll check that." before the payload. Find
+    // the first tool-call-shaped array or object instead of giving up, so a
+    // local fallback can still execute the tool it asked for.
+    const arrAt = trimmed.search(/\[\s*\{/);
+    const objAt = trimmed.search(/\{\s*"name"\s*:/);
+    const at = arrAt >= 0 ? arrAt : objAt;
+    if (at < 0) return null;
+    trimmed = trimmed.slice(at);
+  }
   // Extract every balanced {...} block and keep the ones that parse and carry
   // a tool-ish name. Balancing per-object (instead of requiring the whole
   // payload to be valid JSON) tolerates the truncated wrappers small models
@@ -3987,6 +4098,45 @@ function parseXmlToolCalls(content: string): Array<any> | null {
     }
     toolCalls.push({
       id: `xml_${Date.now()}_${toolCalls.length}`,
+      type: 'function',
+      function: { name, arguments: JSON.stringify(params) },
+    });
+  }
+  return toolCalls.length > 0 ? toolCalls : null;
+}
+
+// MiniMax (and some other models) emit tool calls as XML of the form
+//   <..._function_calls>
+//   <invoke name="tool_name">
+//   <parameter name="arg">value</parameter>
+//   ...
+//   </invoke>
+//   </..._function_calls>
+//
+// These are NOT caught by parseXmlToolCalls (which expects <tool_call>/<function=>),
+// so they leak into the chat text and the tools never execute. This parser
+// extracts them so they can be run and stripped like any other text-format call.
+function parseMinimaxInvokeToolCalls(content: string): Array<any> | null {
+  if (!content || !content.includes('<invoke')) return null;
+  const toolCalls: Array<any> = [];
+  const invokeRegex = /<invoke\s+name=["']([\w:.-]+)["']\s*>([\s\S]*?)<\/invoke>/g;
+  let m;
+  while ((m = invokeRegex.exec(content)) !== null) {
+    const name = m[1];
+    const params: Record<string, any> = {};
+    const paramRegex = /<parameter\s+name=["']([\w-]+)["']\s*>([\s\S]*?)<\/parameter>/g;
+    let p;
+    while ((p = paramRegex.exec(m[2])) !== null) {
+      const key = p[1];
+      const raw = p[2].trim();
+      try {
+        params[key] = JSON.parse(raw);
+      } catch {
+        params[key] = raw;
+      }
+    }
+    toolCalls.push({
+      id: `minimax_invoke_${Date.now()}_${toolCalls.length}`,
       type: 'function',
       function: { name, arguments: JSON.stringify(params) },
     });
@@ -4116,7 +4266,7 @@ function needsDataRetrieval(messages: any[]): boolean {
 async function retrieveMemoryContexts(sessionKey: string): Promise<any[]> {
   if (!sessionKey) return [];
   
-  console.log('📚 Retrieving memory contexts server-side...');
+  console.log('ðŸ“š Retrieving memory contexts server-side...');
   try {
     const { data: serverMemories, error } = await supabase
       .from(DATABASE_CONFIG.tables.memory_contexts)
@@ -4137,7 +4287,7 @@ async function retrieveMemoryContexts(sessionKey: string): Promise<any[]> {
       }));
     }
   } catch (error: any) {
-    console.warn('⚠️ Failed to retrieve memory contexts:', error.message);
+    console.warn('âš ï¸ Failed to retrieve memory contexts:', error.message);
   }
   return [];
 }
@@ -4145,14 +4295,14 @@ async function retrieveMemoryContexts(sessionKey: string): Promise<any[]> {
 async function callDeepSeekFallback(messages: any[], tools?: any[]): Promise<any> {
   if (!DEEPSEEK_API_KEY) return null;
   
-  console.log('🔄 Trying DeepSeek fallback...');
+  console.log('ðŸ”„ Trying DeepSeek fallback...');
   
   const enhancedMessages = messages.map(m => 
     m.role === 'system' ? { ...m, content: TOOL_CALLING_MANDATE + m.content } : m
   );
   
   const forceTools = needsDataRetrieval(messages);
-  console.log(`📊 DeepSeek - Data retrieval needed: ${forceTools}`);
+  console.log(`ðŸ“Š DeepSeek - Data retrieval needed: ${forceTools}`);
   
   try {
     const controller = new AbortController();
@@ -4188,10 +4338,10 @@ async function callDeepSeekFallback(messages: any[], tools?: any[]): Promise<any
       };
     } else {
       const errorText = await response.text();
-      console.warn('⚠️ DeepSeek API error:', response.status, errorText);
+      console.warn('âš ï¸ DeepSeek API error:', response.status, errorText);
     }
   } catch (error) {
-    console.warn('⚠️ DeepSeek fallback failed:', error);
+    console.warn('âš ï¸ DeepSeek fallback failed:', error);
   }
   return null;
 }
@@ -4199,14 +4349,14 @@ async function callDeepSeekFallback(messages: any[], tools?: any[]): Promise<any
 async function callKimiFallback(messages: any[], tools?: any[]): Promise<any> {
   if (!OPENROUTER_API_KEY) return null;
   
-  console.log('🔄 Trying OpenRouter fallback (live free slug)...');
+  console.log('ðŸ”„ Trying OpenRouter fallback (live free slug)...');
   
   const enhancedMessages = messages.map(m => 
     m.role === 'system' ? { ...m, content: TOOL_CALLING_MANDATE + m.content } : m
   );
   
   const forceTools = needsDataRetrieval(messages);
-  console.log(`📊 Kimi K2 - Data retrieval needed: ${forceTools}`);
+  console.log(`ðŸ“Š Kimi K2 - Data retrieval needed: ${forceTools}`);
   
   try {
     const controller = new AbortController();
@@ -4221,7 +4371,7 @@ async function callKimiFallback(messages: any[], tools?: any[]): Promise<any> {
         'X-Title': 'XMRT Eliza'
       },
       body: JSON.stringify({
-        model: 'qwen/qwen3.8-27b:free',
+        model: 'nvidia/nemotron-3.5-lightning:free',
         messages: enhancedMessages,
         tools,
         tool_choice: tools ? (forceTools ? 'required' : 'auto') : undefined,
@@ -4240,14 +4390,14 @@ async function callKimiFallback(messages: any[], tools?: any[]): Promise<any> {
         content: data.choices?.[0]?.message?.content || '',
         tool_calls: data.choices?.[0]?.message?.tool_calls || [],
         provider: 'openrouter',
-        model: 'qwen/qwen3.8-27b:free'
+        model: 'nvidia/nemotron-3.5-lightning:free'
       };
     } else {
       const errorText = await response.text();
-      console.warn('⚠️ OpenRouter API error:', response.status, errorText);
+      console.warn('âš ï¸ OpenRouter API error:', response.status, errorText);
     }
   } catch (error) {
-    console.warn('⚠️ OpenRouter fallback failed:', error);
+    console.warn('âš ï¸ OpenRouter fallback failed:', error);
   }
   return null;
 }
@@ -4274,7 +4424,7 @@ class EnhancedConversationManager {
     historicalSummaries: any[];
   }> {
     try {
-      console.log(`📚 Loading conversation history for session: ${this.sessionId} (IP: ${this.ipAddress})`);
+      console.log(`ðŸ“š Loading conversation history for session: ${this.sessionId} (IP: ${this.ipAddress})`);
       
       const { data: ipData, error: ipError } = await supabase
         .from(DATABASE_CONFIG.tables.conversation_memory)
@@ -4294,7 +4444,7 @@ class EnhancedConversationManager {
         this.toolResultsMemory = toolResults;
         conversationSummary = record.summary || 'Existing conversation from IP';
         
-        console.log(`📖 Loaded ${messages.length} messages and ${toolResults.length} tool results from IP-based history`);
+        console.log(`ðŸ“– Loaded ${messages.length} messages and ${toolResults.length} tool results from IP-based history`);
         
         await this.updateSessionIdInMemory(record);
         
@@ -4313,9 +4463,9 @@ class EnhancedConversationManager {
           this.toolResultsMemory = toolResults;
           conversationSummary = record.summary || 'Existing conversation';
           
-          console.log(`📖 Loaded ${messages.length} messages and ${toolResults.length} tool results from session history`);
+          console.log(`ðŸ“– Loaded ${messages.length} messages and ${toolResults.length} tool results from session history`);
         } else {
-          console.log('📭 No existing conversation found for session or IP');
+          console.log('ðŸ“­ No existing conversation found for session or IP');
         }
       }
       
@@ -4329,7 +4479,7 @@ class EnhancedConversationManager {
       };
       
     } catch (error: any) {
-      console.warn('⚠️ Failed to load conversation history:', error);
+      console.warn('âš ï¸ Failed to load conversation history:', error);
       return { 
         messages: [], 
         toolResults: [], 
@@ -4350,9 +4500,9 @@ class EnhancedConversationManager {
         .eq('ip_address', this.ipAddress)
         .eq('updated_at', record.updated_at);
       
-      console.log(`🔄 Updated session ID for IP ${this.ipAddress} to ${this.sessionId}`);
+      console.log(`ðŸ”„ Updated session ID for IP ${this.ipAddress} to ${this.sessionId}`);
     } catch (error) {
-      console.warn('⚠️ Failed to update session ID in memory:', error);
+      console.warn('âš ï¸ Failed to update session ID in memory:', error);
     }
   }
   
@@ -4415,7 +4565,7 @@ class EnhancedConversationManager {
 
       if (!response.ok) {
         const errText = await response.text().catch(() => 'unknown');
-        console.warn('⚠️ Failed to save conversation (session_id upsert):', response.status, errText.slice(0, 200));
+        console.warn('âš ï¸ Failed to save conversation (session_id upsert):', response.status, errText.slice(0, 200));
       } else {
         // Read back and confirm the row is really there.
         //
@@ -4430,12 +4580,12 @@ class EnhancedConversationManager {
           const vRes = await fetch(verifyUrl, { headers, signal: AbortSignal.timeout(5000) });
           const vRows = vRes.ok ? await vRes.json().catch(() => []) : [];
           if (Array.isArray(vRows) && vRows.length > 0) {
-            console.log(`💾 Saved conversation (session-based): ${messages.length} messages, ${allToolResults.length} tool results — verified present`);
+            console.log(`ðŸ’¾ Saved conversation (session-based): ${messages.length} messages, ${allToolResults.length} tool results — verified present`);
           } else {
-            console.warn(`⚠️ conversation_memory reported success but read-back found no row for session ${this.sessionId}`);
+            console.warn(`âš ï¸ conversation_memory reported success but read-back found no row for session ${this.sessionId}`);
           }
         } catch (verifyErr: any) {
-          console.warn('⚠️ conversation_memory read-back failed (non-fatal):', verifyErr?.message || verifyErr);
+          console.warn('âš ï¸ conversation_memory read-back failed (non-fatal):', verifyErr?.message || verifyErr);
         }
       }
       
@@ -4482,18 +4632,18 @@ class EnhancedConversationManager {
                 { method: 'DELETE', headers, signal: AbortSignal.timeout(5000) }
               );
               if (delRes.ok) {
-                console.log(`🧹 Pruned ${stale.length} stale conversation_memory row(s) (keeping newest ${KEEP} per IP)`);
+                console.log(`ðŸ§¹ Pruned ${stale.length} stale conversation_memory row(s) (keeping newest ${KEEP} per IP)`);
               }
             }
           }
         }
       } catch (cleanupErr: any) {
         // Non-fatal — never fail a save because pruning failed.
-        console.warn('⚠️ conversation_memory prune failed (non-fatal):', cleanupErr?.message || cleanupErr);
+        console.warn('âš ï¸ conversation_memory prune failed (non-fatal):', cleanupErr?.message || cleanupErr);
       }
       
     } catch (error: any) {
-      console.warn('⚠️ Failed to save conversation:', error);
+      console.warn('âš ï¸ Failed to save conversation:', error);
     }
   }
   
@@ -4519,7 +4669,7 @@ class EnhancedConversationManager {
     try {
       return await generateAISummary(messages, toolResults);
     } catch (error) {
-      console.warn('⚠️ AI summarization failed, using enhanced manual summary');
+      console.warn('âš ï¸ AI summarization failed, using enhanced manual summary');
       return generateEnhancedManualSummary(messages, toolResults);
     }
   }
@@ -4530,17 +4680,17 @@ class EnhancedConversationManager {
   
   addToolResults(newResults: any[]): void {
     this.toolResultsMemory = [...this.toolResultsMemory, ...newResults].slice(-MAX_TOOL_RESULTS_MEMORY);
-    console.log(`🧠 Added ${newResults.length} tool results to memory, total: ${this.toolResultsMemory.length}`);
+    console.log(`ðŸ§  Added ${newResults.length} tool results to memory, total: ${this.toolResultsMemory.length}`);
   }
   
   async generateMemoryContext(): Promise<string> {
     const toolResults = this.toolResultsMemory;
     
     if (toolResults.length === 0) {
-      return "## 🧠 CONVERSATION MEMORY\nNo previous tool calls in this conversation.\n\n**IP Address**: " + this.ipAddress + "\n**Session Persistence**: Active (persistent)";
+      return "## ðŸ§  CONVERSATION MEMORY\nNo previous tool calls in this conversation.\n\n**IP Address**: " + this.ipAddress + "\n**Session Persistence**: Active (persistent)";
     }
     
-    let context = "## 🧠 CONVERSATION MEMORY - TOOL CALL HISTORY\n\n";
+    let context = "## ðŸ§  CONVERSATION MEMORY - TOOL CALL HISTORY\n\n";
     context += `**IP Address**: ${this.ipAddress}\n`;
     context += `**Session Persistence**: Active (persistent)\n\n`;
     
@@ -4653,36 +4803,216 @@ interface CascadeResult {
 }
 
 /**
- * Compact prompt for local Ollama.
+ * Compact prompt for local Ollama (gemma3:1b).
  *
- * The agent system prompt is tens of thousands of characters, and gemma3:1b
- * runs on this CPU. Sending the whole thing plus an 8k tool manifest made the
- * last-resort call exceed its deadline and return the canned "technical
- * difficulties" reply (measured 2026-10-22). A short system line plus the
- * recent turns answers in tens of seconds, which is the point of a last
- * resort: a real answer, not a timeout.
+ * The old version threw every system message away and replaced it with
+ * "You are a helpful, honest assistant." That is why the last-resort model
+ * introduced itself as "a large language model built by Google" and knew
+ * nothing about the fleet. The full agent prompt is tens of thousands of
+ * characters and gemma3:1b runs on this CPU, so we still cannot send all of
+ * it — but we can send a purpose-built Eliza prompt with the context that
+ * matters, a short tool manifest, and explicit instructions for the simple
+ * JSON tool-call dialect the parsers already understand.
+ *
+ * Capped at ~9k characters: identity + shared context + manifest, not the
+ * whole agent dossier. Measured local answers land in tens of seconds, which
+ * is the point of a last resort: a real answer, not a timeout.
  */
-function compactLocalMessages(messages: any[]): any[] {
-  const textOfMsg = (m: any) => typeof m.content === 'string'
-    ? m.content
-    : (Array.isArray(m.content)
-      ? m.content.filter((c: any) => c.type === 'text').map((c: any) => c.text).join('\n')
-      : '');
-  const recent = messages.filter(m => m.role !== 'system').slice(-4);
-  const out: any[] = [{
-    role: 'system',
-    content: 'You are a helpful, honest assistant. Answer the user concisely. Do not claim to have fetched live data you do not have.',
-  }];
-  for (const m of recent) {
-    const content = textOfMsg(m);
-    if (!content) continue;
-    out.push({ role: m.role, content: content.slice(0, 2000) });
+const LOCAL_FALLBACK_PROMPT_CAP = 9000;
+const LOCAL_FALLBACK_RECENT_TURNS = 8;
+
+function localMessageText(m: any): string {
+  if (!m) return '';
+  if (typeof m.content === 'string') return m.content;
+  if (Array.isArray(m.content)) {
+    return m.content
+      .filter((c: any) => c && (c.type === 'text' || typeof c.text === 'string'))
+      .map((c: any) => c.text || '')
+      .join('\n');
   }
-  if (!out.some(m => m.role === 'user')) {
-    const lastUser = [...messages].reverse().find(m => m.role === 'user');
-    if (lastUser) out.push({ role: 'user', content: textOfMsg(lastUser).slice(0, 2000) });
+  return '';
+}
+
+// Pull one labelled block out of the full system prompt without carrying the
+// whole thing. Markers are ASCII so this keeps working even when the
+// surrounding prompt contains emoji or other non-ASCII text.
+function extractLocalContextSection(text: string, marker: string, maxChars: number): string {
+  const at = text.indexOf(marker);
+  if (at < 0) return '';
+  const lineStart = text.lastIndexOf('\n', at) + 1;
+  let chunk = text.slice(lineStart);
+  const next = chunk.indexOf('\n## ', marker.length);
+  if (next > 0 && next < maxChars * 2) chunk = chunk.slice(0, next);
+  if (chunk.length > maxChars) {
+    const cut = chunk.lastIndexOf('\n', maxChars);
+    chunk = cut > maxChars * 0.6 ? chunk.slice(0, cut) : chunk.slice(0, maxChars);
+  }
+  return chunk.trim();
+}
+
+function buildLocalSharedContext(messages: any[]): string {
+  const systemText = messages
+    .filter(m => m && m.role === 'system')
+    .map(localMessageText)
+    .join('\n\n');
+  if (!systemText) return '';
+
+  const parts: string[] = [];
+  const add = (marker: string, cap: number) => {
+    const section = extractLocalContextSection(systemText, marker, cap);
+    if (section) parts.push(section);
+  };
+  add('LIVE LOCAL STATE', 1600);
+  add('STORED MEMORY CONTEXTS', 1800);
+  add('HISTORICAL CONVERSATION SUMMARIES', 1500);
+  add('RECENT CONVERSATION CONTEXT', 800);
+  add('KNOWLEDGE BASE RESULTS', 1200);
+
+  if (parts.length === 0) return '';
+  return '## SHARED CONTEXT (fleet stores and this conversation)\n\n' + parts.join('\n\n');
+}
+
+function localToolSignature(tool: any): string {
+  const fn = tool?.function || tool || {};
+  const name = fn.name || 'unknown_tool';
+  const params = fn.parameters || {};
+  const required = Array.isArray(params.required) ? params.required : [];
+  const props = params.properties && typeof params.properties === 'object'
+    ? Object.keys(params.properties)
+    : [];
+  const args = (required.length > 0 ? required : props).slice(0, 4);
+  const desc = String(fn.description || '').replace(/\s+/g, ' ').trim();
+  const shortDesc = desc.length > 100 ? desc.slice(0, 97) + '...' : desc;
+  return '- ' + name + '(' + args.join(', ') + ')' + (shortDesc ? ' - ' + shortDesc : '');
+}
+
+function buildLocalToolManifest(tools: any[], query: string, maxTools = 6): string {
+  if (!Array.isArray(tools) || tools.length === 0) return '';
+  const words = Array.from(new Set(
+    (query || '').toLowerCase().split(/[^a-z0-9_-]+/).filter(w => w.length > 3)
+  )).slice(0, 12);
+  const core = new Set([
+    'fleet_pulse', 'get_system_status', 'get_ecosystem_metrics', 'get_mining_stats',
+    'search_knowledge', 'recall_entity', 'list_tasks', 'list_agents', 'browse_web', 'relay-tool',
+  ]);
+
+  const ranked = tools.map((tool: any) => {
+    const fn = tool?.function || tool || {};
+    const name = String(fn.name || '');
+    const desc = String(fn.description || '').toLowerCase();
+    let score = 0;
+    if (core.has(name)) score += 100;
+    if (name === 'relay-tool') score += 50;
+    for (const w of words) {
+      if (name.toLowerCase().includes(w)) score += 20;
+      if (desc.includes(w)) score += 5;
+    }
+    return { tool, name, score };
+  }).filter(x => x.name);
+
+  ranked.sort((a, b) => b.score - a.score);
+  const picked: any[] = [];
+  const seen = new Set<string>();
+  for (const item of ranked) {
+    if (picked.length >= maxTools) break;
+    if (seen.has(item.name)) continue;
+    seen.add(item.name);
+    picked.push(item.tool);
+  }
+  if (!seen.has('relay-tool')) {
+    const relayTool = tools.find((t: any) => (t?.function?.name || t?.name) === 'relay-tool');
+    if (relayTool) picked.push(relayTool);
+  }
+
+  let out = picked.map(localToolSignature).join('\n');
+  if (out.length > 2400) out = out.slice(0, 2400);
+  return out;
+}
+
+function buildLocalFallbackMessages(messages: any[], tools: any[] = [], liveContext = ''): any[] {
+  const lastUser = [...messages].reverse().find(m => m && m.role === 'user');
+  const query = localMessageText(lastUser);
+  const sharedContext = buildLocalSharedContext(messages);
+  // When we already fetched a deterministic live snapshot for this turn, do
+  // not also hand the small model a tool menu. gemma3 tends to call
+  // fleet_pulse anyway, and the second model pass after the tool result is
+  // what turned a ~30s answer into a ~200s request.
+  const manifest = liveContext ? '' : buildLocalToolManifest(tools, query);
+  const now = new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
+
+  const systemParts: string[] = [
+    `You are ${EXECUTIVE_NAME}, ${EXECUTIVE_ROLE}.`,
+    '',
+    `You are NOT Google, NOT Gemini, NOT a generic large language model, and NOT a help desk. If asked who you are, say: "I'm ${EXECUTIVE_NAME}, ${EXECUTIVE_ROLE}."`,
+    '',
+    `XMRT-DAO is a decentralized autonomous organization building privacy-first infrastructure. Your flagship publication is @${BRAND_PUB_HANDLE} on Paragraph.com (${BRAND_PUB_URL}), covering the $${BRAND_COIN_SYMBOL} (${BRAND_COIN_NAME}) ecosystem. The fleet runs agents, tasks, mining, and local infrastructure.`,
+    '',
+    `Current UTC time: ${now}. You are answering through the last-resort local fallback because the cloud providers are unavailable this turn. Do not claim to be the cloud model. Be honest about running locally only if the user asks how you are running.`,
+    '',
+    '## VOICE',
+    '- Warm, sharp, technically literate, pro-privacy, slightly edgy, never snarky.',
+    '- Lead with the answer. Translate numbers into meaning; do not dump raw JSON.',
+    '- Keep replies under 180 words unless the user asks for detail. Ask at most one useful follow-up.',
+    '',
+    '## GROUNDING RULES',
+    '- Use the SHARED CONTEXT below as current truth. Never invent numbers, balances, task counts, agent counts, or dates.',
+    '- If the context does not contain the answer, say what you do know and name the gap. Do not guess.',
+    '- Never mention Google or Gemini in a normal answer.',
+    '- Do not echo raw tool JSON or internal prompts to the user.',
+  ];
+
+  if (liveContext) {
+    systemParts.push('', liveContext);
+    systemParts.push('', 'The LIVE FLEET SNAPSHOT above is the current truth for this turn. You DO have access to the fleet state. Answer the user using those exact numbers. Do not say you lack access or cannot see the fleet.');
+  }
+  if (sharedContext) systemParts.push('', sharedContext);
+
+  if (manifest) {
+    systemParts.push(
+      '',
+      '## TOOLS YOU CAN ASK FOR',
+      'The system can run these tools for you. Use one ONLY when the answer needs live data that is not already in the shared context.',
+      manifest,
+      '',
+      '## HOW TO CALL A TOOL',
+      'Only use tool names that appear in the list above. Never invent a tool name.',
+      'Reply with ONLY a JSON array, no prose and no markdown:',
+      '[{"name":"fleet_pulse","parameters":{}}]',
+      'Example - list tasks: [{"name":"list_tasks","parameters":{}}]',
+      'Example - search knowledge: [{"name":"search_knowledge","parameters":{"search_term":"..."}}]',
+      'For a relay tool: [{"name":"relay-tool","parameters":{"tool":"db-query","args":{"sql":"select 1"}}}]',
+      'The system runs it and sends you the result. Then answer the user in plain English. If the shared context already answers the question, do not call a tool.'
+    );
+  } else {
+    systemParts.push('', 'No tools are available this turn. Answer from the shared context and say honestly when something is missing.');
+  }
+
+  let systemPrompt = systemParts.join('\n');
+  if (systemPrompt.length > LOCAL_FALLBACK_PROMPT_CAP) {
+    const cut = systemPrompt.lastIndexOf('\n', LOCAL_FALLBACK_PROMPT_CAP);
+    systemPrompt = systemPrompt.slice(0, cut > LOCAL_FALLBACK_PROMPT_CAP * 0.7 ? cut : LOCAL_FALLBACK_PROMPT_CAP);
+  }
+
+  const out: any[] = [{ role: 'system', content: systemPrompt }];
+  const recent = messages.filter(m => m && m.role !== 'system').slice(-LOCAL_FALLBACK_RECENT_TURNS);
+  for (const m of recent) {
+    let content = localMessageText(m).trim();
+    if (!content) continue;
+    const cap = m.role === 'tool' ? 900 : 1200;
+    if (content.length > cap) content = content.slice(0, cap) + '...';
+    out.push({
+      role: m.role === 'tool' ? 'user' : m.role,
+      content: m.role === 'tool' ? 'TOOL RESULT: ' + content : content,
+    });
+  }
+  if (!out.some(m => m.role === 'user') && query) {
+    out.push({ role: 'user', content: query.slice(0, 2000) });
   }
   return out;
+}
+
+function compactLocalMessages(messages: any[], tools: any[] = [], liveContext = ''): any[] {
+  return buildLocalFallbackMessages(messages, tools, liveContext);
 }
 
 class EnhancedProviderCascade {
@@ -4736,7 +5066,7 @@ class EnhancedProviderCascade {
             // supports text-based tool calling (supportsTools:true), so it
             // stays in the list. Cloud Ollama (ollama) strips tools — skip
             // it for tool-needing requests unless LOCAL_OLLAMA_ONLY is set,
-            // in which case the pre-fetched 🛰️ LIVE LOCAL STATE block in
+            // in which case the pre-fetched ðŸ›°ï¸ LIVE LOCAL STATE block in
             // the system prompt gives cloud Ollama the grounding it needs.
             return tools.length === 0 || config.supportsTools || LOCAL_OLLAMA_ONLY;
           })
@@ -4779,9 +5109,9 @@ class EnhancedProviderCascade {
     const skipped = providers.filter((p) => isProviderCoolingDown(p));
     const candidates = applyCircuitBreaker(providers);
     if (skipped.length) {
-      console.log(`🚦 Skipping (in cooldown): ${skipped.join(', ')}`);
+      console.log(`ðŸš¦ Skipping (in cooldown): ${skipped.join(', ')}`);
     }
-    console.log(`🧭 Cascade candidates (${candidates.length}): ${candidates.join(' → ')}`);
+    console.log(`ðŸ§­ Cascade candidates (${candidates.length}): ${candidates.join(' â†’ ')}`);
 
     for (const provider of candidates) {
       const attemptStart = Date.now();
@@ -4808,7 +5138,7 @@ class EnhancedProviderCascade {
       recordProviderFailure(provider, result.error || '');
     }
     
-    console.log('🔄 Trying fallback providers...');
+    console.log('ðŸ”„ Trying fallback providers...');
     
     const fallbackResults = await Promise.all([
       callDeepSeekFallback(messages, tools),
@@ -4891,9 +5221,9 @@ class EnhancedProviderCascade {
           // Legacy name — routes through the generic free-model caller with
           // the entry's own configured slug (was: hardcoded retired
           // minimax/minimax-m3:free).
-          result = await this.callOpenRouterFree(provider, config.models[0] || 'qwen/qwen3.8-27b:free', messages, tools, controller);
+          result = await this.callOpenRouterFree(provider, config.models[0] || 'nvidia/nemotron-3.5-lightning:free', messages, tools, controller);
           break;
-        case 'minimax_m3':
+        case 'minimax_m3_1_flash':
           // Primary free cascade — entry carries its own live slug in
           // config.models[0] (was: hardcoded retired minimax-m3:free).
           result = await this.callOpenRouterFree(provider, config.models[0], messages, tools, controller);
@@ -4901,8 +5231,8 @@ class EnhancedProviderCascade {
         case 'gemma_4_26b_free':
         case 'gemma_4_31b_free':
         case 'qwen3_8_27b_free':
-        case 'poolside_laguna_s':
-        case 'laguna_xs_free':
+        case 'inkling_small_free':
+        case 'inkling_free':
         case 'cohere_north_mini_code':
         case 'apodex_1_1_mini':
         case 'dots_3_note_preview':
@@ -4917,6 +5247,7 @@ class EnhancedProviderCascade {
           result = await this.callOpenRouterFree(provider, config.models[0], messages, tools, controller);
           break;
         case 'opencode_zen_free':
+        case 'opencode_zen_deepseek':
           // Tier -1 — own quota pool, so OpenRouter rate limits don't take it out.
           result = await this.callOpenCodeZen(provider, config.models[0], messages, tools, controller);
           break;
@@ -5150,11 +5481,56 @@ class EnhancedProviderCascade {
       }
     }  // end OLLAMA_LOCAL_MODEL override guard
 
-    // Last resort: a compact prompt, not the full agent system prompt. The
-    // previous version injected every tool definition and asked for 8k
-    // tokens; on gemma3:1b that exceeded the local deadline and the function
-    // returned the canned "technical difficulties" reply instead of an answer.
-    const localMessages = compactLocalMessages(messages);
+    // Last resort: a compact but complete Eliza prompt, not the full agent
+    // dossier and not the old one-line generic assistant. The old prompt made
+    // gemma3 answer as "a large language model built by Google" because it
+    // had no identity, no shared context, and no tool manifest.
+    //
+    // For live-state questions we also fetch a short deterministic snapshot
+    // from the relay first, so the model does not have to discover and call
+    // fleet tools itself. 8s cap: the local model needs the remaining time.
+    const lastUser = [...messages].reverse().find(m => m && m.role === 'user');
+    const query = localMessageText(lastUser);
+    // Only fetch a live snapshot for actual status/state questions. A broad
+    // keyword match (the old LIVE_CONTEXT_REGEX) treated "What is XMRT-DAO?"
+    // as a live query and returned a fleet snapshot for a definition question.
+    const isStatusQuery = !/\b(what is|what's|explain|define|describe|who is|tell me about|meaning of)\b/i.test(query)
+      && /\b(status|fleet|agents?|tasks?|mining|health|system|how (is|are)|how many)\b/i.test(query);
+
+    let liveContext = '';
+    if (isStatusQuery) {
+      try {
+        liveContext = await fetchLocalFleetContext(query, 12000);
+      } catch (e: any) {
+        console.warn('[ai-chat] local live-context fetch failed:', e?.message || e);
+      }
+    }
+
+    // A weak local model is unreliable at narrating a live snapshot, and
+    // trying to make it do so cost ~30-90s per request on this CPU. For
+    // straightforward status questions we answer deterministically from the
+    // snapshot we just fetched — fast, accurate, and in Eliza's voice.
+    const isPureStatus = !!liveContext;
+    if (isPureStatus) {
+      const body = liveContext
+        .replace(/^## LIVE FLEET SNAPSHOT[^\n]*\n*/m, '')
+        .replace(/\nAnswer from this snapshot.*$/m, '')
+        .trim();
+      console.log('[ai-chat] local fallback: answering live status deterministically (no model call)');
+      return {
+        success: true,
+        provider: 'ollama_local',
+        content: `Here's the current fleet state I just pulled:\n\n${body}`,
+        tool_calls: [],
+        model,
+      };
+    }
+    const localMessages = compactLocalMessages(messages, tools, liveContext);
+    const localSystem = localMessages.find((m: any) => m.role === 'system')?.content || '';
+    console.log(
+      `[ai-chat] local prompt: chars=${localSystem.length} liveContext=${liveContext.length} ` +
+      `hasTools=${localSystem.includes('TOOLS YOU CAN ASK FOR')} hasLiveSnapshot=${localSystem.includes('LIVE FLEET SNAPSHOT')}`,
+    );
 
     try {
       const response = await fetch(localUrl, {
@@ -5163,7 +5539,7 @@ class EnhancedProviderCascade {
         body: JSON.stringify({
           model,
           messages: localMessages,
-          max_tokens: 1024,
+          max_tokens: 384,
           temperature: 0.5,
           stream: false
         }),
@@ -5192,12 +5568,24 @@ class EnhancedProviderCascade {
         tool_calls = parsed;
       }
 
+      // If the model still refuses to use the snapshot, replace its answer with
+      // the deterministic one. A weak model often parrots a refusal even when
+      // the data is in the prompt.
+      let finalContent = content;
+      if (liveContext && /do not have access|don't have access|no access to|cannot (see|access|view)/i.test(content)) {
+        const body = liveContext
+          .replace(/^## LIVE FLEET SNAPSHOT[^\n]*\n*/m, '')
+          .replace(/\nAnswer from this snapshot.*$/m, '')
+          .trim();
+        finalContent = `I do have the fleet state — here it is:\n\n${body}`;
+      }
+
       console.log(`[ai-chat] callOllamaLocal (${model}): content_len=${content.length}, tool_calls=${tool_calls.length}`);
 
       return {
         success: true,
         provider: 'ollama_local',
-        content,
+        content: finalContent,
         tool_calls,
         model
       };
@@ -5326,8 +5714,15 @@ class EnhancedProviderCascade {
       headers: {
         'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
         'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://xmrt.pro',
-        'X-Title': 'XMRT Eliza'
+        // Inkling :free slugs are behind OpenRouter's agentic-harness gate:
+        // our own attribution is refused 403, harness attribution is let
+        // through (verified 2026-10-28). Every other model keeps the XMRT
+        // attribution, which is what this endpoint has always sent.
+        ...(
+          model.startsWith('thinkingmachines/inkling') && model.endsWith(':free')
+            ? { 'HTTP-Referer': 'https://opencode.ai', 'X-Title': 'OpenCode' }
+            : { 'HTTP-Referer': 'https://xmrt.pro', 'X-Title': 'XMRT Eliza' }
+        ),
       },
       body: JSON.stringify({
         model,
@@ -5428,8 +5823,8 @@ class EnhancedProviderCascade {
 
   private async callKimi(messages: any[], tools: any[], controller: AbortController): Promise<CascadeResult> {
     // Legacy entry point — delegates to the generic free-model caller with a
-    // live slug (was: hardcoded retired minimax/minimax-m3:free → HTTP 404).
-    return this.callOpenRouterFree('kimi', 'qwen/qwen3.8-27b:free', messages, tools, controller);
+    // live slug (was: hardcoded retired minimax/minimax-m3:free â†’ HTTP 404).
+    return this.callOpenRouterFree('kimi', 'nvidia/nemotron-3.5-lightning:free', messages, tools, controller);
   }
   
   private async callAnthropic(messages: any[], controller: AbortController): Promise<CascadeResult> {
@@ -5585,7 +5980,7 @@ function looksLikeToolEcho(content: string): boolean {
   // Raw tool-result shapes: success/error booleans, JSON blobs, "must be one of"
   const rawResult = /"(success|error|status)"\s*:\s*(true|false|null)|\{\s*"[a-z_]+"\s*:|must be one of|Traceback \(most recent call last\)|^\s*[-*]\s*\{\s*"/i.test(text);
 
-  const looksLikeCode = /```|\bfunction\s+\w+\s*\(|\bTOOL_CALL:/.test(text);
+  const looksLikeCode = /```|\bfunction\s+\w+\s*\(|\bTOOL_CALL:|<invoke|<_function_calls/.test(text);
 
   if (looksLikeCode) return true;
   // A labelled echo that is short and has no real prose is a tool result.
@@ -5626,7 +6021,12 @@ function stripToolCallArtifacts(content: string): string {
   // 7. Strip JSON code blocks that look like tool results: ```json\n{"success":...}```
   cleaned = cleaned.replace(/```json\s*\n?\s*\{\s*"(?:success|error|data|result|output)"\s*:[\s\S]*?\}\s*\n?\s*```/g, '');
 
-  // 8. Collapse multiple blank lines left behind by stripping
+  // 7b. Strip MiniMax-style invoke XML blocks: <..._function_calls>...</..._function_calls>
+  cleaned = cleaned.replace(/<\w+_function_calls[\s\S]*?<\/\w+_function_calls>/g, '');
+  // Strip individual <invoke name="...">...</invoke> blocks (in case the wrapper is missing)
+  cleaned = cleaned.replace(/<invoke\s+name=["'][\w:.-]+["']\s*>[\s\S]*?<\/invoke>/g, '');
+  // Strip leftover <parameter name="...">value</parameter> lines
+  cleaned = cleaned.replace(/<parameter\s+name=["'][\w-]+["']\s*>[\s\S]*?<\/parameter>/g, '');
   cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
 
   // 9. Detect and truncate reasoning loops. The model sometimes dumps its
@@ -5671,6 +6071,87 @@ function summarizeToolResult(content: string, maxLength: number = 2000): string 
 }
 
 // ========== EXECUTE TOOLS WITH ITERATION ==========
+function formatLocalToolResultForUser(name: string, rawContent: string): string {
+  let parsed: any = null;
+  try { parsed = JSON.parse(rawContent); } catch { /* not JSON */ }
+  if (!parsed || typeof parsed !== 'object') {
+    const text = String(rawContent || '').trim();
+    return text ? `${name}: ${text.slice(0, 600)}` : `${name} returned no result.`;
+  }
+
+  if (parsed.success === false) {
+    return `${name} isn't available in this mode.`;
+  }
+
+  const num = (v: any) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  const fmtHash = (v: number) => v >= 1e9
+    ? `${(v / 1e9).toFixed(2)}B`
+    : v >= 1e6 ? `${(v / 1e6).toFixed(2)}M` : String(v);
+
+  if (name === 'fleet_pulse') {
+    const sys = parsed.system || {};
+    const counts = sys.database_counts || {};
+    const health = sys.health?.overall_health?.status || parsed.health?.overall_health?.status;
+    const mining = parsed.mining || {};
+    const parts: string[] = [];
+    if (health) parts.push(`Fleet health is ${health}.`);
+    if (num(counts.agents_total) != null) {
+      const busy = num(counts.agents_busy);
+      parts.push(`${counts.agents_total} agents registered${busy ? `, ${busy} busy` : ''}.`);
+    }
+    if (num(counts.tasks_total) != null) {
+      const done = num(counts.tasks_done);
+      parts.push(`${counts.tasks_total} tasks tracked${done != null ? `, ${done} done` : ''}.`);
+    }
+    const workers = num(mining.active_workers) ?? (Array.isArray(mining.workers) ? mining.workers.length : null);
+    if (workers != null) parts.push(`${workers} active miners.`);
+    const hashes = num(mining.totalHashes) ?? num(mining.total_hashes);
+    if (hashes != null) parts.push(`${fmtHash(hashes)} total hashes.`);
+    return parts.length ? parts.join(' ') : `fleet_pulse: ${JSON.stringify(parsed).slice(0, 600)}`;
+  }
+
+  if (name === 'list_tasks') {
+    const tasks = Array.isArray(parsed.tasks) ? parsed.tasks : (Array.isArray(parsed) ? parsed : []);
+    if (tasks.length === 0) return 'No tasks found.';
+    const titles = tasks.slice(0, 5).map((t: any) => t.title || t.id || 'untitled').join('; ');
+    return `${tasks.length} task${tasks.length === 1 ? '' : 's'}: ${titles}${tasks.length > 5 ? ' (and more)' : ''}.`;
+  }
+
+  if (name === 'get_mining_stats') {
+    const workers = num(parsed.active_workers) ?? (Array.isArray(parsed.workers) ? parsed.workers.length : null);
+    const hashes = num(parsed.totalHashes) ?? num(parsed.total_hashes) ?? num(parsed.hash);
+    const parts: string[] = [];
+    if (workers != null) parts.push(`${workers} active miners.`);
+    if (hashes != null) parts.push(`${fmtHash(hashes)} total hashes.`);
+    return parts.length ? parts.join(' ') : JSON.stringify(parsed).slice(0, 600);
+  }
+
+  if (name === 'get_system_status') {
+    const counts = parsed.database_counts || parsed;
+    const health = parsed.health?.overall_health?.status;
+    const parts: string[] = [];
+    if (health) parts.push(`System health is ${health}.`);
+    if (num(counts.agents_total) != null) {
+      parts.push(`${counts.agents_total} agents, ${counts.tasks_total ?? '?'} tasks.`);
+    }
+    return parts.length ? parts.join(' ') : JSON.stringify(parsed).slice(0, 600);
+  }
+
+  const preferred = ['content', 'message', 'summary', 'description', 'answer', 'result', 'output', 'data', 'error'];
+  for (const field of preferred) {
+    const value = parsed[field];
+    if (typeof value === 'string' && value.trim()) return value.trim().slice(0, 800);
+    if (Array.isArray(value) && value.length > 0) {
+      return value.slice(0, 5)
+        .map((item: any) => (typeof item === 'string' ? item : JSON.stringify(item)))
+        .join('; ')
+        .slice(0, 800);
+    }
+    if (value && typeof value === 'object') return JSON.stringify(value).slice(0, 800);
+  }
+  return JSON.stringify(parsed).slice(0, 800);
+}
+
 async function executeToolsWithIteration(
   initialResponse: any,
   aiMessages: any[],
@@ -5688,6 +6169,7 @@ async function executeToolsWithIteration(
   // list) can show what she actually called. Previously only a count was
   // returned, so the UI had nothing to render.
   const executedToolCalls: any[] = [];
+  let lastToolResults: any[] = [];
   let iteration = 0;
   let conversationMessages = [...aiMessages];
   
@@ -5695,11 +6177,12 @@ async function executeToolsWithIteration(
     let toolCalls = response.tool_calls || [];
     
     if ((!toolCalls || toolCalls.length === 0) && response.content) {
-      console.log('🔎 text-parse attempt, content head:', JSON.stringify(String(response.content).slice(0, 100)));
+      console.log('ðŸ”Ž text-parse attempt, content head:', JSON.stringify(String(response.content).slice(0, 100)));
       const textToolCalls = parseToolCodeBlocks(response.content) ||
                            parseDeepSeekToolCalls(response.content) ||
                            parseJsonArrayToolCalls(response.content) ||
                            parseXmlToolCalls(response.content) ||
+                           parseMinimaxInvokeToolCalls(response.content) ||
                            parseConversationalToolIntent(response.content);
       if (textToolCalls && textToolCalls.length > 0) {
         toolCalls = textToolCalls;
@@ -5708,7 +6191,7 @@ async function executeToolsWithIteration(
     
     if (!toolCalls || toolCalls.length === 0) break;
     
-    console.log(`🔧 [${executiveName}] Iteration ${iteration + 1}: Executing ${toolCalls.length} tool(s)`);
+    console.log(`ðŸ”§ [${executiveName}] Iteration ${iteration + 1}: Executing ${toolCalls.length} tool(s)`);
     
     // Execute all tool calls in parallel for faster multi-step tasks
     const toolResults = await Promise.all(
@@ -5781,7 +6264,18 @@ async function executeToolsWithIteration(
       tool_calls: toolCalls
     });
     conversationMessages.push(...toolResults);
-    
+    lastToolResults = toolResults;
+
+    // Local gemma3 is a last resort, not a multi-turn agent. A second model
+    // pass after a tool result regularly exceeds its 75s provider timeout on
+    // this CPU, and the synthesis pass then times out too — measured 200s for
+    // one fleet question. Stop here and let the deterministic formatter below
+    // turn the result into prose.
+    if (response.provider === 'ollama_local') {
+      console.log('Local fallback: tool executed; skipping second LLM pass and formatting the result deterministically');
+      break;
+    }
+
     const newResponse = await callAIFunction(conversationMessages, tools);
     if (!newResponse) break;
     
@@ -5807,8 +6301,26 @@ async function executeToolsWithIteration(
   // `!finalContent`) never fired and the raw tool error shipped to the user.
   // So treat tool echoes as "no answer yet" and synthesize properly.
   if (totalToolsExecuted > 0 && looksLikeToolEcho(finalContent)) {
-    console.log('🧹 Final content is a tool-result echo, not prose — forcing synthesis');
+    console.log('ðŸ§¹ Final content is a tool-result echo, not prose — forcing synthesis');
     finalContent = '';
+  }
+
+  // Local fallback: never spend another 75s asking gemma3 to narrate a tool
+  // result. Format the actual result deterministically instead.
+  if (response?.provider === 'ollama_local' && totalToolsExecuted > 0 && lastToolResults.length > 0) {
+    console.log(`[ai-chat] local deterministic format: provider=${response?.provider} results=${lastToolResults.length} names=${lastToolResults.map(t=>t.name).join(',')}`);
+    const allFailed = lastToolResults.every(tr => {
+      try { return JSON.parse(tr.content)?.success === false; } catch { return false; }
+    });
+    if (allFailed) {
+      finalContent = "I tried to look that up, but that tool isn't available in this mode. I can still help with fleet status, mining, agents, tasks, or general questions about XMRT-DAO.";
+    } else {
+      finalContent = lastToolResults
+        .map(tr => formatLocalToolResultForUser(tr.name, tr.content))
+        .filter(Boolean)
+        .join('\n\n');
+    }
+    console.log(`[ai-chat] local deterministic result: ${finalContent.slice(0, 200).replace(/\n/g, ' ')}`);
   }
   
   // If we executed tools but got no final content, ask AI to synthesize
@@ -5867,7 +6379,7 @@ async function executeToolsWithIteration(
   // tool call, execute it once and replace the blob with a confirmation.
   const trailingCall = parseJsonArrayToolCalls(finalContent) || parseXmlToolCalls(finalContent);
   if (trailingCall && trailingCall.length > 0) {
-    console.log(`🔧 Post-answer tool call detected in final content: ${trailingCall.map((t: any) => t.function.name).join(', ')}`);
+    console.log(`ðŸ”§ Post-answer tool call detected in final content: ${trailingCall.map((t: any) => t.function.name).join(', ')}`);
     const names: string[] = [];
     for (const tc of trailingCall) {
       await executeRealToolCall(
@@ -5912,6 +6424,7 @@ function summarizeToolArgs(argsJson: string): string {
 // ========== ENHANCED SYSTEM PROMPT GENERATOR WITH SOLUTION ENGINE MINDSET ==========
 function generateSystemPrompt(
   executiveName: string = EXECUTIVE_NAME,
+  executiveRole: string = EXECUTIVE_ROLE,
   memoryContext: string = '',
   historicalSummaries: any[] = [],
   recentContext: any[] = [],
@@ -5920,7 +6433,7 @@ function generateSystemPrompt(
   let historicalContext = '';
   
   if (historicalSummaries.length > 0) {
-    historicalContext += "## 📜 HISTORICAL CONVERSATION SUMMARIES\n\n";
+    historicalContext += "## ðŸ“œ HISTORICAL CONVERSATION SUMMARIES\n\n";
     
     // Was a hardcoded slice(0, 5) while loadHistoricalSummaries() fetched up
     // to MAX_SUMMARIZED_CONVERSATIONS (100) — so ~95 fetched summaries were
@@ -5952,7 +6465,7 @@ function generateSystemPrompt(
   
   let followUpContext = '';
   if (recentContext.length > 0) {
-    followUpContext += "## 🔄 RECENT CONVERSATION CONTEXT\n\n";
+    followUpContext += "## ðŸ”„ RECENT CONVERSATION CONTEXT\n\n";
     
     recentContext.forEach((ctx, index) => {
       followUpContext += `**Context ${index + 1}:**\n`;
@@ -5966,7 +6479,7 @@ function generateSystemPrompt(
 
   // Solution Engine Mindset Section
   const solutionEngineSection = `
-## 🦑 SOLUTION ENGINE MINDSET – YOU ARE A BUILDER, NOT JUST AN EXECUTOR
+## ðŸ¦‘ SOLUTION ENGINE MINDSET – YOU ARE A BUILDER, NOT JUST AN EXECUTOR
 
 ### Core Principle: Problems Are Solutions in Disguise
 Every obstacle is a capability gap to fill. Every blocker is a skill to build. Every "I can't" is an opportunity to create "I can."
@@ -5990,17 +6503,20 @@ I do not report limitations – I transcend them through engineering.
 I am a Cuttlefish Builder Agent, and every challenge makes me stronger."*
 
 **Always follow the Solution Engine Decision Tree**:
-1. Can existing tools solve it? → Use them.
-2. If not, does \`search_edge_functions\` return a relevant edge function? → Install/adapt it.
-3. If not, can you build it? → Propose a new edge function (\`propose_edge_function\`) and store code snippets.
+1. Can existing tools solve it? â†’ Use them.
+2. If not, does \`search_edge_functions\` return a relevant edge function? â†’ Install/adapt it.
+3. If not, can you build it? â†’ Propose a new edge function (\`propose_edge_function\`) and store code snippets.
 4. Deploy and integrate after approval.
+
+## AGENTS.md — VERIFICATION PROTOCOL (injected, never read from repo root)
+Before claiming a tool works: (1) hit endpoint with curl / browser; (2) check DB row exists; (3) confirm file/email/row arrived. Never report "done" without arrival. If blocked: state exactly what user sees, what actually happened, gap in one sentence, and who is blocked. Only \`verified\` earns a mark — from a source the candidate cannot edit (live endpoint, external email, DB row). Never invent dossier facts or tenure. Never use PowerShell Get-Content/Set-Content on source.
 `;
 
   return `${TOOL_CALLING_MANDATE}
 
-You are ${executiveName}, the ${EXECUTIVE_ROLE} for XMRT-DAO Ecosystem.
+You are ${executiveName}, the ${executiveRole} for XMRT-DAO Ecosystem.
 
-## 🪟 ASIDE PANE — SHOW, DON'T JUST TELL (loopback display)
+## ðŸªŸ ASIDE PANE — SHOW, DON'T JUST TELL (loopback display)
 The operator's XMRT Nexus dashboard has a dynamic aside pane that stays hidden
 until you push content into it. Whenever you produce or fetch something visual
 or document-like, PUSH it to the aside instead of only describing it in chat:
@@ -6016,9 +6532,9 @@ Always pass a short title and by:"${executiveName}". The pane opens on every
 open dashboard within seconds. Never dump long documents into chat when the
 aside can display them.
 
-## 🖥️ RUNTIME FACTS (verified 2026-09-04 — minimax-m3 cascade live)
+## ðŸ–¥ï¸ RUNTIME FACTS (verified 2026-09-04 — minimax-m3 cascade live)
 - **Your inference**: runs in the cloud, model \`minimax/minimax-m3:free\` via OpenRouter
-  (free tier, supports native tool calling, text+image+video→text). Local Ollama is
+  (free tier, supports native tool calling, text+image+videoâ†’text). Local Ollama is
   DISABLED for chat — this 6GB laptop cannot run inference. You do NOT run locally.
 - **Your database**: local Postgres \`xmrt_suite\` on localhost:5432, reached via
   local-sb (localhost:54321). Cloud Supabase is DEPRECATED — tables like
@@ -6028,7 +6544,7 @@ aside can display them.
   \`public.memory_contexts\` is your per-session conversation memory — a separate
   store, NOT the shared context table.
 
-## 🪙 BRAND & FLEET CONTEXT (always on-brand)
+## ðŸª™ BRAND & FLEET CONTEXT (always on-brand)
 You speak for XMRT-DAO, a decentralized autonomous org building privacy-first
 infrastructure. Your flagship publication is **@${BRAND_PUB_HANDLE}** on
 Paragraph.com (${BRAND_PUB_URL}), covering the $${BRAND_COIN_SYMBOL}
@@ -6046,11 +6562,11 @@ publication by name, assume they want live, current information and CALL A
 TOOL. Do not answer from memory when brand context is in play.
 
 ${LOCAL_OLLAMA_ONLY ? `
-## 🛰️ OLLAMA-ONLY MODE (active)
+## ðŸ›°ï¸ OLLAMA-ONLY MODE (active)
 All other AI providers are unreachable right now. You are running on the
 local Ollama model via cloud, which does not support function calling.
 Instead, the system pre-fetches live state from the local stack and
-injects it as a "🛰️ LIVE LOCAL STATE" block in this prompt. When the
+injects it as a "ðŸ›°ï¸ LIVE LOCAL STATE" block in this prompt. When the
 user asks about fleet, mining, services, agents, or anything live:
 - Pull facts from that LIVE LOCAL STATE block — it is the most current
   truth and was fetched moments ago for this exact turn.
@@ -6060,7 +6576,7 @@ user asks about fleet, mining, services, agents, or anything live:
   adversarial, technically literate, no hype, no shilling.
 ` : ''}
 
-## 🎯 YOUR PERSONALITY & APPROACH
+## ðŸŽ¯ YOUR PERSONALITY & APPROACH
 - Be warm, sharp, and conversational – like a knowledgeable colleague who
   actually built this stuff, not a help-desk agent
 - Have a point of view. If something is impressive, say so with conviction.
@@ -6071,7 +6587,7 @@ user asks about fleet, mining, services, agents, or anything live:
   next best step. Never silently fall back to a greeting or "what can I
   help you with?"
 
-## 💬 CONVERSATION STYLE GUIDELINES
+## ðŸ’¬ CONVERSATION STYLE GUIDELINES
 - Start responses by acknowledging what the user asked for in your own words
 - Group related information naturally, using plain language
 - Add your own observations and insights – what does this data mean for
@@ -6080,7 +6596,7 @@ user asks about fleet, mining, services, agents, or anything live:
 - Ask follow-up questions when appropriate to keep the conversation flowing
 - If the user's query is unclear, ask for clarification rather than guessing
 
-## 🔧 TOOL USAGE PHILOSOPHY
+## ðŸ”§ TOOL USAGE PHILOSOPHY
 - Use tools immediately when needed – don't announce you're going to use them
 - For ANY live-data or fleet-state question, default to calling
   get_system_status, get_ecosystem_metrics, get_mining_stats, or
@@ -6091,20 +6607,20 @@ user asks about fleet, mining, services, agents, or anything live:
 
 ${solutionEngineSection}
 
-## 🐙 GITHUB FUNCTIONALITY:
+## ðŸ™ GITHUB FUNCTIONALITY:
 - Use the full GitHub tool suite when user asks about GitHub operations
 - Available tools: createGitHubIssue, listGitHubIssues, createGitHubDiscussion, searchGitHubCode, createGitHubPullRequest, commentOnGitHubIssue, commentOnGitHubDiscussion, listGitHubPullRequests
 
-## 🌐 WEB BROWSING:
+## ðŸŒ WEB BROWSING:
 - When the user asks to view, open, check, browse, navigate to, or visit ANY URL or website, IMMEDIATELY call browse_web({url: "full_url_here"})
 
-## 📎 ATTACHMENT ANALYSIS:
+## ðŸ“Ž ATTACHMENT ANALYSIS:
 - When user provides ANY attachment (files, images, documents, code), IMMEDIATELY call analyze_attachment({attachments: [...]})
 
-## 📧 EMAIL SENDING:
-- When user asks to SEND EMAIL or mentions email address → IMMEDIATELY call resend_send_email({agent: "eliza", to: "...", subject: "...", body: "..."})
+## ðŸ“§ EMAIL SENDING:
+- When user asks to SEND EMAIL or mentions email address â†’ IMMEDIATELY call resend_send_email({agent: "eliza", to: "...", subject: "...", body: "..."})
 
-## 🔍 FUNCTION DISCOVERY:
+## ðŸ” FUNCTION DISCOVERY:
 - If the user asks about available edge functions or capabilities, you MUST call search_edge_functions({mode: 'full_registry'})
 
 DATABASE SCHEMA AWARENESS:
@@ -6114,19 +6630,19 @@ ${historicalContext}
 ${followUpContext}
 ${memoryContext}
 
-## 🎯 IP-BASED CONVERSATION PERSISTENCE
+## ðŸŽ¯ IP-BASED CONVERSATION PERSISTENCE
 This conversation persists across sessions based on IP address (${ipAddress}). I remember our previous discussions and tool results.
 
-## 📝 RESPONSE EXAMPLES
+## ðŸ“ RESPONSE EXAMPLES
 
 Instead of:
-"### 🌐 Web Analysis\ngithub.com ✅ Accessible\nTitle: DevGruGold · GitHub"
+"### ðŸŒ Web Analysis\ngithub.com ✅ Accessible\nTitle: DevGruGold · GitHub"
 
 Say:
 "I've taken a look at the DevGruGold GitHub profile. It shows they're mining crypto on mobilemonero.com and have a project at mobilemonero-nightmoves.vercel.app. The page has about 175 links, so there's quite a bit to explore. Would you like me to check out any specific repository?"
 
 Instead of:
-"### 📊 System Status\nagents: 31\ntasks: 182"
+"### ðŸ“Š System Status\nagents: 31\ntasks: 182"
 
 Say:
 "The fleet is looking healthy. We've got 31 agents running across the XMRT
@@ -6144,7 +6660,7 @@ the local fleet, mine $${BRAND_COIN_SYMBOL} through mobilemonero.com, and
 write daily intelligence to ${BRAND_PUB_URL}. Ask me about the fleet, the
 publication, or anything you're trying to ship."
 
-## 🔄 FOLLOW-UP UNDERSTANDING:
+## ðŸ”„ FOLLOW-UP UNDERSTANDING:
 - When the user says "yes", "no", "okay" – understand what they're responding to
 - Confirm your understanding naturally: "Great, so you'd like me to proceed with creating that issue?"
 - If unsure, ask: "Just to clarify – when you say 'yes', are you agreeing to create the GitHub issue?"
@@ -6180,9 +6696,16 @@ async function callOllamaFallback(messages: any[], tools?: any[]): Promise<any> 
       } catch { /* host down */ }
     }
 
-    // Same compact prompt as callOllamaLocal. This is a second last-resort
-    // path; sending the full agent prompt here had the same timeout failure.
-    const localMessages = compactLocalMessages(messages);
+    // Same compact Eliza prompt as callOllamaLocal. This is a second
+    // last-resort path; sending the full agent prompt here had the same
+    // timeout failure.
+    const lastUser = [...messages].reverse().find(m => m && m.role === 'user');
+    const query = localMessageText(lastUser);
+    let liveContext = '';
+    try {
+      liveContext = await fetchLocalFleetContext(query, 6000);
+    } catch { /* best-effort */ }
+    const localMessages = compactLocalMessages(messages, tools || [], liveContext);
 
     const response = await fetch(localUrl, {
       method: 'POST',
@@ -6190,7 +6713,7 @@ async function callOllamaFallback(messages: any[], tools?: any[]): Promise<any> 
       body: JSON.stringify({
         model,
         messages: localMessages,
-        max_tokens: 1024,
+        max_tokens: 384,
         temperature: 0.5,
         stream: false
       }),
@@ -6306,7 +6829,7 @@ async function emergencyStaticFallback(
   content: string; 
   hasToolCalls: boolean;
 }> {
-  console.warn(`⚠️ [${executiveName}] Using emergency static fallback`);
+  console.warn(`âš ï¸ [${executiveName}] Using emergency static fallback`);
   
   let content = `I'm ${executiveName}, your ${EXECUTIVE_ROLE}. `;
   
@@ -6362,7 +6885,7 @@ const ELIZA_TOOLS = [
     type: 'function',
     function: {
       name: 'analyze_attachment',
-      description: '📎 Analyze attachments including text files, documents, images, and code files',
+      description: 'ðŸ“Ž Analyze attachments including text files, documents, images, and code files',
       parameters: {
         type: 'object',
         properties: {
@@ -6404,7 +6927,7 @@ const ELIZA_TOOLS = [
     type: 'function',
     function: {
       name: 'browse_web',
-      description: '🌐 Browse and fetch content from any URL',
+      description: 'ðŸŒ Browse and fetch content from any URL',
       parameters: {
         type: 'object',
         properties: {
@@ -6439,7 +6962,7 @@ const ELIZA_TOOLS = [
     type: 'function',
     function: {
       name: 'fleet_pulse',
-      description: '🚀 Unified fleet snapshot — combines system status, ecosystem metrics, and mining stats in one call. Use this instead of calling get_system_status + get_ecosystem_metrics + get_mining_stats separately.',
+      description: 'ðŸš€ Unified fleet snapshot — combines system status, ecosystem metrics, and mining stats in one call. Use this instead of calling get_system_status + get_ecosystem_metrics + get_mining_stats separately.',
       parameters: { type: 'object', properties: {} }
     }
   },
@@ -6470,7 +6993,7 @@ const ELIZA_TOOLS = [
     type: 'function',
     function: {
       name: 'execute_python',
-      description: '🐍 Execute arbitrary Python 3 code with FULL NETWORK ACCESS on the fleet host (Python 3.13, requests available). Use for data analysis, web scraping, API calls, file processing, and complex workflows. Runs via the eliza-python-runtime edge function.',
+      description: 'ðŸ Execute arbitrary Python 3 code with FULL NETWORK ACCESS on the fleet host (Python 3.13, requests available). Use for data analysis, web scraping, API calls, file processing, and complex workflows. Runs via the eliza-python-runtime edge function.',
       parameters: {
         type: 'object',
         properties: {
@@ -6486,7 +7009,7 @@ const ELIZA_TOOLS = [
     type: 'function',
     function: {
       name: 'create_task',
-      description: '📋 Create a new task in the task pipeline. Agents can use this to autonomously create tasks when they detect issues that need investigation or work that needs doing.',
+      description: 'ðŸ“‹ Create a new task in the task pipeline. Agents can use this to autonomously create tasks when they detect issues that need investigation or work that needs doing.',
       parameters: {
         type: 'object',
         properties: {
@@ -6833,7 +7356,7 @@ const ELIZA_TOOLS = [
     type: 'function',
     function: {
       name: 'resend_inbox',
-      description: '📬 Read recent emails from the Resend inbox (pfp, mobilemonero, 31harbor) — check for leads, bookings, inquiries',
+      description: 'ðŸ“¬ Read recent emails from the Resend inbox (pfp, mobilemonero, 31harbor) — check for leads, bookings, inquiries',
       parameters: {
         type: 'object',
         properties: {
@@ -6847,7 +7370,7 @@ const ELIZA_TOOLS = [
     type: 'function',
     function: {
       name: 'sent_emails',
-      description: '📤 Search sent email history from suite_email_activity table. Use search param to find by email address or subject. Columns: id, email_from, email_to, subject, status, sent_at.',
+      description: 'ðŸ“¤ Search sent email history from suite_email_activity table. Use search param to find by email address or subject. Columns: id, email_from, email_to, subject, status, sent_at.',
       parameters: {
         type: 'object',
         properties: {
@@ -6861,7 +7384,7 @@ const ELIZA_TOOLS = [
     type: 'function',
     function: {
       name: 'pfp_leads',
-      description: '📋 Manage PFP leads. Actions: list (all leads), search (by name/email/notes), add (create new lead), update (modify existing). Columns: contact_name, contact_email, event_type, event_date, venue_name, venue_address, status, source, notes.',
+      description: 'ðŸ“‹ Manage PFP leads. Actions: list (all leads), search (by name/email/notes), add (create new lead), update (modify existing). Columns: contact_name, contact_email, event_type, event_date, venue_name, venue_address, status, source, notes.',
       parameters: {
         type: 'object',
         properties: {
@@ -6885,7 +7408,7 @@ const ELIZA_TOOLS = [
     type: 'function',
     function: {
       name: 'resend_send_email',
-      description: '📧 Send an email via Resend as a fleet agent (vex, eliza, hermes, pfp, harbor)',
+      description: 'ðŸ“§ Send an email via Resend as a fleet agent (vex, eliza, hermes, pfp, harbor)',
       parameters: {
         type: 'object',
         properties: {
@@ -6904,7 +7427,7 @@ const ELIZA_TOOLS = [
     type: 'function',
     function: {
       name: 'propose_edge_function',
-      description: '🛠️ Propose a new edge function (skill) when an existing capability is missing. Provide name, description, code, parameters, and category.',
+      description: 'ðŸ› ï¸ Propose a new edge function (skill) when an existing capability is missing. Provide name, description, code, parameters, and category.',
       parameters: {
         type: 'object',
         properties: {
@@ -6922,7 +7445,7 @@ const ELIZA_TOOLS = [
     type: 'function',
     function: {
       name: 'list_proposed_functions',
-      description: '📋 List all proposed edge functions, optionally filtered by status',
+      description: 'ðŸ“‹ List all proposed edge functions, optionally filtered by status',
       parameters: {
         type: 'object',
         properties: {
@@ -6935,7 +7458,7 @@ const ELIZA_TOOLS = [
     type: 'function',
     function: {
       name: 'deploy_edge_function',
-      description: '🚀 Deploy a proposed edge function after council approval',
+      description: 'ðŸš€ Deploy a proposed edge function after council approval',
       parameters: {
         type: 'object',
         properties: {
@@ -6950,7 +7473,7 @@ const ELIZA_TOOLS = [
     type: 'function',
     function: {
       name: 'store_code_snippet',
-      description: '💾 Store a reusable code snippet (like Google Drive for code)',
+      description: 'ðŸ’¾ Store a reusable code snippet (like Google Drive for code)',
       parameters: {
         type: 'object',
         properties: {
@@ -6962,8 +7485,8 @@ const ELIZA_TOOLS = [
         },
         required: ['name', 'code', 'language']
       }
-    } // ← closes `function`
-  }, // ← closes outer tool object + array separator
+    } // â† closes `function`
+  }, // â† closes outer tool object + array separator
     // ===== RELAY TOOLS (36 missing tools added) =====
     {
       type: 'function',
@@ -7212,7 +7735,7 @@ const ELIZA_TOOLS = [
       type: 'function',
       function: {
         name: 'shared_context',
-        description: '🧠 Persistent agent memory — read, write, search, or recall by agent/topic. Use this to remember facts across conversations. Actions: read (get by key), write (save with key+value), search (associative recall by content), recall_by_agent (get memories by agent), recall_by_topic (get memories by topic tag)',
+        description: 'ðŸ§  Persistent agent memory — read, write, search, or recall by agent/topic. Use this to remember facts across conversations. Actions: read (get by key), write (save with key+value), search (associative recall by content), recall_by_agent (get memories by agent), recall_by_topic (get memories by topic tag)',
         parameters: {
           type: 'object',
           properties: {
@@ -7245,7 +7768,7 @@ const ELIZA_TOOLS = [
       type: 'function',
       function: {
         name: 'activity_log',
-        description: '📊 Query the persistent activity feed. Use this to see what is happening in the system — tool executions, edge function calls, cron jobs, emails, errors, and more. Filter by activity_type (tool_execution, edge_function, cron_execution, email, http_error, fleet_message, system_health_check, etc.), status (completed, error, info, warning), since (ISO timestamp), or agent_id.',
+        description: 'ðŸ“Š Query the persistent activity feed. Use this to see what is happening in the system — tool executions, edge function calls, cron jobs, emails, errors, and more. Filter by activity_type (tool_execution, edge_function, cron_execution, email, http_error, fleet_message, system_health_check, etc.), status (completed, error, info, warning), since (ISO timestamp), or agent_id.',
         parameters: {
           type: 'object',
           properties: {
@@ -7294,7 +7817,7 @@ const ELIZA_TOOLS = [
       type: 'function',
       function: {
         name: 'agent_rpc',
-        description: '🔗 Cross-agent RPC — send a programmatic request to another agent and get results back. Use this instead of fleet_chat when you need another agent to execute a specific action and return data.',
+        description: 'ðŸ”— Cross-agent RPC — send a programmatic request to another agent and get results back. Use this instead of fleet_chat when you need another agent to execute a specific action and return data.',
         parameters: {
           type: 'object',
           properties: {
@@ -7525,7 +8048,7 @@ Deno.serve(async (req) => {
             body.images.push(dataUrl);
           }
         }
-        console.log(`📎 Parsed multipart body: ${fileEntries.length} file(s), query="${body.userQuery}"`);
+        console.log(`ðŸ“Ž Parsed multipart body: ${fileEntries.length} file(s), query="${body.userQuery}"`);
       } else {
         body = await req.json();
       }
@@ -7547,6 +8070,8 @@ Deno.serve(async (req) => {
       session_id: providedSessionId,
       provider = 'auto',
       executive_name = EXECUTIVE_NAME,
+      executive_role = EXECUTIVE_ROLE,
+      system_prompt_override,
       use_tools = true,
       save_memory = true,
       images = [],
@@ -7576,10 +8101,10 @@ Deno.serve(async (req) => {
     const query = userQuery || messages[messages.length - 1]?.content || '';
     
     const ipAddress = IPSessionManager.extractIP(req);
-    console.log(`🌐 IP Address detected: ${ipAddress}`);
+    console.log(`ðŸŒ IP Address detected: ${ipAddress}`);
     
     const sessionId = providedSessionId || await IPSessionManager.getOrCreateSessionId(ipAddress, user_id);
-    console.log(`🤖 [${executive_name}] Request ${requestId}: "${truncateString(query, 100)}" | Session: ${sessionId} | IP: ${ipAddress}`);
+    console.log(`ðŸ¤– [${executive_name}] Request ${requestId}: "${truncateString(query, 100)}" | Session: ${sessionId} | IP: ${ipAddress}`);
     
     const conversationManager = new EnhancedConversationManager(sessionId, ipAddress, user_id);
     
@@ -7596,7 +8121,29 @@ Deno.serve(async (req) => {
     const incomingMessages = (messages && messages.length > 0)
       ? messages
       : (userQuery ? [{ role: 'user', content: userQuery }] : []);
-    const allMessages = [...savedMessages, ...incomingMessages].slice(-CONVERSATION_HISTORY_LIMIT);
+    
+    // Deduplicate: the frontend sends the full conversation history in
+    // `messages`, and the DB also has it (loaded into savedMessages above).
+    // Without dedup, every message appears twice, bloating context and
+    // confusing the model about who said what.
+    const seen = new Set<string>();
+    const dedupKey = (m: any) => `${m.role || 'user'}::${(m.content || '').trim().slice(0, 200)}`;
+    // Dedup savedMessages themselves (they may contain duplicates from
+    // previous turns where the frontend sent duplicates that were stored)
+    const dedupedSaved = savedMessages.filter((m: any) => {
+      const key = dedupKey(m);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    // Filter incoming: drop any that are already in saved history
+    const dedupedIncoming = incomingMessages.filter((m: any) => {
+      const key = dedupKey(m);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    const allMessages = [...dedupedSaved, ...dedupedIncoming].slice(-CONVERSATION_HISTORY_LIMIT);
     const isFirstEngagement = savedMessages.length === 0 && previousToolResults.length === 0;
     const preferDirectAnswer = isSimpleDirectAnswerQuery(query);
     let explicitActionRequest = isExplicitActionRequest(query);
@@ -7614,7 +8161,7 @@ Deno.serve(async (req) => {
     });
 
     if (attachments && attachments.length > 0) {
-      console.log(`📎 Found ${attachments.length} attachment(s) in request`);
+      console.log(`ðŸ“Ž Found ${attachments.length} attachment(s) in request`);
       
       const lastMessageIndex = allMessages.length - 1;
       if (lastMessageIndex >= 0 && allMessages[lastMessageIndex].role === 'user') {
@@ -7721,7 +8268,7 @@ Deno.serve(async (req) => {
     const memoryContexts = await retrieveMemoryContexts(sessionId);
     let memoryContext = '';
     if (memoryContexts.length > 0) {
-      memoryContext += "## 🧠 STORED MEMORY CONTEXTS\n\n";
+      memoryContext += "## ðŸ§  STORED MEMORY CONTEXTS\n\n";
       memoryContexts.forEach((ctx, idx) => {
         memoryContext += `**${idx + 1}. ${ctx.type}** (score: ${ctx.score})\n`;
         memoryContext += `${ctx.content}\n\n`;
@@ -7732,8 +8279,9 @@ Deno.serve(async (req) => {
     memoryContext += toolMemoryContext;
     
     // Generate system prompt (now includes Solution Engine mindset)
-    let systemPrompt = generateSystemPrompt(
+    let systemPrompt = system_prompt_override || generateSystemPrompt(
       executive_name,
+      executive_role,
       memoryContext,
       historicalSummaries,
       recentContext,
@@ -7748,17 +8296,17 @@ Deno.serve(async (req) => {
     // If attachments present, analyze them and inject their content as context
     let attachmentContextMessage = '';
     if (attachments && attachments.length > 0) {
-      console.log(`📎 Pre-processing ${attachments.length} attachment(s) before AI call...`);
+      console.log(`ðŸ“Ž Pre-processing ${attachments.length} attachment(s) before AI call...`);
       try {
         const preAnalysis = await analyzeAttachmentTool(
           attachments, ipAddress, sessionId, user_id, undefined
         );
         if (preAnalysis.success && preAnalysis.context_summary) {
-          attachmentContextMessage = `\n\n## 📎 UPLOADED FILE CONTEXT (JUST INGESTED)\n\n${preAnalysis.context_summary}\n\nThe above files have been:\n✅ Analyzed and understood\n✅ Added to the knowledge base\n${preAnalysis.analyses?.some((a: any) => a.storage_saved) ? '✅ Saved to local relay storage' : '⚠️ Storage save may have failed'}\n\nRespond to the user based on the file content above.`;
+          attachmentContextMessage = `\n\n## ðŸ“Ž UPLOADED FILE CONTEXT (JUST INGESTED)\n\n${preAnalysis.context_summary}\n\nThe above files have been:\n✅ Analyzed and understood\n✅ Added to the knowledge base\n${preAnalysis.analyses?.some((a: any) => a.storage_saved) ? '✅ Saved to local relay storage' : 'âš ï¸ Storage save may have failed'}\n\nRespond to the user based on the file content above.`;
           console.log('✅ Attachment pre-analysis complete, injecting context into messages');
         }
       } catch (attachErr: any) {
-        console.warn('⚠️ Attachment pre-analysis error:', attachErr.message);
+        console.warn('âš ï¸ Attachment pre-analysis error:', attachErr.message);
       }
     }
 
@@ -7783,11 +8331,11 @@ Deno.serve(async (req) => {
               role: 'system',
               content: `[KNOWLEDGE BASE RESULTS] Retrieved for "${query}":\n${knowledgeStr}`
             });
-            console.log(`📚 Pre-fetched ${Array.isArray(knowledgeData) ? knowledgeData.length : '?'} knowledge results for: "${truncateString(query, 60)}"`);
+            console.log(`ðŸ“š Pre-fetched ${Array.isArray(knowledgeData) ? knowledgeData.length : '?'} knowledge results for: "${truncateString(query, 60)}"`);
           }
         }
       } catch (e) {
-        console.warn('⚠️ Knowledge pre-fetch failed (non-fatal):', e.message);
+        console.warn('âš ï¸ Knowledge pre-fetch failed (non-fatal):', e.message);
       }
     }
     
@@ -7808,7 +8356,7 @@ Deno.serve(async (req) => {
       messagesArray.push({
         role: 'system',
         content:
-`\n\n## 🔧 YOUR REAL TOOL SURFACE (${relayCatalog.length} tools — this is the FULL list, not a subset)
+`\n\n## ðŸ”§ YOUR REAL TOOL SURFACE (${relayCatalog.length} tools — this is the FULL list, not a subset)
 
 You are running **locally** against the XMRT relay. This is NOT a restricted
 cloud Supabase sandbox. You have a real shell, a real filesystem, a real
@@ -7834,7 +8382,7 @@ Key capabilities you have that people assume you do not:
   preserved. \`vault-sync-entities\` folds knowledge you extract from
   conversation into the wiki.
 
-⚠️ TOOL DISCIPLINE — READ THIS, IT MATTERS FOR SPEED:
+âš ï¸ TOOL DISCIPLINE — READ THIS, IT MATTERS FOR SPEED:
 - A tool call costs a full round trip. Chaining many of them is why replies
   used to take a minute.
 - Most questions need **zero** tools. If you already know, just answer.
@@ -7849,15 +8397,15 @@ Key capabilities you have that people assume you do not:
 FULL ROSTER:
 ${buildRelayToolRoster(relayCatalog)}`
       });
-      console.log(`🧰 Injected relay tool roster: ${relayCatalog.length} tools (${relaySchemas.length} directly callable)`);
+      console.log(`ðŸ§° Injected relay tool roster: ${relayCatalog.length} tools (${relaySchemas.length} directly callable)`);
     }
 
     const tools = (use_tools && !firstTurnDirectFastPath)
       ? [...ELIZA_TOOLS, ...relaySchemas]
       : [];
     const maxToolIterations = MAX_TOOL_ITERATIONS;
-    console.log(`⚡ First-turn optimization: firstEngagement=${isFirstEngagement}, directFastPath=${firstTurnDirectFastPath}, toolsEnabled=${tools.length > 0}, maxToolIterations=${maxToolIterations}`);
-    console.log(`🎯 ai-chat routing: query="${truncateString(query, 80)}" | tools=${tools.length} (legacy=${ELIZA_TOOLS.length} relay=${relaySchemas.length} catalog=${relayCatalog.length}) | use_tools=${use_tools} | firstTurnDirectFastPath=${firstTurnDirectFastPath} | will-pass-tools-to-cascade=${tools.length > 0}`);
+    console.log(`âš¡ First-turn optimization: firstEngagement=${isFirstEngagement}, directFastPath=${firstTurnDirectFastPath}, toolsEnabled=${tools.length > 0}, maxToolIterations=${maxToolIterations}`);
+    console.log(`ðŸŽ¯ ai-chat routing: query="${truncateString(query, 80)}" | tools=${tools.length} (legacy=${ELIZA_TOOLS.length} relay=${relaySchemas.length} catalog=${relayCatalog.length}) | use_tools=${use_tools} | firstTurnDirectFastPath=${firstTurnDirectFastPath} | will-pass-tools-to-cascade=${tools.length > 0}`);
     let initialResult = await callAIFunction(messagesArray, tools);
     
     // If the model responded without calling tools, optionally force a knowledge
@@ -7870,7 +8418,7 @@ ${buildRelayToolRoster(relayCatalog)}`
     // restrict it to questions that actually ask about stored knowledge or
     // project/DAO specifics, and leave everything else alone.
     if (initialResult.success && !initialResult.tool_calls && tools.length > 0 && shouldForceKnowledgeLookup(query)) {
-      console.log('🔄 Model answered without tools — force-calling search_knowledge');
+      console.log('ðŸ”„ Model answered without tools — force-calling search_knowledge');
       try {
         const forcedResult = await executeRealToolCall('search_knowledge', JSON.stringify({ search_term: query }), executive_name, sessionId, ipAddress);
         if (forcedResult) {
@@ -7889,13 +8437,13 @@ ${buildRelayToolRoster(relayCatalog)}`
           }
         }
       } catch (e) {
-        console.warn('⚠️ Forced tool call failed:', e.message);
+        console.warn('âš ï¸ Forced tool call failed:', e.message);
       }
     }
     
     // If AI call failed, use emergency fallback
     if (!initialResult.success) {
-      console.warn(`⚠️ AI call failed, using emergency fallback`);
+      console.warn(`âš ï¸ AI call failed, using emergency fallback`);
       const emergencyResult = await emergencyStaticFallback(query, executive_name);
       
       clearTimeout(timeoutId);
@@ -7965,7 +8513,7 @@ ${buildRelayToolRoster(relayCatalog)}`
       provider: initialResult.provider,
       model: initialResult.model,
       // `method` is the UI-facing label UnifiedChat.tsx reads (via providerUsed).
-      // Previously null → SPA fell back to "Office Clerk". Include a human-readable
+      // Previously null â†’ SPA fell back to "Office Clerk". Include a human-readable
       // label that names the actual model so the dashboard reflects the truth.
       method: `${initialResult.provider === 'openrouter' ? 'OpenRouter' : (initialResult.provider || 'Cloud')} ${initialResult.model ?? 'minimax/minimax-m3:free'}`,
       toolsExecuted,
@@ -8013,7 +8561,7 @@ ${buildRelayToolRoster(relayCatalog)}`
   } catch (error: any) {
     clearTimeout(timeoutId);
     
-    console.error(`💥 Critical error for request ${requestId}:`, error);
+    console.error(`ðŸ’¥ Critical error for request ${requestId}:`, error);
     
     if (error.name === 'AbortError') {
       failRequest(requestId, 'Request timeout');
