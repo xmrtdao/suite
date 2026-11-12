@@ -229,6 +229,108 @@ This inserts 5 core entities (XMRT DAO, local-sb, Memory Pipeline, Fleet Chat, P
 - **Deno**: Cold-start per function call (~500ms) — no long-running workers
 - **PostgREST edge cases**: Some advanced queries (`.single()`, enum `in.(...)`) may need workarounds — see `local-supabase/routes/rest.mjs`
 
+---
+
+## 🐧 Linux Installation
+
+### Prerequisites (Ubuntu/Debian)
+
+```bash
+# Node.js 20+
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+
+# PostgreSQL 15+
+sudo apt-get install -y postgresql postgresql-contrib
+sudo -u postgres psql -c "CREATE DATABASE xmrt_suite;"
+sudo -u postgres psql -d xmrt_suite -c "CREATE USER xmrt WITH PASSWORD 'xmrt';"
+sudo -u postgres psql -d xmrt_suite -c "GRANT ALL PRIVILEGES ON DATABASE xmrt_suite TO xmrt;"
+
+# Deno
+curl -fsSL https://deno.land/install.sh | sh
+export DENO_INSTALL="$HOME/.deno"
+export PATH="$DENO_INSTALL/bin:$PATH"
+
+# Git
+sudo apt-get install -y git
+```
+
+### Clone and install
+
+```bash
+# Clone the relay (contains local-sb and the relay server)
+git clone https://github.com/xmrtdao/mobilemonero.git
+cd mobilemonero
+
+# Install relay dependencies
+cd relay && npm install && cd ..
+
+# Install local-sb dependencies
+cd local-supabase && npm install && cd ..
+
+# Clone and install the suite
+git clone https://github.com/xmrtdao/suite.git
+cd suite && npm install --legacy-peer-deps && cd ..
+```
+
+### Configure
+
+```bash
+# Relay env
+cp relay/.env.example relay/.env
+# Edit relay/.env — set RELAY_API_KEY, OPENROUTER_API_KEY, etc.
+
+# Suite env
+cp suite/.env.example suite/.env.local
+# Edit suite/.env.local — set VITE_SUPABASE_URL=http://127.0.0.1:54321 (local-sb mode)
+```
+
+### Start the stack
+
+```bash
+# Option A: Use the supervisor (recommended)
+cd mobilemonero && node supervisor.mjs --serve
+
+# Option B: Manual startup
+# 1. Start Postgres (already running as service)
+# 2. Start local-sb
+cd local-supabase && node server.mjs &
+# 3. Start relay
+cd ../relay && node server.js &
+# 4. Start suite dev server
+cd ../suite && npm run dev &
+```
+
+### Verify
+
+```bash
+# Relay health
+curl http://localhost:8080/health
+
+# local-sb health
+curl http://localhost:54321/health
+
+# Suite dashboard
+curl http://localhost:8080/suite/dashboard
+```
+
+### Production build
+
+```bash
+cd suite && npm run build
+# The relay serves the built SPA from suite/dist at /suite/
+```
+
+### Prerequisites summary
+
+| Dependency | Version | Purpose |
+|------------|---------|---------|
+| Node.js | 20+ | Runtime for relay, local-sb, suite |
+| PostgreSQL | 15+ | Database backend |
+| Deno | 1.x+ | Edge function runtime (local-sb) |
+| Git | 2.x+ | Source control |
+| Ollama (optional) | latest | Local LLM inference (gemma3-xmrt) |
+
 ## 🔧 Development
 
 ### Available Scripts
