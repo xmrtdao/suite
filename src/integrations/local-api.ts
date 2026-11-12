@@ -66,6 +66,24 @@ export async function createTask(data: Record<string, any>): Promise<LocalRespon
   }
 }
 
+export async function createTaskArtifact(data: { task_id: string; type?: string; url?: string; description?: string }): Promise<LocalResponse<any>> {
+  try {
+    const res = await fetch('/api/suite/task-artifacts', {
+      method: 'POST',
+      headers: relayAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+      return { data: null, error: { message: err.error || `HTTP ${res.status}` } };
+    }
+    const json = await res.json();
+    return { data: json, error: null };
+  } catch (e: any) {
+    return { data: null, error: { message: e.message } };
+  }
+}
+
 export async function updateTask(id: string, data: Record<string, any>): Promise<LocalResponse<any>> {
   try {
     const res = await fetch(`/api/suite/tasks/${id}`, {

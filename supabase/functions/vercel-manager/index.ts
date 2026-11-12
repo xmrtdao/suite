@@ -183,7 +183,7 @@ serve(async (req) => {
               status: 'active',
               integration: 'supabase-backend',
               backend: {
-                url: 'https://vawouugtzwmejxqkeqqj.supabase.co',
+                url: 'http://127.0.0.1:54321',
                 project_id: 'vawouugtzwmejxqkeqqj'
               }
             }

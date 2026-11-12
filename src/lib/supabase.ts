@@ -109,9 +109,9 @@ export const chatAPI = {
     })
   },
   
-  // Call CMO (Lovable) specifically
+  // Call CMO (AI cascade) specifically
   async callCMO(messages: any[], options: any = {}) {
-    return this.callChatFunction('lovable-chat', {
+    return this.callChatFunction('ai-chat', {
       messages,
       model: 'claude-3.5-sonnet',
       temperature: 0.7,
@@ -127,7 +127,7 @@ export const chatAPI = {
       { name: 'CTO', func: 'deepseek-chat' },
       { name: 'CAO', func: 'gemini-chat' },
       { name: 'CFO', func: 'openai-chat' },
-      { name: 'CMO', func: 'lovable-chat' }
+      { name: 'CMO', func: 'ai-chat' }
     ]
     
     const responses = []
@@ -164,7 +164,7 @@ export const chatAPI = {
   // Smart routing (let backend choose best executive)
   async callSmart(messages: any[], options: any = {}) {
     // Try executives in order of availability
-    const executiveOrder = ['coo-chat', 'deepseek-chat', 'gemini-chat', 'openai-chat', 'lovable-chat', 'ai-chat']
+    const executiveOrder = ['coo-chat', 'deepseek-chat', 'gemini-chat', 'openai-chat', 'ai-chat']
     
     for (const executive of executiveOrder) {
       try {

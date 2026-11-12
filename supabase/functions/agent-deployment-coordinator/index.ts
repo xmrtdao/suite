@@ -134,7 +134,7 @@ async function deployXMRTAgent(
     },
     environment: {
       XMRT_ECOSYSTEM: 'true',
-      SUPABASE_URL: 'https://vawouugtzwmejxqkeqqj.supabase.co',
+      SUPABASE_URL: 'http://127.0.0.1:54321',
       AGENT_TYPE: agent.agent_type,
       AGENT_DOMAIN: agent.domain,
       ECOSYSTEM_MODE: 'autonomous',

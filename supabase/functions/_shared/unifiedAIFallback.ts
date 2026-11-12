@@ -22,7 +22,6 @@ const PROVIDER_TIMEOUTS = {
   vertexai: 8000,     // Vertex AI Express Mode
   deepseek: 10000,    // Slightly longer for reasoning
   kimi: 8000,         // Kimi
-  lovable: 10000,     // Lovable API
   ollamaPro: 15000,   // Ollama Pro cloud (OpenAI-compatible)
   opencodeZen: 15000, // OpenCode Zen (OpenAI-compatible, space-bunny-free)
   embedding: 10000,
@@ -336,6 +335,12 @@ interface ProviderResult {
   content?: string;
   message?: any;
   provider: string;
+  // The model that actually answered. Without it every persona function had
+  // to report a hardcoded 'unified-fallback-cascade', which is a name for the
+  // ROUTE, not for the model — so the UI could not tell the user (or us)
+  // which model they were talking to. The whole point of the "via <provider>
+  // <model>" label is that it is true.
+  model?: string;
   error?: string;
 }
 
@@ -540,20 +545,27 @@ async function callVertex(
 }
 
 /**
- * Call Lovable (via OpenRouter/Anthropic) - TERTIARY PROVIDER
+ * Call OpenRouter Free Models Router (reasoning + tool-calling)
  */
-async function callLovable(
+async function callOpenRouterFreeRouter(
   messages: AIMessage[],
   options: UnifiedAIOptions = {}
 ): Promise<ProviderResult> {
-  const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY') || Deno.env.get('OPENROUTER_API_KEY');
+  const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY');
 
-  if (!LOVABLE_API_KEY) {
-    return { success: false, provider: 'lovable', error: 'LOVABLE_API_KEY not configured' };
+  if (!OPENROUTER_API_KEY) {
+    return { success: false, provider: 'openrouter', error: 'OPENROUTER_API_KEY not configured' };
   }
 
+  // Proven tool-calling models in priority order
+  const toolCallingModels = [
+    'nvidia/nemotron-3.5-lightning:free',     // Verified: 0.66s, native tool_calls
+    'cohere/north-mini-code:free',             // Verified: 1396ms + native tool_calls
+    'dots-studio/dots-3-note-preview:free',    // Verified: 3501ms + native tool_calls
+  ];
+
   try {
-    console.log('💜 TERTIARY PROVIDER: Attempting Lovable (Claude 3.5 Sonnet) with full Eliza context...');
+    console.log('🔑 BACKUP: Attempting OpenRouter Free Models Router (reasoning + tool-calling)...');
 
     const effectiveSystemPrompt = getEffectiveSystemPrompt(options);
     const effectiveTools = getEffectiveTools(options);
@@ -565,156 +577,75 @@ async function callLovable(
 
     const maxTokens = options.maxTokens || options.max_tokens || RESPONSE_MAX_TOKENS;
 
-    const requestBody: any = {
-      model: 'anthropic/claude-3.5-sonnet', // The "Lovable" brain
-      messages: requestMessages,
-      temperature: options.temperature || 0.7,
-      max_tokens: maxTokens,
-    };
+    // Try each proven tool-calling model in sequence
+    for (const model of toolCallingModels) {
+      console.log(`🔑 Trying OpenRouter model: ${model}`);
 
-    // Include ALL tools for Lovable
-    if (effectiveTools.length > 0) {
-      console.log(`📊 Lovable: Passing ${effectiveTools.length} tools (full array)`);
-      requestBody.tools = effectiveTools;
-      requestBody.tool_choice = 'auto';
-    }
+      const requestBody: any = {
+        model: model,
+        messages: requestMessages,
+        temperature: options.temperature || 0.7,
+        max_tokens: maxTokens,
+      };
 
-    const response = await fetchWithTimeout(
-      'https://openrouter.ai/api/v1/chat/completions',
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': 'https://xmrt.pro',
-          'X-Title': 'XMRT Lovable'
+      if (effectiveTools.length > 0) {
+        console.log(`📊 OpenRouter: Passing ${effectiveTools.length} tools (full array)`);
+        requestBody.tools = effectiveTools;
+        requestBody.tool_choice = 'auto';
+      }
+
+      const response = await fetchWithTimeout(
+        'https://openrouter.ai/api/v1/chat/completions',
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+            'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://xmrt.pro',
+            'X-Title': 'XMRT OpenRouter',
+          },
+          body: JSON.stringify(requestBody),
         },
-        body: JSON.stringify(requestBody),
-      },
-      PROVIDER_TIMEOUTS.lovable
-    );
+        PROVIDER_TIMEOUTS.openrouter
+      );
 
-    // Fast-fail
-    const fastFailError = checkFastFail(response, 'lovable');
-    if (fastFailError) {
-      return { success: false, provider: 'lovable', error: fastFailError };
+      const fastFailError = checkFastFail(response, 'openrouter');
+      if (fastFailError) {
+        console.log(`⚠️ OpenRouter model ${model} fast-failed:`, fastFailError);
+        continue;  // Try next model
+      }
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.warn(`⚠️ OpenRouter model ${model} failed (${response.status}):`, errorText);
+        continue;  // Try next model
+      }
+
+      const data = await response.json();
+      const message = data.choices?.[0]?.message;
+
+      if (!message) {
+        console.log(`⚠️ OpenRouter model ${model} - no message in response`);
+        continue;  // Try next model
+      }
+
+      console.log(`✅ OpenRouter model ${model} successful with Eliza intelligence`);
+
+      if (message.tool_calls?.length > 0) {
+        console.log(`🔧 OpenRouter model ${model} returned ${message.tool_calls.length} tool calls`);
+        return { success: true, provider: 'openrouter', model: model, message };
+      }
+
+      console.log(`✅ OpenRouter model ${model} returned content (no tool calls)`);
+      return { success: true, provider: 'openrouter', model: model, content: message.content || '' };
     }
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.warn(`⚠️ Lovable failed (${response.status}):`, errorText);
-      return { success: false, provider: 'lovable', error: `${response.status}: ${errorText}` };
-    }
-
-    const data = await response.json();
-    const message = data.choices?.[0]?.message;
-
-    if (!message) {
-      return { success: false, provider: 'lovable', error: 'No message in response' };
-    }
-
-    console.log('✅ Lovable AI successful with Eliza intelligence');
-
-    if (message.tool_calls?.length > 0) {
-      console.log(`🔧 Lovable returned ${message.tool_calls.length} tool calls`);
-      return { success: true, provider: 'lovable', message };
-    }
-
-    return { success: true, provider: 'lovable', content: message.content || '' };
+    // All models failed
+    return { success: false, provider: 'openrouter', error: 'All proven tool-calling models failed' };
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
-    console.warn('⚠️ Lovable error:', errMsg);
-    return { success: false, provider: 'lovable', error: errMsg };
-  }
-}
-
-/**
- * Call DeepSeek V3 - FALLBACK PROVIDER (Reasoning)
- */
-async function callDeepSeek(
-  messages: AIMessage[],
-  options: UnifiedAIOptions = {}
-): Promise<ProviderResult> {
-  const DEEPSEEK_API_KEY = Deno.env.get('DEEPSEEK_API_KEY');
-
-  if (!DEEPSEEK_API_KEY) {
-    return { success: false, provider: 'deepseek', error: 'DEEPSEEK_API_KEY not configured' };
-  }
-
-  try {
-    console.log('🧠 FALLBACK PROVIDER: Attempting DeepSeek V3 with full Eliza context...');
-
-    const effectiveSystemPrompt = getEffectiveSystemPrompt(options);
-    const effectiveTools = getEffectiveTools(options);
-
-    // DeepSeek V3 supports system messages
-    const requestMessages = [
-      { role: 'system', content: effectiveSystemPrompt },
-      ...messages.filter(m => m.role !== 'system')
-    ];
-
-    const maxTokens = options.maxTokens || options.max_tokens || RESPONSE_MAX_TOKENS;
-
-    const requestBody: any = {
-      model: 'deepseek-v4-pro',
-      messages: requestMessages,
-      temperature: options.temperature || 0.7,
-      max_tokens: maxTokens,
-    };
-
-    // Note: DeepSeek V3 tool calling support varies, but we'll try passing them
-    // If it fails, we might need to disable tools for strict DeepSeek usage
-    if (effectiveTools.length > 0) {
-      // Check if DeepSeek supports OpenAI format tools (it usually does)
-      // requestBody.tools = effectiveTools;
-      // requestBody.tool_choice = 'auto';
-      // For now, simpler DeepSeek usage (often used for pure reasoning)
-    }
-
-    const response = await fetchWithTimeout(
-      'https://api.deepseek.com/v1/chat/completions',
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${DEEPSEEK_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-      },
-      PROVIDER_TIMEOUTS.deepseek
-    );
-
-    // Fast-fail for credit exhaustion
-    const fastFailError = checkFastFail(response, 'deepseek');
-    if (fastFailError) {
-      return { success: false, provider: 'deepseek', error: fastFailError };
-    }
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.warn(`⚠️ DeepSeek failed (${response.status}):`, errorText);
-      return { success: false, provider: 'deepseek', error: `${response.status}: ${errorText}` };
-    }
-
-    const data = await response.json();
-    const message = data.choices?.[0]?.message;
-
-    if (!message) {
-      return { success: false, provider: 'deepseek', error: 'No message in response' };
-    }
-
-    console.log('✅ DeepSeek AI successful with Eliza intelligence');
-
-    if (message.tool_calls?.length > 0) {
-      console.log(`🔧 DeepSeek returned ${message.tool_calls.length} tool calls`);
-      return { success: true, provider: 'deepseek', message };
-    }
-
-    return { success: true, provider: 'deepseek', content: message.content || '' };
-  } catch (error) {
-    const errMsg = error instanceof Error ? error.message : String(error);
-    console.warn('⚠️ DeepSeek error:', errMsg);
-    return { success: false, provider: 'deepseek', error: errMsg };
+    console.warn('⚠️ OpenRouter error:', errMsg);
+    return { success: false, provider: 'openrouter', error: errMsg };
   }
 }
 
@@ -796,10 +727,10 @@ async function callKimi(
 
     if (message.tool_calls?.length > 0) {
       console.log(`🔧 Kimi returned ${message.tool_calls.length} tool calls`);
-      return { success: true, provider: 'kimi', message };
+      return { success: true, provider: 'kimi', model: 'kimi-for-coding', message };
     }
 
-    return { success: true, provider: 'kimi', content: message.content || '' };
+    return { success: true, provider: 'kimi', model: 'kimi-for-coding', content: message.content || '' };
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error);
     console.warn('⚠️ Kimi error:', errMsg);
@@ -909,10 +840,10 @@ async function handleOllamaResponse(response: Response, model: string): Promise<
 
     if (message.tool_calls?.length > 0) {
       console.log(`🔧 Ollama Pro returned ${message.tool_calls.length} tool calls`);
-      return { success: true, provider: 'ollama-pro', message };
+      return { success: true, provider: 'ollama-pro', model, message };
     }
 
-    return { success: true, provider: 'ollama-pro', content: message.content || '' };
+    return { success: true, provider: 'ollama-pro', model, content: message.content || '' };
   } catch (error) {
     console.warn('⚠️ Ollama Cloud response parse error:', (error as Error).message);
     return { success: false, provider: 'ollama-pro', error: (error as Error).message };
@@ -1013,7 +944,7 @@ async function callOpenCodeZen(
       // `message` object, so mirror handleOllamaResponse's shape exactly.
       if (message.tool_calls?.length > 0) {
         console.log(`🔧 OpenCode Zen returned ${message.tool_calls.length} tool calls`);
-        return { success: true, provider: 'opencode-zen', message };
+        return { success: true, provider: 'opencode-zen', model, message };
       }
 
       const content = message.content || message.reasoning || '';
@@ -1022,7 +953,7 @@ async function callOpenCodeZen(
         continue;
       }
 
-      return { success: true, provider: 'opencode-zen', content };
+      return { success: true, provider: 'opencode-zen', model, content };
     } catch (error) {
       lastError = (error as Error).message;
     }
@@ -1062,28 +993,19 @@ export async function callAIWithFallback(
   errors.push(`OllamaPro: ${ollamaResult.error}`);
   console.warn('⚠️ Ollama Pro failed, trying Vertex SA backup...');
 
-  // 3. BACKUP: Vertex AI via Service Account OAuth2
-  console.log('🔑 Trying Vertex AI SA OAuth2 (backup)...');
-  const saResult = await callVertexWithServiceAccount(messages, options);
-  if (saResult.success) return transformResult(saResult);
-  errors.push(`VertexSA: ${saResult.error}`);
-
-  // 4. BACKUP: Gemini API key
+  // 3. BACKUP: Gemini API key
+  console.log('🔑 Trying Gemini API key backup (not Vertex) ...');
   const geminiResult = await callGemini(messages, options);
   if (geminiResult.success) return transformResult(geminiResult);
   errors.push(`Gemini: ${geminiResult.error}`);
 
-  // 5. BACKUP: Vertex AI Express Mode (reuses Gemini key)
-  const vertexResult = await callVertex(messages, options);
-  if (vertexResult.success) return transformResult(vertexResult);
-  errors.push(`Vertex: ${vertexResult.error}`);
+  // 4. BACKUP: OpenRouter Free Models Router (reasoning + tool-calling free tier)
+  console.log('🔑 Trying OpenRouter free models router (reasoning + tools) ...');
+  const openRouterResult = await callOpenRouterFreeRouter(messages, options);
+  if (openRouterResult.success) return transformResult(openRouterResult);
+  errors.push(`OpenRouterFree: ${openRouterResult.error}`);
 
-  // 6. BACKUP: DeepSeek V3
-  const deepSeekResult = await callDeepSeek(messages, options);
-  if (deepSeekResult.success) return transformResult(deepSeekResult);
-  errors.push(`DeepSeek: ${deepSeekResult.error}`);
-
-  // 7. BACKUP: Kimi
+  // 5. BACKUP: Kimi
   const kimiResult = await callKimi(messages, options);
   if (kimiResult.success) return transformResult(kimiResult);
   errors.push(`Kimi: ${kimiResult.error}`);
@@ -1101,13 +1023,15 @@ function transformResult(result: ProviderResult): any {
       role: 'assistant',
       content: result.message.content,
       tool_calls: result.message.tool_calls,
-      provider: result.provider
+      provider: result.provider,
+      model: result.model
     };
   }
   // Return simple object with content (Exec Council compatibility)
   return {
     content: result.content || '',
-    provider: result.provider
+    provider: result.provider,
+    model: result.model
   };
 }
 

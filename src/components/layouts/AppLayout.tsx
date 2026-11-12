@@ -29,29 +29,42 @@ export const AppLayout = () => {
             
             {/* Desktop Navigation */}
             <DesktopNav />
-            
+
             {/* Status Indicators & User Menu */}
-            <div className="hidden md:flex items-center gap-3">
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            {/* These appear at lg, not md. The desktop nav and this group were
+                both md, and together they are wider than a 768–907px viewport:
+                the brand (84) + 5 nav links (559) + this group (240) = 883px in
+                a 737px row, so the whole page gained a horizontal scrollbar and
+                the language toggle and avatar were pushed off the right edge.
+                Below lg the drawer carries the navigation instead. */}
+            <div className="hidden lg:flex items-center gap-3">
+              {/* The status pair is decoration — the same "Active" state and
+                  the same function count are shown in the page body — so it
+                  is the first thing to go when the row is tight. */}
+              <div className="hidden xl:flex items-center gap-1.5 text-xs text-muted-foreground">
                 <div className="w-1.5 h-1.5 rounded-full bg-suite-success animate-pulse" />
                 <span>{t('label.active')}</span>
               </div>
-              <div className="w-px h-4 bg-border" />
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              <div className="hidden xl:block w-px h-4 bg-border" />
+              <div className="hidden xl:flex items-center gap-1.5 text-xs text-muted-foreground">
                 <Activity className="w-3 h-3" />
                 <span>120+</span>
               </div>
-              <div className="w-px h-4 bg-border" />
+              <div className="hidden xl:block w-px h-4 bg-border" />
               <LanguageToggle />
               <div className="w-px h-4 bg-border" />
               <UserMenu />
             </div>
 
-            {/* Mobile: User Menu + Hamburger side-by-side */}
-            <div className="md:hidden flex items-center gap-2">
-              <LanguageToggle />
-              <UserMenu />
-              <MobileNavTrigger isOpen={mobileNavOpen} onToggle={() => setMobileNavOpen(!mobileNavOpen)} />
+            {/* Below lg: the language toggle, the user menu and the drawer
+                handle. The toggle and the user menu are hidden at lg+ because
+                the desktop group above shows them there. */}
+            <div className="flex items-center gap-2">
+              <div className="lg:hidden"><LanguageToggle /></div>
+              <div className="lg:hidden"><UserMenu /></div>
+              <div className="lg:hidden">
+                <MobileNavTrigger isOpen={mobileNavOpen} onToggle={() => setMobileNavOpen(!mobileNavOpen)} />
+              </div>
             </div>
           </div>
         </div>

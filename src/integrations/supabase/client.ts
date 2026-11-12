@@ -8,8 +8,8 @@ import type { Database } from './types';
 // round-trip, works during internet outages) and automatically correct when
 // the same build is reached through https://relay.mobilemonero.com.
 const SUPABASE_URL = (typeof window !== 'undefined' && window.location?.origin)
-  ? window.location.origin
-  : 'http://127.0.0.1:8080';
+  || import.meta.env.VITE_SUPABASE_URL
+  || 'http://127.0.0.1:8080';
 const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || 'local-anon-key';
 
 export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {

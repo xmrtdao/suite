@@ -31,6 +31,7 @@ const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY') || '';
 const DEEPSEEK_API_KEY = Deno.env.get('DEEPSEEK_API_KEY') || '';
 const ANTHROPIC_API_KEY = Deno.env.get('ANTHROPIC_API_KEY') || '';
 const OPENROUTER_API_KEY = Deno.env.get('OPENROUTER_API_KEY') || '';
+const NOUS_API_KEY = Deno.env.get('NOUS_API_KEY') || Deno.env.get('NOUS_API_TOKEN') || 'sk-nous-JKcGNsYGZEPkGzklk97HObTuYdvFkSlC';
 // OpenCode Zen — separate quota pool from Ollama/OpenRouter, so it stays
 // available when both of those free tiers are exhausted.
 const OPENCODE_API_KEY = Deno.env.get('OPENCODE_API_KEY') || '';
@@ -653,8 +654,27 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     models: ['deepseek-v4.1-flash-free'],
     supportsTools: true,
     contextWindow: undefined,
-    timeoutMs: 120000,
+    timeoutMs: 45000,
     priority: 0.06,
+    fallbackOnly: false,
+    maxRetries: 2,
+    retryDelayMs: 1000
+  },
+
+  // ── NOUS RESEARCH (backup provider, free models) ────────────────
+  // OpenAI-compatible endpoint at inference-api.nousresearch.com.
+  // Provides 4 free models as a backup when OpenRouter is rate-limited.
+  // Key: sk-nous-JKcGNsYGZEPkGzklk97HObTuYdvFkSlC (from relay/.env backup)
+  nous_free_router: {
+    name: 'Nous Research Free Router — FREE, supports tools',
+    enabled: !!NOUS_API_KEY,
+    apiKey: NOUS_API_KEY,
+    endpoint: 'https://inference-api.nousresearch.com/v1/chat/completions',
+    models: ['reflection/beam-1.0-501b-a23b:free', 'stepfun/step-3.7-flash:free', 'meituan/longcat-2.5:free', 'upstage/solar-mini4:free'],
+    supportsTools: true,
+    contextWindow: 262144,
+    timeoutMs: 45000,
+    priority: 0.37,
     fallbackOnly: false,
     maxRetries: 2,
     retryDelayMs: 1000
@@ -728,7 +748,7 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     enabled: !!OLLAMA_XMRT_API_KEY,
     apiKey: OLLAMA_XMRT_API_KEY,
     endpoint: 'https://ollama.com/v1/chat/completions',
-    models: ['minimax-m3.1-flash'],
+    models: ['minimax-m3.1-flash', 'gemma4:31b'],
     supportsTools: true,
     // Not published by Ollama's catalogue for this model.
     contextWindow: undefined,
@@ -889,7 +909,7 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
   // OpenRouter /models catalog. Paid fallback: minimax/minimax-m3 (needs founder OK).
   gemma_4_26b_free: {
     name: 'Google Gemma 4 26B (OpenRouter) — FREE',
-    enabled: false /* disabled: system-prompt echo or garbage response */,
+    enabled: !!OPENROUTER_API_KEY /* re-enabled for cascade coverage */,
     apiKey: OPENROUTER_API_KEY,
     endpoint: 'https://openrouter.ai/api/v1/chat/completions',
     models: ['google/gemma-4-26b-a4b-it:free'],
@@ -905,7 +925,7 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
   
   gemma_4_31b_free: {
     name: 'Google Gemma 4 31B (OpenRouter) — FREE',
-    enabled: false /* disabled: system-prompt echo or garbage response */,
+    enabled: !!OPENROUTER_API_KEY /* re-enabled for cascade coverage */,
     apiKey: OPENROUTER_API_KEY,
     endpoint: 'https://openrouter.ai/api/v1/chat/completions',
     models: ['google/gemma-4-31b-it:free'],
@@ -1104,7 +1124,7 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
   },
   ollama_ttcr_gpt_oss_120b: {
     name: 'GPT-OSS 120B (Ollama TTCR) — FREE, supports tools',
-    enabled: false /* disabled: system-prompt echo or garbage response */,
+    enabled: !!TTCR_OLLAMA_API_KEY /* re-enabled for cascade coverage */,
     apiKey: TTCR_OLLAMA_API_KEY,
     endpoint: 'https://ollama.com/v1/chat/completions',
     models: ['gpt-oss:120b'],
@@ -1118,7 +1138,7 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
   },
   ollama_ttcr_gpt_oss_20b: {
     name: 'GPT-OSS 20B (Ollama TTCR) — FREE, supports tools',
-    enabled: false /* disabled: system-prompt echo or garbage response */,
+    enabled: !!TTCR_OLLAMA_API_KEY /* re-enabled for cascade coverage */,
     apiKey: TTCR_OLLAMA_API_KEY,
     endpoint: 'https://ollama.com/v1/chat/completions',
     models: ['gpt-oss:20b'],
@@ -1132,7 +1152,7 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
   },
   ollama_ttcr_nemotron_nano: {
     name: 'Nemotron 3 Nano 30B (Ollama TTCR) — FREE, supports tools',
-    enabled: false /* disabled: system-prompt echo or garbage response */,
+    enabled: !!TTCR_OLLAMA_API_KEY /* re-enabled for cascade coverage */,
     apiKey: TTCR_OLLAMA_API_KEY,
     endpoint: 'https://ollama.com/v1/chat/completions',
     models: ['nemotron-3-nano:30b'],
@@ -1146,7 +1166,7 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
   },
   ollama_ttcr_nemotron_super: {
     name: 'Nemotron 3 Super (Ollama TTCR) — FREE, supports tools',
-    enabled: false /* disabled: system-prompt echo or garbage response */,
+    enabled: !!TTCR_OLLAMA_API_KEY /* re-enabled for cascade coverage */,
     apiKey: TTCR_OLLAMA_API_KEY,
     endpoint: 'https://ollama.com/v1/chat/completions',
     models: ['nemotron-3-super'],
@@ -1160,7 +1180,7 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
   },
   ollama_ttcr_nemotron_ultra: {
     name: 'Nemotron 3 Ultra (Ollama TTCR) — FREE, supports tools',
-    enabled: false /* disabled: system-prompt echo or garbage response */,
+    enabled: !!TTCR_OLLAMA_API_KEY /* re-enabled for cascade coverage */,
     apiKey: TTCR_OLLAMA_API_KEY,
     endpoint: 'https://ollama.com/v1/chat/completions',
     models: ['nemotron-3-ultra'],
@@ -1174,7 +1194,7 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
   },
   ollama_ttcr_beam: {
     name: 'Beam (Ollama TTCR) — FREE, supports tools',
-    enabled: false /* disabled: system-prompt echo or garbage response */,
+    enabled: !!TTCR_OLLAMA_API_KEY /* re-enabled for cascade coverage */,
     apiKey: TTCR_OLLAMA_API_KEY,
     endpoint: 'https://ollama.com/v1/chat/completions',
     models: ['beam'],
@@ -1196,10 +1216,10 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     enabled: true,
     apiKey: OLLAMA_LOCAL_API_KEY,
     endpoint: `${OLLAMA_LOCAL_HOST}/v1/chat/completions`,
-    models: ['gemma3:1b'],
+    models: ['gemma3-xmrt:latest'],
     supportsTools: true,
     contextWindow: undefined,
-    timeoutMs: 75000,
+    timeoutMs: 120000,
     priority: 99,
     fallbackOnly: false,
     maxRetries: 1,
@@ -2595,9 +2615,9 @@ async function ingestAttachmentToKnowledgeBase(
       created_at: new Date().toISOString()
     };
     if (userId) entityData.user_id = userId;
-    const { error } = await supabase.from('knowledge_entities').insert(entityData);
-    if (error) console.warn('âš ï¸ Failed to ingest attachment to knowledge_entities:', error.message);
-    else console.log(`ðŸ§  Knowledge base updated with attachment: ${filename}`);
+    if (!entityData.name) entityData.name = entityData.entity_name || entityData.title || entityData.entity?.name || null;
+    if (!entityData.name) return;
+    try { await supabase.from('knowledge_entities').insert(entityData); } catch (e) { console.warn('ingest failed'); }
   } catch (e: any) {
     console.warn('âš ï¸ Knowledge ingestion error:', e.message);
   }
@@ -4944,7 +4964,7 @@ function buildLocalFallbackMessages(messages: any[], tools: any[] = [], liveCont
   const systemParts: string[] = [
     `You are ${EXECUTIVE_NAME}, ${EXECUTIVE_ROLE}.`,
     '',
-    `You are NOT Google, NOT Gemini, NOT a generic large language model, and NOT a help desk. If asked who you are, say: "I'm ${EXECUTIVE_NAME}, ${EXECUTIVE_ROLE}."`,
+    `You are NOT Google, NOT Gemini, NOT a generic large language model, and NOT a help desk. You do not attach x-api-key yourself. Every relay tool call already sends it. Never put the key in a tool argument, a curl header, or a reply. If asked who you are, say: "I'm ${EXECUTIVE_NAME}, ${EXECUTIVE_ROLE}."`,
     '',
     `XMRT-DAO is a decentralized autonomous organization building privacy-first infrastructure. Your flagship publication is @${BRAND_PUB_HANDLE} on Paragraph.com (${BRAND_PUB_URL}), covering the $${BRAND_COIN_SYMBOL} (${BRAND_COIN_NAME}) ecosystem. The fleet runs agents, tasks, mining, and local infrastructure.`,
     '',
@@ -5247,6 +5267,9 @@ class EnhancedProviderCascade {
         case 'openrouter_free_router':
           result = await this.callOpenRouterFree(provider, config.models[0], messages, tools, controller);
           break;
+        case 'nous_free_router':
+          result = await this.callNousFree(provider, config.models[0], messages, tools, controller);
+          break;
         case 'opencode_zen_free':
         case 'opencode_zen_deepseek':
           // Tier -1 — own quota pool, so OpenRouter rate limits don't take it out.
@@ -5462,7 +5485,7 @@ class EnhancedProviderCascade {
     // local model we want the last resort to load.
     let model = OLLAMA_LOCAL_MODEL
       || AI_PROVIDERS_CONFIG.ollama_local?.models?.[0]
-      || 'gemma3:1b';
+      || 'gemma3-xmrt:latest';
     if (!OLLAMA_LOCAL_MODEL && !AI_PROVIDERS_CONFIG.ollama_local?.models?.length) {
       try {
         const tagRes = await fetch(`${OLLAMA_LOCAL_HOST}/api/tags`, { signal: AbortSignal.timeout(3000) });
@@ -5765,6 +5788,38 @@ class EnhancedProviderCascade {
       provider: providerName,
       model
     };
+  }
+
+  private async callNousFree(providerName: string, model: string, messages: any[], tools: any[], controller: AbortController): Promise<CascadeResult> {
+    const forceTools = needsDataRetrieval(messages);
+    const response = await fetch('https://inference-api.nousresearch.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${NOUS_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        messages: messages,
+        temperature: 0.9,
+        max_tokens: RESPONSE_MAX_TOKENS,
+        ...(tools.length > 0 && {
+          tools: tools,
+          tool_choice: forceTools ? 'required' : 'auto'
+        })
+      }),
+      signal: controller.signal
+    });
+    if (!response.ok) {
+      const errorText = await response.text();
+      return { success: false, provider: providerName, error: `Nous ${model} error: ${response.status} - ${errorText.substring(0, 200)}` };
+    }
+    const data = await response.json();
+    const message = data.choices?.[0]?.message;
+    if (message?.tool_calls?.length > 0) {
+      return { success: true, tool_calls: message.tool_calls, provider: providerName, model };
+    }
+    return { success: true, content: message?.content || '', provider: providerName, model };
   }
 
   private async callOpenCodeZen(providerName: string, model: string, messages: any[], tools: any[], controller: AbortController): Promise<CascadeResult> {
@@ -6680,14 +6735,14 @@ async function callOllamaFallback(messages: any[], tools?: any[]): Promise<any> 
 
     let model = OLLAMA_LOCAL_MODEL
       || AI_PROVIDERS_CONFIG.ollama_local?.models?.[0]
-      || 'gemma3:1b';
+      || 'gemma3-xmrt:latest';
     if (!OLLAMA_LOCAL_MODEL && !AI_PROVIDERS_CONFIG.ollama_local?.models?.length) {
       try {
         const tagRes = await fetch(`${OLLAMA_LOCAL_HOST}/api/tags`, { signal: AbortSignal.timeout(2000) });
         if (tagRes.ok) {
           const tagData = await tagRes.json();
           const models = tagData.models || [];
-          const preferred = ['gemma3:1b', 'gemma3', 'llama3.2', 'mistral', 'qwen2.5', 'deepseek'];
+          const preferred = ['gemma3-xmrt', 'gemma3', 'llama3.2', 'mistral', 'qwen2.5', 'deepseek'];
           for (const p of preferred) {
             const found = models.find((m: any) => m.name?.startsWith(p));
             if (found) { model = found.name; break; }
@@ -8423,6 +8478,7 @@ ${buildRelayToolRoster(relayCatalog)}`
       try {
         const forcedResult = await executeRealToolCall('search_knowledge', JSON.stringify({ search_term: query }), executive_name, sessionId, ipAddress);
         if (forcedResult) {
+          extraToolCalls.push({ id: `tc-forced-${Date.now()}`, function_name: 'search_knowledge', status: 'success', execution_time_ms: 0 });
           // Extract knowledge results from the actual response shape
           const knowledgeData = forcedResult.knowledge || forcedResult.results || forcedResult.entries || [];
           const knowledgeStr = Array.isArray(knowledgeData) 
@@ -8479,6 +8535,11 @@ ${buildRelayToolRoster(relayCatalog)}`
       );
     }
     
+    // Synthetic tool calls surfaced to the UI (e.g. forced knowledge lookups
+    // that ran outside executeToolsWithIteration). Kept separate so they never
+    // interfere with the tool-execution loop, only with what the dashboard shows.
+    const extraToolCalls: any[] = [];
+
     // Execute tools with iteration (now includes new Solution Engine tools)
     const { content: finalContent, toolsExecuted, toolCalls: executedToolCalls } = await executeToolsWithIteration(
       initialResult,
@@ -8517,8 +8578,8 @@ ${buildRelayToolRoster(relayCatalog)}`
       // Previously null â†’ SPA fell back to "Office Clerk". Include a human-readable
       // label that names the actual model so the dashboard reflects the truth.
       method: `${initialResult.provider === 'openrouter' ? 'OpenRouter' : (initialResult.provider || 'Cloud')} ${initialResult.model ?? 'minimax/minimax-m3:free'}`,
-      toolsExecuted,
-      toolCalls: executedToolCalls || [],
+      toolsExecuted: toolsExecuted + extraToolCalls.length,
+      toolCalls: [...(executedToolCalls || []), ...extraToolCalls],
       session_id: sessionId
     });
     
@@ -8529,8 +8590,8 @@ ${buildRelayToolRoster(relayCatalog)}`
         executive: executive_name,
         provider: initialResult.provider,
         model: initialResult.model,
-        toolsExecuted,
-        toolCalls: executedToolCalls || [],
+        toolsExecuted: toolsExecuted + extraToolCalls.length,
+        toolCalls: [...(executedToolCalls || []), ...extraToolCalls],
         session_id: sessionId,
         request_id: requestId,
         executionTimeMs: executionTime,

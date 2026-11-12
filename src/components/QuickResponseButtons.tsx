@@ -287,13 +287,13 @@ const PROCEED_INTELLIGENTLY_BUTTON: ButtonConfig = {
 };
 
 const GO_SURFING_PROMPT =
-  "Go Surfing 🏄‍♀️ — Eliza, use browse_web to follow your curiosity and engage your imagination for a series of 3 chained tool calls based on your own whims. Don't bother telling me what you're going to surf, just explore and return with your summarized synthesis of what you explored and what you learned.";
+  "Go Surfing 🏄‍♀️ — Eliza, use ef:playwright-browse or web-search to follow your curiosity and engage your imagination for a series of 3 chained tool calls based on your own whims. Don't bother telling me what you're going to surf, just explore and return with your summarized synthesis of what you explored and what you learned.";
 
 const PROCEED_INTELLIGENTLY_PROMPT =
   "Proceed Intelligently 🧠 — Eliza, review our conversation history and take the next most intelligent action. This could mean:\n" +
-  "1. If we were discussing a task or problem — advance it: call assign_task, search_knowledge, fleet_pulse, or the most relevant tool\n" +
+  "1. If we were discussing a task or problem — advance it: call assign_task, ef:knowledge-search (or knowledge-graph), fleet_pulse, or the most relevant tool\n" +
   "2. If we were exploring a topic — dive deeper: call ef:explore-curiosity with the key phrase from our conversation\n" +
-  "3. If we were debugging — check logs: call activity_log with relevant filters\n" +
+  "3. If we were debugging — check logs: call activity-log (or ecosystem-activity) with relevant filters\n" +
   "4. If we were planning — execute the next step\n\n" +
   "Do NOT ask me what to do. Do NOT describe what you could do. Just pick the best tool and call it. Report what you did and what you found.";
 

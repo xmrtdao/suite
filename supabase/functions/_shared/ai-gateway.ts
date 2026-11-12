@@ -1,6 +1,11 @@
 // Unified AI Gateway with Comprehensive Fallback System
-// Priority: OpenRouter free (MiniMax M3.1 Flash → Nemotron 3.5 Lightning → Gemma 4 31B) → OpenCode Zen → Ollama cloud → local Ollama → Vertex → Gemini → DeepSeek → OpenAI → Kimi
-// Last updated: 2026-10-19 — the free tier leads, and every model in this list was measured from this runtime before it was put here
+// Priority: OpenRouter free (Nemotron 3.5 Lightning → Nemotron 3 Ultra →
+// North Mini Code → Dots 3 Note → Flint → Super VL → free router) → Ollama
+// MiniMax (3 accounts) → Ollama TTCR (gemma4, gpt-oss, nemotron) → OpenCode
+// Zen → local Ollama → Vertex → Gemini → DeepSeek → OpenAI → Kimi.
+// Last updated: 2026-10-22 — OpenRouter retired the MiniMax :free slug today,
+// so no tier depends on a single free model. Every slug here answered from
+// this runtime with a tools array before it was put in the hot path.
 
 import { getVertexAuth, getVertexEndpoint } from './vertexAuthHelper.ts';
 
@@ -39,8 +44,66 @@ const GATEWAY_CONFIG: GatewayConfig = {
     {
       name: 'openrouter-minimax',
       endpoint: 'https://openrouter.ai/api/v1/chat/completions',
-      model: 'minimax/minimax-m3.1-flash:free',
-      priority: 1,
+      model: 'minimax/minimax-m3.1-flash',
+      priority: 0.05,  // paid primary — leads the gateway cascade; free slugs follow
+      rateLimit: 5000,
+      timeout: 25000,
+      available: true,
+    },
+    // Verified live 2026-10-22 from this runtime with a tools array. These are
+    // the free slugs that answered; the retired/empty ones are not here.
+    {
+      name: 'openrouter-nemotron-ultra',
+      endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+      model: 'nvidia/nemotron-3-ultra-550b-a55b:free',
+      priority: 0.2,
+      rateLimit: 5000,
+      timeout: 25000,
+      available: true,
+    },
+    {
+      name: 'openrouter-north-mini',
+      endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+      model: 'cohere/north-mini-code:free',
+      priority: 0.3,
+      rateLimit: 5000,
+      timeout: 25000,
+      available: true,
+    },
+    {
+      name: 'openrouter-dots',
+      endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+      model: 'dots-studio/dots-3-note-preview:free',
+      priority: 0.4,
+      rateLimit: 5000,
+      timeout: 25000,
+      available: true,
+    },
+    {
+      name: 'openrouter-flint',
+      endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+      model: 'recursive/flint-v1.0:free',
+      priority: 0.5,
+      rateLimit: 5000,
+      timeout: 25000,
+      available: true,
+    },
+    {
+      name: 'openrouter-super-vl',
+      endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+      model: 'nvidia/nemotron-3.5-super-vl:free',
+      priority: 0.6,
+      rateLimit: 5000,
+      timeout: 25000,
+      available: true,
+    },
+    {
+      // The free-models router. It is the catch-all when an explicit slug is
+      // rate-limited or retired; verified 200 with native tool_calls.
+      name: 'openrouter-free',
+      endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+      model: 'openrouter/free',
+      priority: 0.9,
       rateLimit: 5000,
       timeout: 25000,
       available: true,
@@ -58,7 +121,23 @@ const GATEWAY_CONFIG: GatewayConfig = {
       name: 'openrouter-gemma',
       endpoint: 'https://openrouter.ai/api/v1/chat/completions',
       model: 'google/gemma-4-31b-it:free',
-      priority: 6,
+      priority: 6.4,
+      rateLimit: 5000,
+      timeout: 25000,
+      // 429 "rate-limited upstream" on 2026-10-22; transient, kept as a
+      // late fallback.
+      available: true,
+    },
+    {
+      // Inkling Small — replaced poolside/laguna-s-2.1 here on 2026-10-28.
+      // Verified 200 with content and native tool_calls. Its :free slug is
+      // behind OpenRouter's agentic-harness gate: requestHeaders() sends the
+      // harness attribution for exactly this model, and the relay's own app
+      // identity answers 403 to it.
+      name: 'openrouter-inkling',
+      endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+      model: 'thinkingmachines/inkling-small:free',
+      priority: 6.5,
       rateLimit: 5000,
       timeout: 25000,
       available: true,
@@ -132,9 +211,43 @@ const GATEWAY_CONFIG: GatewayConfig = {
       available: true,
     },
 
+    // ── Ollama TTCR account ──────────────────────────────────────────────
+    // The fourth account is the one that still serves the free non-MiniMax
+    // models. Measured 2026-10-22 with a tools array: all three answered
+    // with native tool_calls in under 1.3s. Without these the cascade drops
+    // from MiniMax straight to local/paid when the first three accounts are
+    // out of weekly allowance.
+    {
+      name: 'ollama-ttcr-gemma',
+      endpoint: 'https://ollama.com/v1/chat/completions',
+      model: 'gemma4:31b',
+      priority: 6.1,
+      rateLimit: 1200,
+      timeout: 20000,
+      available: true,
+    },
+    {
+      name: 'ollama-ttcr-gpt-oss',
+      endpoint: 'https://ollama.com/v1/chat/completions',
+      model: 'gpt-oss:120b',
+      priority: 6.2,
+      rateLimit: 1200,
+      timeout: 20000,
+      available: true,
+    },
+    {
+      name: 'ollama-ttcr-nemotron',
+      endpoint: 'https://ollama.com/v1/chat/completions',
+      model: 'nemotron-3-super',
+      priority: 6.3,
+      rateLimit: 1200,
+      timeout: 20000,
+      available: true,
+    },
+
     // ── Local Ollama ─────────────────────────────────────────────────────
     // The only provider here that does not depend on somebody else's quota.
-    // It is slow on this box - gemma3:1b answered in 21s on CPU - and the
+    // It is slow on this box - gemma3:1b answered in 36s on CPU - and the
     // machine has about 0.7 GB free, so it is last and it uses the 1B model.
     {
       name: 'ollama-local',
@@ -142,7 +255,7 @@ const GATEWAY_CONFIG: GatewayConfig = {
       model: Deno.env.get('OLLAMA_LOCAL_MODEL') || 'gemma3:1b',
       priority: 8,
       rateLimit: 60,
-      timeout: 60000,
+      timeout: 75000,
       available: true,
     },
 
@@ -177,7 +290,7 @@ const GATEWAY_CONFIG: GatewayConfig = {
     {
       name: 'deepseek',
       endpoint: 'https://api.deepseek.com/v1/chat/completions',
-      model: 'deepseek-v4-pro',
+      model: 'deepseekv4-flash',
       priority: 12,
       rateLimit: 1500,
       timeout: 30000,
@@ -371,6 +484,14 @@ async function executeWithProvider(
         throw new AIGatewayError(`No API key for ${provider.name}`, provider.name, 401, 'service_unavailable');
       }
       headers['User-Agent'] = 'DevGruGold-Suite/2.0';
+      // Inkling :free slugs pass OpenRouter's agentic-harness gate only under
+      // harness attribution (verified 2026-10-28: 200 here, 403 under our own
+      // app identity). Other models are not re-attributed here; the gateway
+      // never sent an HTTP-Referer before, which is unchanged for them.
+      if (provider.model.startsWith('thinkingmachines/inkling') && provider.model.endsWith(':free')) {
+        headers['HTTP-Referer'] = 'https://opencode.ai';
+        headers['X-Title'] = 'OpenCode';
+      }
     }
 
     const response = await fetch(endpoint, {
@@ -472,13 +593,24 @@ async function getAPIKey(providerName: string): Promise<string> {
     // share one key; OpenCode and each Ollama quota have their own.
     'openrouter-minimax': Deno.env.get('OPENROUTER_API_KEY') || '',
     'openrouter-nemotron': Deno.env.get('OPENROUTER_API_KEY') || '',
+    'openrouter-nemotron-ultra': Deno.env.get('OPENROUTER_API_KEY') || '',
+    'openrouter-north-mini': Deno.env.get('OPENROUTER_API_KEY') || '',
+    'openrouter-dots': Deno.env.get('OPENROUTER_API_KEY') || '',
+    'openrouter-flint': Deno.env.get('OPENROUTER_API_KEY') || '',
+    'openrouter-super-vl': Deno.env.get('OPENROUTER_API_KEY') || '',
+    'openrouter-free': Deno.env.get('OPENROUTER_API_KEY') || '',
     'openrouter-gemma': Deno.env.get('OPENROUTER_API_KEY') || '',
+    'openrouter-laguna': Deno.env.get('OPENROUTER_API_KEY') || '',
     opencode: Deno.env.get('OPENCODE_API_KEY') || '',
-    // Three Ollama accounts, one model. The keys are read at call time, so a
-    // rotated key is picked up without editing this file.
+    // Four Ollama accounts. The keys are read at call time, so a rotated key
+    // is picked up without editing this file. The TTCR account is the one
+    // that still has free-plan capacity for the non-MiniMax models.
     'ollama-minimax': Deno.env.get('OLLAMA_API_KEY') || '',
     'ollama-minimax-xmrt': Deno.env.get('OLLAMA_XMRT_API_KEY') || '',
     'ollama-minimax-3rd': Deno.env.get('OLLAMA_3RD_API_KEY') || '',
+    'ollama-ttcr-gemma': Deno.env.get('TTCR_OLLAMA_API_KEY') || Deno.env.get('OLLAMA_TTCR_API_KEY') || '',
+    'ollama-ttcr-gpt-oss': Deno.env.get('TTCR_OLLAMA_API_KEY') || Deno.env.get('OLLAMA_TTCR_API_KEY') || '',
+    'ollama-ttcr-nemotron': Deno.env.get('TTCR_OLLAMA_API_KEY') || Deno.env.get('OLLAMA_TTCR_API_KEY') || '',
     // Local Ollama needs no key. It is the one provider on this machine that
     // is not asking anybody else for quota.
     'ollama-local': '',

@@ -5,6 +5,7 @@ import {
   updateTask as localUpdateTask,
   updateAgent as localUpdateAgent,
   createActivityLog as localCreateActivityLog,
+  createTaskArtifact as localCreateTaskArtifact,
   subscribeTasks as localSubscribeTasks,
   subscribeAgents as localSubscribeAgents,
 } from '@/integrations/local-api';
@@ -243,9 +244,11 @@ interface TaskCardProps {
   onDragEnd: () => void;
   isDragging: boolean;
   onTaskClick: (task: Task) => void;
+  onTaskDecision?: (option: string, task: Task) => void;
+  onTaskComplete?: (task: Task) => void;
 }
 
-function TaskCard({ task, agentName, hasUnresolvedAgent, onDragStart, onDragEnd, isDragging, onTaskClick }: TaskCardProps) {
+function TaskCard({ task, agentName, hasUnresolvedAgent, onDragStart, onDragEnd, isDragging, onTaskClick, onTaskDecision, onTaskComplete }: TaskCardProps) {
   const statusStyle = STATUS_STYLES[task.status] || STATUS_STYLES.PENDING;
   const categoryColor = task.category ? CATEGORY_COLORS[task.category.toLowerCase()] || 'bg-muted' : 'bg-muted';
   const progressPercentage = Math.min(100, Math.max(0, task.progress_percentage || 0));
@@ -255,11 +258,21 @@ function TaskCard({ task, agentName, hasUnresolvedAgent, onDragStart, onDragEnd,
     ? task.status.replace('_', ' ')
     : 'UNKNOWN';
 
+  const isAwaitingOperatorDecision = task.blocking_reason && /awaiting operator decision|operator decision required|awaiting.*decision/i.test(task.blocking_reason);
+
+  const isTerminalTask = ['COMPLETED', 'DONE', 'CANCELLED', 'CLOSED'].includes((task.status || '').toUpperCase());
+
   const handleClick = (e: React.MouseEvent) => {
     // Only trigger click if not dragging
     if (!isDragging) {
       e.stopPropagation();
       onTaskClick(task);
+    }
+  };
+
+  const handleDecision = (option: string) => {
+    if (onTaskDecision) {
+      onTaskDecision(option, task);
     }
   };
 
@@ -320,6 +333,61 @@ function TaskCard({ task, agentName, hasUnresolvedAgent, onDragStart, onDragEnd,
         </div>
       )}
 
+      {/* Operator decision buttons — shown when a task is awaiting a human choice */}
+      {isAwaitingOperatorDecision && onTaskDecision && (
+        <div className="mt-3 space-y-2">
+          <div className="text-[10px] text-amber-400 font-medium flex items-center gap-1">
+            <AlertTriangle className="w-3 h-3" />
+            Awaiting operator decision
+          </div>
+          <div className="grid grid-cols-3 gap-1.5">
+            <Button
+              size="sm"
+              variant="outline"
+              title="1 — Proceed: resolve the blocking issue and continue"
+              className="h-7 text-[10px] px-1.5 py-0 border-green-500/50 text-green-400 hover:bg-green-500/20 hover:text-green-300"
+              onClick={(e) => { e.stopPropagation(); handleDecision('1'); }}
+            >
+              1 Proceed
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              title="2 — Defer: pause for later review"
+              className="h-7 text-[10px] px-1.5 py-0 border-blue-500/50 text-blue-400 hover:bg-blue-500/20 hover:text-blue-300"
+              onClick={(e) => { e.stopPropagation(); handleDecision('2'); }}
+            >
+              2 Defer
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              title="3 — Reject: mark task not applicable"
+              className="h-7 text-[10px] px-1.5 py-0 border-amber-500/50 text-amber-400 hover:bg-amber-500/20 hover:text-amber-300"
+              onClick={(e) => { e.stopPropagation(); handleDecision('3'); }}
+            >
+              3 Reject
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Manual completion button — shown for tasks that can be completed */}
+      {!isAwaitingOperatorDecision && onTaskComplete && !isTerminalTask && (
+        <div className="mt-3 space-y-2">
+          <div className="grid grid-cols-1 gap-1.5">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 text-[10px] px-1.5 py-0 border-purple-500/50 text-purple-400 hover:bg-purple-500/20 hover:text-purple-300"
+              onClick={(e) => { e.stopPropagation(); onTaskComplete(task); }}
+            >
+              Mark as Completed
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Auto-advance countdown */}
       <div className="mt-2 flex items-center justify-between">
         <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
@@ -353,6 +421,8 @@ interface StageColumnProps {
   draggedTask: Task | null;
   isUpdating: boolean;
   onTaskClick: (task: Task) => void;
+  onTaskDecision?: (option: string, task: Task) => void;
+  onTaskComplete?: (task: Task) => void;
 }
 
 function StageColumn({
@@ -368,7 +438,9 @@ function StageColumn({
   onDragEnd,
   draggedTask,
   isUpdating,
-  onTaskClick
+  onTaskClick,
+  onTaskDecision,
+  onTaskComplete
 }: StageColumnProps) {
   const Icon = stage.icon;
   // Fix: Use getColumnForTask to robustly map task stages/statuses to columns
@@ -440,6 +512,8 @@ function StageColumn({
                 onDragEnd={onDragEnd}
                 isDragging={draggedTask?.id === task.id}
                 onTaskClick={onTaskClick}
+                onTaskDecision={onTaskDecision}
+                onTaskComplete={onTaskComplete}
               />
             ))
           )}
@@ -678,6 +752,174 @@ export function AgentTaskVisualizer() {
   const handleTaskClick = (task: Task) => {
     setSelectedTask(task);
     setIsDetailSheetOpen(true);
+  };
+
+  const handleTaskDecision = async (option: string, task: Task) => {
+    setIsUpdating(true);
+
+    try {
+      const decisionReasons = {
+        '1': 'Operator decision: proceed with remediation / resolve blocking issue',
+        '2': 'Operator decision: defer remediation for later review',
+        '3': 'Operator decision: reject remediation, mark task not applicable',
+      };
+
+      const decisionText = decisionReasons[option as keyof typeof decisionReasons] ?? `Operator decision: option ${option}`;
+
+      // Map decision to task status and blocking update
+      let newStatus: string;
+      let newBlockingReason: string | null;
+
+      switch (option) {
+        case '1': // Proceed / Resolve
+          newStatus = task.stage === 'DISCUSS' ? 'CLAIMED' : 'IN_PROGRESS';
+          newBlockingReason = null;
+          break;
+        case '2': // Defer
+          newStatus = 'PENDING';
+          newBlockingReason = task.blocking_reason || 'Deferred by operator';
+          break;
+        case '3': // Reject / Not applicable
+          newStatus = 'FAILED';
+          newBlockingReason = 'Rejected by operator decision';
+          break;
+        default:
+          newStatus = 'PENDING';
+          newBlockingReason = null;
+      }
+
+      // Update the task in the database
+      const updates: Record<string, unknown> = {
+        status: newStatus,
+        blocking_reason: newBlockingReason,
+        updated_at: new Date().toISOString(),
+        metadata: {
+          ...(task as Record<string, unknown>).metadata,
+          operator_decision: {
+            option,
+            decision: decisionText,
+            decided_at: new Date().toISOString(),
+          },
+        },
+      };
+
+      const { error: updateError } = await localUpdateTask(task.id, updates);
+      if (updateError) throw new Error(updateError.message);
+
+      // Log the decision to the activity feed
+      await localCreateActivityLog({
+        activity_type: 'task_blocked',
+        title: `Operator decision: ${option} — ${decisionText}`,
+        description: `Task "${task.title}" was awaiting operator decision. Decision: ${decisionText}`,
+        status: 'completed',
+        task_id: task.id,
+        agent_id: task.assignee_agent_id || null,
+        metadata: {
+          task_title: task.title,
+          task_stage: task.stage,
+          operator_decision: option,
+          decision_text: decisionText,
+          previous_status: task.status,
+          new_status: newStatus,
+        },
+      });
+
+      // Update local state so the UI reflects the change immediately
+      const updatedTask = { ...task, status: newStatus, blocking_reason: newBlockingReason } as Task;
+      handleTaskUpdate(updatedTask);
+
+      // Close the detail sheet if open
+      setIsDetailSheetOpen(false);
+      setSelectedTask(null);
+
+      toast({
+        title: `Task decision ${option} applied`,
+        description: decisionText,
+      });
+
+      console.log(`[AgentTaskVisualizer] Task decision: ${option} for task ${task.id}`);
+    } catch (err) {
+      console.error('[AgentTaskVisualizer] Failed to apply task decision:', err);
+      toast({
+        title: 'Failed to apply task decision',
+        description: err instanceof Error ? err.message : 'An error occurred',
+        variant: 'destructive',
+      });
+      throw err;
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const handleTaskComplete = async (task: Task) => {
+    setIsUpdating(true);
+
+    try {
+      // Satisfy the evidence gate: create an artifact recording the manual
+      // completion before flipping the status, so the DB trigger allows COMPLETED.
+      const { error: artifactError } = await localCreateTaskArtifact({
+        task_id: task.id,
+        type: 'manual_completion',
+        url: 'operator://manual-completion',
+        description: 'Manually marked complete by operator',
+      });
+      if (artifactError) throw new Error(artifactError.message);
+
+      // Update the task in the database
+      const updates: Record<string, unknown> = {
+        status: 'COMPLETED',
+        blocking_reason: null,
+        updated_at: new Date().toISOString(),
+        metadata: {
+          ...(task as Record<string, unknown>).metadata,
+          completed_at: new Date().toISOString(),
+        },
+      };
+
+      const { error: updateError } = await localUpdateTask(task.id, updates);
+      if (updateError) throw new Error(updateError.message);
+
+      // Log the completion to the activity feed
+      await localCreateActivityLog({
+        activity_type: 'task_completed',
+        title: `Task completed manually`,
+        description: `Task "${task.title}" has been manually marked as completed`,
+        status: 'completed',
+        task_id: task.id,
+        agent_id: task.assignee_agent_id || null,
+        metadata: {
+          task_title: task.title,
+          task_stage: task.stage,
+          previous_status: task.status,
+          new_status: 'COMPLETED',
+        },
+      });
+
+      // Update local state so the UI reflects the change immediately
+      const updatedTask = { ...task, status: 'COMPLETED', blocking_reason: null } as Task;
+      handleTaskUpdate(updatedTask);
+
+      // Close the detail sheet if open
+      setIsDetailSheetOpen(false);
+      setSelectedTask(null);
+
+      toast({
+        title: 'Task marked as completed',
+        description: `${task.title} has been completed manually`,
+      });
+
+      console.log(`[AgentTaskVisualizer] Task completed: ${task.id}`);
+    } catch (err) {
+      console.error('[AgentTaskVisualizer] Failed to complete task:', err);
+      toast({
+        title: 'Failed to complete task',
+        description: err instanceof Error ? err.message : 'An error occurred',
+        variant: 'destructive',
+      });
+      throw err;
+    } finally {
+      setIsUpdating(false);
+    }
   };
 
   const handleTaskUpdate = (updatedTask: Task) => {
@@ -1193,6 +1435,8 @@ export function AgentTaskVisualizer() {
                 draggedTask={draggedTask}
                 isUpdating={isUpdating}
                 onTaskClick={handleTaskClick}
+                onTaskDecision={handleTaskDecision}
+                onTaskComplete={handleTaskComplete}
               />
             ))}
           </div>

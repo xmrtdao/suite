@@ -54,7 +54,7 @@ export const DesktopNav = () => {
   const isInboxActive = location.pathname === "/inbox";
 
   return (
-    <nav className="hidden md:flex items-center gap-1">
+    <nav className="hidden lg:flex items-center gap-1">
       {allNavItems.map((item) => {
         const isActive = location.pathname === item.to;
         const Icon = item.icon;

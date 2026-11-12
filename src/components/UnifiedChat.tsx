@@ -574,6 +574,7 @@ const UnifiedChatInner: React.FC<UnifiedChatProps> = ({
   
   const [activeDocAudit, setActiveDocAudit] = useState<{text: string, audit: any} | null>(null);
 const [messages, setMessages] = useState<UnifiedMessage[]>([]);
+const [historyChecked, setHistoryChecked] = useState(false);
   const [conversationSummaries, setConversationSummaries] = useState<Array<{ summaryText: string; messageCount: number; createdAt: Date }>>([]);
   const [hasMoreMessages, setHasMoreMessages] = useState(false);
   const [loadingMoreMessages, setLoadingMoreMessages] = useState(false);
@@ -750,6 +751,7 @@ const [messages, setMessages] = useState<UnifiedMessage[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const liveProcessorRef = useRef<any>(null);
   const hasGeneratedGreetingRef = useRef(false);
+  const hasLoadedHistoryRef = useRef(false);
 
   const clearPendingNoteTimeouts = useCallback(() => {
     pendingNoteTimeoutsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
@@ -944,12 +946,22 @@ const [messages, setMessages] = useState<UnifiedMessage[]>([]);
     if (messages.length > 0 && !isProcessing) {
       // Use setTimeout to ensure DOM updates are complete
       setTimeout(() => {
-        // Only scroll within the chat container itself
-        if (scrollAreaRef.current) {
-          scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight;
+        // Scroll the chat container to the bottom so the newest messages
+        // (which render last) are visible, WITHOUT scrolling the whole page.
+        // Walk up from the sentinel to the nearest scrollable ancestor.
+        const el = messagesEndRef.current;
+        if (!el) return;
+        let node: HTMLElement | null = el.parentElement;
+        while (node && node !== document.body) {
+          const style = window.getComputedStyle(node);
+          if (style.overflowY === 'auto' || style.overflowY === 'scroll') {
+            node.scrollTop = node.scrollHeight;
+            return;
+          }
+          node = node.parentElement;
         }
-        // Removed scrollIntoView to prevent page-level scrolling
-        // User stays at their current position on the page
+        // Fallback: scrollIntoView (may move the page, but better than nothing)
+        el.scrollIntoView({ block: 'end', behavior: 'auto' });
       }, 100);
     }
   }, [messages, isProcessing]);
@@ -974,15 +986,29 @@ const [messages, setMessages] = useState<UnifiedMessage[]>([]);
         try {
           await conversationPersistence.initializeSession();
 
-          // Load conversation context (summaries from conversation_summaries table)
-          const context = await conversationPersistence.getConversationContext(0);
+          // Load conversation context (summaries + recent messages from conversation_messages)
+          // Load a real page of recent messages so the dashboard actually shows the
+          // past conversation instead of only a fresh greeting. Previously this was
+          // called with 0, which fetched zero messages and left the chat blank.
+          const context = await conversationPersistence.getConversationContext(30);
 
-          if (context.summaries.length > 0 || context.totalMessageCount > 0) {
-            setConversationSummaries(context.summaries);
-            setHasMoreMessages(context.totalMessageCount > 0);
-            setTotalMessageCount(context.totalMessageCount);
+          setConversationSummaries(context.summaries || []);
+          setTotalMessageCount(context.totalMessageCount || 0);
+          setHasMoreMessages((context.totalMessageCount || 0) > (context.recentMessages?.length || 0));
 
-            console.log(`📚 Found ${context.summaries.length} summaries for ${context.totalMessageCount} total messages`);
+          if (context.recentMessages && context.recentMessages.length > 0) {
+            const converted: UnifiedMessage[] = context.recentMessages.map((msg: any) => ({
+              id: String(msg.id || `msg-${Date.now()}-${Math.random()}`),
+              content: msg.content,
+              sender: msg.sender as 'user' | 'assistant',
+              timestamp: msg.timestamp instanceof Date ? msg.timestamp : new Date(msg.timestamp),
+              ...(msg.metadata || {}),
+            }));
+            setMessages(converted);
+            hasLoadedHistoryRef.current = true;
+            console.log(`📚 Loaded ${converted.length} past messages (${context.totalMessageCount} total)`);
+          } else {
+            console.log(`📚 No past messages found (${context.totalMessageCount} total)`);
           }
 
           // Load enhanced Supabase backend data
@@ -1007,6 +1033,7 @@ const [messages, setMessages] = useState<UnifiedMessage[]>([]);
         } catch (error) {
           console.log('Conversation persistence error:', error);
         }
+        setHistoryChecked(true);
 
         // Periodic refresh for mining stats
         if (enableMiningStats && !externalMiningStats) {
@@ -1018,6 +1045,7 @@ const [messages, setMessages] = useState<UnifiedMessage[]>([]);
         }
       } catch (error) {
         console.error('Failed to initialize:', error);
+        setHistoryChecked(true);
       }
     };
 
@@ -1260,12 +1288,14 @@ const [messages, setMessages] = useState<UnifiedMessage[]>([]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { handleSendMessageRef.current = handleSendMessage; });
 
-  // Generate immediate greeting when user context is available
+  // Generate immediate greeting when user context is available (only if no past history was loaded)
   useEffect(() => {
+    if (!historyChecked) return;
+    if (hasLoadedHistoryRef.current) return;
     if (userContext && messages.length === 0) {
       generateQuickGreeting();
     }
-  }, [userContext, conversationSummaries]);
+  }, [userContext, conversationSummaries, historyChecked]);
 
 
   const generateQuickGreeting = () => {

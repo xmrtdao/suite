@@ -500,7 +500,7 @@ Format your response EXACTLY as:
     try {
       // Use ai-chat for synthesis — WITHOUT systemPrompt override (that replaces Eliza)
       // Council context is embedded in the synthesisPrompt message itself
-      const { data, error } = await supabase.functions.invoke('ai-chat', {
+      const { data: initData, error: initError } = await supabase.functions.invoke('ai-chat', {
         body: {
           messages: [{ role: 'user', content: synthesisPrompt }],
           use_tools: true,   // ← CRITICAL: enables Eliza to actually EXECUTE tool calls during synthesis
@@ -509,8 +509,41 @@ Format your response EXACTLY as:
         }
       });
 
-      if (error) {
-        throw new Error(error?.message || 'Failed to synthesize council responses');
+      if (initError) {
+        throw new Error(initError?.message || 'Failed to synthesize council responses');
+      }
+
+      // ai-chat returns { status: 'processing', request_id } and completes asynchronously.
+      // Poll for the result so we don't mistake the "AI request accepted" message
+      // for the actual synthesis.
+      let data = initData;
+      if (initData?.status === 'processing' && initData?.request_id) {
+        const rid = initData.request_id;
+        const base = (typeof window !== 'undefined' && window.location?.origin)
+          ? window.location.origin
+          : (import.meta.env?.VITE_SUPABASE_URL || 'http://127.0.0.1:8080');
+        const pollStart = Date.now();
+        const POLL_TIMEOUT_MS = 180000;
+        const POLL_INTERVAL_MS = 2000;
+        while (Date.now() - pollStart < POLL_TIMEOUT_MS) {
+          await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+          try {
+            const pollRes = await fetch(`${base}/functions/v1/ai-chat?request_id=${encodeURIComponent(rid)}`, {
+              method: 'GET',
+              headers: { 'apikey': 'local-anon-key' },
+            });
+            const pollData = await pollRes.json().catch(() => ({}));
+            if (pollData.status === 'done') {
+              data = pollData.result || pollData;
+              break;
+            }
+            if (pollData.status === 'error' || pollData?.error) {
+              throw new Error(pollData.error || 'background request failed');
+            }
+          } catch (pollErr: any) {
+            console.warn(`⏳ council synthesis poll error (${pollErr?.message || 'unknown'}), continuing...`);
+          }
+        }
       }
 
       // ai-chat returns content in various fields — extract whichever is present
@@ -518,7 +551,6 @@ Format your response EXACTLY as:
         data?.response ||
         data?.content ||
         data?.choices?.[0]?.message?.content ||
-        data?.message ||
         data?.text ||
         null;
 
@@ -537,6 +569,7 @@ Format your response EXACTLY as:
       console.error('❌ Failed to synthesize with Lovable AI Gateway:', error);
 
       // Fallback: simple concatenation
+
       return {
         responses,
         synthesis: this.simpleSynthesis(responses),
@@ -661,18 +694,18 @@ Format your response EXACTLY as:
   }
 
   /**
-   * Generate fallback response using Lovable AI Gateway
+   * Generate fallback response using the inference cascade (ai-chat)
    */
   private async generateFallbackResponse(
     userInput: string,
     context: ElizaContext,
     startTime: number
   ): Promise<CouncilDeliberation> {
-    console.log('🌐 Falling back to lovable-chat edge function for council response...');
+    console.log('🌐 Falling back to ai-chat edge function for council response...');
 
     try {
-      // Use lovable-chat edge function for fallback
-      const { data, error } = await supabase.functions.invoke('lovable-chat', {
+      // Use ai-chat edge function for fallback — the multiple provider/model cascade
+      const { data, error } = await supabase.functions.invoke('ai-chat', {
         body: {
           messages: [{ role: 'user', content: userInput }],
           miningStats: context.miningStats,
@@ -681,7 +714,7 @@ Format your response EXACTLY as:
       });
 
       if (error || !data?.success) {
-        throw new Error(error?.message || 'Lovable AI Gateway unavailable');
+        throw new Error(error?.message || 'Inference cascade unavailable');
       }
 
       const response = data.response || 'Unable to generate response at this time.';
@@ -689,7 +722,7 @@ Format your response EXACTLY as:
       return {
         responses: [{
           executive: 'vercel-ai-chat',
-          executiveTitle: 'Lovable AI Gateway (Gemini 2.5 Flash)',
+          executiveTitle: 'Inference Cascade',
           executiveIcon: '🌐',
           executiveColor: 'cyan',
           perspective: response,
@@ -698,11 +731,11 @@ Format your response EXACTLY as:
         }],
         synthesis: response,
         consensus: true,
-        leadExecutive: 'Lovable AI Gateway',
+        leadExecutive: 'Inference Cascade',
         totalExecutionTimeMs: Date.now() - startTime
       };
     } catch (error) {
-      console.error('❌ Lovable AI Gateway fallback failed:', error);
+      console.error('❌ Inference cascade fallback failed:', error);
       throw error;
     }
   }

@@ -167,7 +167,7 @@ export async function getGitHubUserInfo(token: string): Promise<{
  * Try to get AI service credential (OpenAI, DeepSeek, Gemini AI, Vercel AI, OpenRouter, Gemini)
  */
 export function getAICredential(
-  service: 'openai' | 'deepseek' | 'gemini' | 'vercel_ai' | 'openrouter' | 'wan' | 'lovable_ai',
+  service: 'openai' | 'deepseek' | 'gemini' | 'vercel_ai' | 'openrouter' | 'wan',
   sessionCredentials: any
 ): string | null {
   // 1. Try session credential
@@ -184,8 +184,7 @@ export function getAICredential(
     gemini: 'GEMINI_API_KEY',
     vercel_ai: 'VERCEL_AI_GATEWAY_KEY',
     openrouter: 'OPENROUTER_API_KEY',
-    wan: 'WAN_AI_API_KEY',
-    lovable_ai: 'LOVABLE_API_KEY'
+    wan: 'WAN_AI_API_KEY'
   };
 
   const backendKey = Deno.env.get(envKeys[service]);

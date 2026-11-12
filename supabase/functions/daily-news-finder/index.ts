@@ -27,6 +27,7 @@ serve(async (req) => {
         const ollamaLocalModel = Deno.env.get('OLLAMA_MODEL');  // e.g. gemma3:1b
         const geminiApiKey = Deno.env.get('GEMINI_API_KEY');
         const deepseekApiKey = Deno.env.get('DEEPSEEK_API_KEY');
+        const ollamaJoeyApiKey = Deno.env.get('OLLAMA_JOEY_API_KEY');
         const ollamaProModel = Deno.env.get('OLLAMA_PRO_MODEL') || 'deepseek-v4-flash:cloud';
 
         if (!supabaseUrl || !supabaseKey) {
@@ -107,7 +108,11 @@ serve(async (req) => {
             // Fail CLOSED. Publishing without a claim is precisely the bug
             // being fixed, so surface the error instead of falling through.
             console.error('Publication claim insert failed:', claimErr.message);
-            await usageTracker.error({ error: `claim_failed: ${claimErr.message}` });
+            // The tracker exposes success() and failure() - there is no
+            // error() method, so this line threw "usageTracker.error is not a
+            // function" and turned the whole job into an HTTP 500. The job's
+            // own 503 was never reached.
+            await usageTracker.failure(`claim_failed: ${claimErr.message}`);
             return new Response(JSON.stringify({
                 success: false, skipped: true, reason: 'claim_unavailable',
                 error: claimErr.message,
@@ -280,13 +285,14 @@ serve(async (req) => {
 
         // Try Ollama Pro (cloud) if local wasn't available.
         // Note: uses OpenAI-compatible schema at ollama.com.
-        if (!usedProvider && ollamaApiKey) {
+        if (!usedProvider && (ollamaApiKey || ollamaJoeyApiKey)) {
             try {
-                console.log(`🔮 Trying Ollama Pro (${ollamaProModel})...`);
+                const activeKey = ollamaApiKey || ollamaJoeyApiKey;
+                console.log(`🔮 Trying Ollama Pro (${ollamaProModel}) using ${ollamaApiKey ? 'standard' : 'Joey'} key...`);
                 const ollamaResponse = await fetch('https://ollama.com/v1/chat/completions', {
                     method: 'POST',
                     headers: {
-                        'Authorization': `Bearer ${ollamaApiKey}`,
+                        'Authorization': `Bearer ${activeKey}`,
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({

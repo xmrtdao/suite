@@ -170,7 +170,7 @@ serve(async (req) => {
         }
 
         const { data: entity, error } = await supabase
-          .from('knowledge_entities')
+          .schema('app').from('knowledge_entities')
           .insert({
             entity_name: entityName,
             entity_type: entityType,
@@ -202,7 +202,7 @@ serve(async (req) => {
         }
 
         const { data: entity, error } = await supabase
-          .from('knowledge_entities')
+          .schema('app').from('knowledge_entities')
           .upsert(
             {
               entity_name: entityName,
@@ -266,7 +266,7 @@ serve(async (req) => {
       // SEARCH KNOWLEDGE
       // ----------------------------------------------------------------------
       case 'search_knowledge': {
-        let query = supabase.from('knowledge_entities').select('*');
+        let query = supabase.schema('app').from('knowledge_entities').select('*');
 
         if (data.entity_type || data.type) {
           query = query.eq('entity_type', data.entity_type || data.type);
@@ -342,7 +342,7 @@ serve(async (req) => {
         }
 
         const { data: entity, error } = await supabase
-          .from('knowledge_entities')
+          .schema('app').from('knowledge_entities')
           .update({
             confidence_score: newConfidence,
             updated_at: new Date().toISOString(),
@@ -420,7 +420,7 @@ serve(async (req) => {
       // ----------------------------------------------------------------------
       case 'list_knowledge': {
         let query = supabase
-          .from('knowledge_entities')
+          .schema('app').from('knowledge_entities')
           .select('*')
           .order('updated_at', { ascending: false })
           .limit(data.limit || 50);
@@ -445,7 +445,7 @@ serve(async (req) => {
         const [entityResult, relationResult, patternResult] = await Promise.all(
           [
             supabase
-              .from('knowledge_entities')
+              .schema('app').from('knowledge_entities')
               .select('*', { count: 'exact', head: true }),
             supabase
               .from('entity_relationships')
@@ -495,7 +495,7 @@ serve(async (req) => {
 
         // Then delete the entity
         const { error } = await supabase
-          .from('knowledge_entities')
+          .schema('app').from('knowledge_entities')
           .delete()
           .eq('id', entityId);
 

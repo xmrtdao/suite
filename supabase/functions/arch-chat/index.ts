@@ -2,7 +2,7 @@ import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { createClient } from "npm:@supabase/supabase-js@2.46.2";
 
 // ========== ENVIRONMENT CONFIGURATION ==========
-const SUPABASE_URL = Deno.env.get('NEXT_PUBLIC_SUPABASE_URL') || 'https://vawouugtzwmejxqkeqqj.supabase.co';
+const SUPABASE_URL = Deno.env.get('NEXT_PUBLIC_SUPABASE_URL') || Deno.env.get('SUPABASE_URL') || 'http://127.0.0.1:54321';
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 
 // API Keys
@@ -82,6 +82,11 @@ const RELAY_BASE_URL = Deno.env.get('RELAY_BASE_URL') || 'http://127.0.0.1:8080'
 const SUPABASE_LOCAL_URL = Deno.env.get('SUPABASE_URL') || 'http://127.0.0.1:54321';
 const SUPABASE_LOCAL_ANON = Deno.env.get('SUPABASE_ANON_KEY') || Deno.env.get('LOCAL_SUPABASE_ANON_KEY') || '';
 const LOCAL_CONTEXT_TIMEOUT_MS = parseInt(Deno.env.get('LOCAL_CONTEXT_TIMEOUT_MS') || '30000');
+// Relay TOOL calls may legitimately outlive local-context fetches: the
+// relay's shell-exec and python-exec handlers clamp their own timeout at
+// 120s. Bounding /tools/run at LOCAL_CONTEXT_TIMEOUT_MS (30s here) aborted
+// real tool calls mid-flight as Deno's "The signal has been aborted".
+const RELAY_TOOL_TIMEOUT_MS = parseInt(Deno.env.get('RELAY_TOOL_TIMEOUT_MS') || '120000');
 
 if (AI_CHAT_DEBUG_LOG) debugLog('local_ollama_only.config', { LOCAL_OLLAMA_ONLY, RELAY_BASE_URL, SUPABASE_LOCAL_URL, hasAnon: !!SUPABASE_LOCAL_ANON });
 
@@ -108,7 +113,7 @@ async function callRelayTool(tool: string, args: Record<string, unknown> = {}): 
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-agent-id': _currentAgentId },
       body: JSON.stringify({ tool, args }),
-    });
+    }, RELAY_TOOL_TIMEOUT_MS);
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
       await debugLog('local_context.tool_http_error', { tool, status: res.status });

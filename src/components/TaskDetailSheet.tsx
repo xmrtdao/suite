@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { createTaskArtifact as localCreateTaskArtifact, updateTask as localUpdateTask } from '@/integrations/local-api';
 import {
   Sheet,
   SheetContent,
@@ -28,7 +29,7 @@ import {
   GitMerge,
   Loader2,
   ListChecks,
-  ArrowUpRight
+  ArrowUpRight,
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 
@@ -400,6 +401,13 @@ export function TaskDetailSheet({
                   <div>
                     <p className="text-sm font-medium text-red-400">Blocked</p>
                     <p className="text-xs text-red-400/80 mt-1">{displayTask.blocking_reason}</p>
+                    {/awaiting operator decision|operator decision required|awaiting.*decision/i.test(displayTask.blocking_reason) && (
+                      <div className="mt-2 space-y-1 text-[11px] text-red-400/70">
+                        <p><span className="font-medium text-green-400">1 Proceed</span> — resolve the blocking issue and continue</p>
+                        <p><span className="font-medium text-blue-400">2 Defer</span> — pause for later review</p>
+                        <p><span className="font-medium text-amber-400">3 Reject</span> — mark task not applicable</p>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -538,6 +546,76 @@ export function TaskDetailSheet({
               </Collapsible>
             )}
           </div>
+
+          {/* Task Completion Section */}
+          {!isCompleted && (
+            <div className="border-t border-border pt-4 pb-6">
+              <Button
+                variant="outline"
+                onClick={async () => {
+                  if (
+                    !confirm(
+                      `Are you sure you want to mark "${displayTask.title}" as completed? This action cannot be undone.`
+                    )
+                  )
+                    return;
+
+                  const { error: artifactError } = await localCreateTaskArtifact({
+                    task_id: displayTask.id,
+                    type: 'manual_completion',
+                    url: 'operator://manual-completion',
+                    description: 'Manually marked complete by operator',
+                  });
+                  if (artifactError) {
+                    toast({
+                      title: 'Failed to complete task',
+                      description: artifactError.message || 'An error occurred',
+                      variant: 'destructive',
+                    });
+                    return;
+                  }
+
+                  const { error: updateError } = await localUpdateTask(displayTask.id, {
+                    status: 'COMPLETED',
+                    blocking_reason: null,
+                  });
+
+                  if (updateError) {
+                    toast({
+                      title: 'Failed to complete task',
+                      description: updateError.message || 'An error occurred',
+                      variant: 'destructive',
+                    });
+                    return;
+                  }
+
+                  toast({
+                    title: 'Task marked as completed',
+                    description: `${displayTask.title} has been marked as completed`,
+                  });
+
+                  setFullTask(prev => {
+                    if (prev) {
+                      return {
+                        ...prev,
+                        status: 'COMPLETED',
+                        blocking_reason: null,
+                        updated_at: new Date().toISOString(),
+                        progress_percentage: 100,
+                      };
+                    }
+                    return null;
+                  });
+
+                  onOpenChange(false);
+                }}
+                className="w-full h-12 text-sm gap-2 text-green-400 border-green-500/50 hover:bg-green-500/10 hover:text-green-300"
+              >
+                <CheckCircle2 className="w-5 h-5" />
+                <span className="text-sm font-medium">Mark as Completed</span>
+              </Button>
+            </div>
+          )}
         </ScrollArea>
 
         {/* Mobile bottom action bar */}

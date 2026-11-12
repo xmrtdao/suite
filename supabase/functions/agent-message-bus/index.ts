@@ -5,7 +5,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const supabaseUrl = "https://vawouugtzwmejxqkeqqj.supabase.co";
+const supabaseUrl = "http://127.0.0.1:54321";
 const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 
 serve(async (req) => {

@@ -68,7 +68,7 @@ export function MobileNavOverlay({ isOpen, onClose }: MobileNavOverlayProps) {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-40 bg-background/98 backdrop-blur-md md:hidden animate-fade-in">
+    <div className="fixed inset-0 z-40 bg-background/98 backdrop-blur-md lg:hidden animate-fade-in">
       <nav className="flex flex-col items-center justify-center h-full space-y-6">
         {navItems.map((item) => (
           <Link
@@ -111,7 +111,7 @@ export function MobileNav() {
 
   return (
     <>
-      <div className="md:hidden">
+      <div className="lg:hidden">
         <MobileNavTrigger isOpen={isOpen} onToggle={() => setIsOpen(!isOpen)} />
       </div>
       <MobileNavOverlay isOpen={isOpen} onClose={() => setIsOpen(false)} />
