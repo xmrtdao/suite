@@ -777,7 +777,7 @@ export default function Landing() {
             <div className="group relative overflow-hidden rounded-2xl border border-border/50 bg-card/80 shadow-lg hover:shadow-xl transition-all duration-300">
               <img
                 src={`${import.meta.env.BASE_URL}openfilm-studio.png`}
-                alt="OpenFilm Studio — visual video editor dashboard"
+                alt="OpenFilm Studio — canvas preview with the Properties, Motion, Adjust and Effects inspector"
                 className="w-full h-auto object-cover"
                 loading="lazy"
               />
@@ -788,8 +788,8 @@ export default function Landing() {
             </div>
             <div className="group relative overflow-hidden rounded-2xl border border-border/50 bg-card/80 shadow-lg hover:shadow-xl transition-all duration-300">
               <img
-                src={`${import.meta.env.BASE_URL}openfilm-editor.png`}
-                alt="OpenFilm Editor — timeline and canvas"
+                src={`${import.meta.env.BASE_URL}openfilm-timeline.png`}
+                alt="OpenFilm Studio — timeline with scene tracks and a voice-over waveform"
                 className="w-full h-auto object-cover"
                 loading="lazy"
               />
