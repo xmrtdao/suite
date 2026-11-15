@@ -29,8 +29,9 @@ The centerpiece is the **Unified Chat**: Eliza, an executive AI with a cascading
 
 - 💬 **Unified Chat with Eliza** — multi-executive routing, council mode, voice in/out, file attachments, and an **Automation mode** that auto-advances multi-step runs with "Proceed Intelligently".
 - 🧠 **Recursive Self-Improvement (RSI)** — the only AI platform that learns from its mistakes. Agents accumulate learning sessions, get positive reinforcement for successes, self-correct overconfident claims, and retrieve episodic memory. Every failure makes the system smarter.
-- 🎬 **Free Video Generation** — OpenFilm creates videos locally using HTML/CSS/JS. Voice-over via MOSS-TTS-Nano (free, CPU-only). Music, SFX, transitions, effects, and templates from CC0 library. No MuAPI, no paid APIs.
+- 🎬 **Free Video Generation** — OpenFilm creates videos locally using HTML/CSS/JS. Human-in-the-loop visual editor for final touches. Voice-over via MOSS-TTS-Nano (free, CPU-only). Music, SFX, transitions, effects, stickers, and templates from CC0 library. No MuAPI, no paid APIs. Agents can generate launch videos, promo clips, and animated explainers.
 - 🎙️ **Free Text-to-Speech** — MOSS-TTS-Nano (0.1B params, CPU, 48kHz). Multilingual. No API key required.
+- 🔧 **Multi-Agent Orchestration** — OpenHands integration. Unified control plane for 8+ agent runtimes (OpenClaw, Pi, Hermes, DSH, OpenCode, Claude Code, Ollama, OpenFilm). Health monitoring, task routing, capability matching, log aggregation.
 - 🗂️ **Dynamic aside panel** — a 33% side pane that opens *only when needed* (Kimi Work / Claude Desktop style):
   - **Document** — drop a PDF/DOCX/TXT; it's parsed server-side (`/api/upload-temp`) and rendered next to the chat so you can ask questions about it.
   - **Web** — a real browser inside the dashboard. Pages are fetched through the relay (`/api/browse` → Playwright/browserless with fetch fallback), rendered in a sandboxed pane, and **link clicks re-browse in-window — you never leave Suite**. Non-URL input becomes an exa-backed search. When Eliza browses a page herself, it opens here automatically so you watch what she saw.

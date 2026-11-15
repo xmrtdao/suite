@@ -154,7 +154,7 @@ const Council = () => {
                   <div className="space-y-2">
                     <h4 className="font-medium text-foreground">Edge Functions</h4>
                     <p className="text-muted-foreground text-sm">
-                      Each executive can access 120+ autonomous functions for comprehensive operations.
+                      Each executive can access 213+ relay tools and 26 AI providers for comprehensive operations.
                     </p>
                   </div>
                 </div>

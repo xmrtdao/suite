@@ -379,14 +379,10 @@ export default function Landing() {
           {/* Stats Row - show final values immediately for fast scrollers */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-3xl mx-auto">
             {[
-              { icon: Zap, value: '$12.4M', label: t('landing.stats.savings') },
-              { icon: Users, value: '41%', label: t('landing.stats.salary') },
-              { icon: Bot, value: '120+', label: t('landing.stats.functions') },
-              {
-                icon: Shield,
-                value: '24/7',
-                label: t('landing.stats.operations'),
-              },
+              { icon: Zap, value: '26', label: t('landing.stats.savings') },
+              { icon: Bot, value: '213+', label: t('landing.stats.salary') },
+              { icon: Shield, value: '24/7', label: t('landing.stats.operations') },
+              { icon: Sparkles, value: 'Free', label: t('landing.stats.functions') },
             ].map((benefit, i) => (
               <div
                 key={i}
@@ -673,6 +669,94 @@ export default function Landing() {
                 <p className="text-muted-foreground">{step.description}</p>
               </div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* New Capabilities Section — OpenFilm + OpenHands */}
+      <section className="relative py-16 px-4">
+        <div className="container mx-auto max-w-6xl">
+          <div className="text-center mb-12">
+            <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold mb-4">
+              {t('landing.capabilities.title')}
+            </h2>
+            <p className="text-muted-foreground text-lg max-w-2xl mx-auto">
+              {t('landing.capabilities.subtitle')}
+            </p>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-8">
+            {/* OpenFilm */}
+            <Card className="glass-card overflow-hidden group hover:shadow-xl transition-all duration-300">
+              <CardContent className="p-8">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center">
+                    <Play className="w-6 h-6 text-primary" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold">{t('landing.capabilities.openfilm.title')}</h3>
+                    <p className="text-sm text-muted-foreground">{t('landing.capabilities.openfilm.subtitle')}</p>
+                  </div>
+                </div>
+                <p className="text-muted-foreground mb-4">
+                  {t('landing.capabilities.openfilm.desc')}
+                </p>
+                <ul className="space-y-2 text-sm text-muted-foreground">
+                  <li className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-primary flex-shrink-0" />
+                    {t('landing.capabilities.openfilm.feature1')}
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-primary flex-shrink-0" />
+                    {t('landing.capabilities.openfilm.feature2')}
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-primary flex-shrink-0" />
+                    {t('landing.capabilities.openfilm.feature3')}
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-primary flex-shrink-0" />
+                    {t('landing.capabilities.openfilm.feature4')}
+                  </li>
+                </ul>
+              </CardContent>
+            </Card>
+
+            {/* OpenHands */}
+            <Card className="glass-card overflow-hidden group hover:shadow-xl transition-all duration-300">
+              <CardContent className="p-8">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center">
+                    <Layers className="w-6 h-6 text-primary" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold">{t('landing.capabilities.openhands.title')}</h3>
+                    <p className="text-sm text-muted-foreground">{t('landing.capabilities.openhands.subtitle')}</p>
+                  </div>
+                </div>
+                <p className="text-muted-foreground mb-4">
+                  {t('landing.capabilities.openhands.desc')}
+                </p>
+                <ul className="space-y-2 text-sm text-muted-foreground">
+                  <li className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-primary flex-shrink-0" />
+                    {t('landing.capabilities.openhands.feature1')}
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-primary flex-shrink-0" />
+                    {t('landing.capabilities.openhands.feature2')}
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-primary flex-shrink-0" />
+                    {t('landing.capabilities.openhands.feature3')}
+                  </li>
+                  <li className="flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-primary flex-shrink-0" />
+                    {t('landing.capabilities.openhands.feature4')}
+                  </li>
+                </ul>
+              </CardContent>
+            </Card>
           </div>
         </div>
       </section>

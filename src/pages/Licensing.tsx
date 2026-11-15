@@ -26,8 +26,8 @@ const Licensing = () => {
   return (
     <>
       <SEOHead 
-        title="Replace Your C-Suite, Not Your Workers | Suite"
-        description="AI executives save companies $12.4M in executive costs - redistributed as 41% raises to every employee. Ethical AI that empowers workers."
+        title="Suite — Self-Improving AI Operations Platform"
+        description="AI operations platform with recursive self-improvement, 26 providers, 213+ tools, free video generation, and multi-agent orchestration. Ethical AI that empowers workers."
         image="/suite-social-card.svg"
         url="/licensing"
       />
@@ -54,14 +54,14 @@ const Licensing = () => {
             <Card className="bg-card/50 backdrop-blur border-primary/20">
               <CardContent className="pt-6 text-center">
                 <DollarSign className="w-8 h-8 mx-auto mb-2 text-green-500" />
-                <p className="text-3xl font-bold text-green-500">$12.4M</p>
+                <p className="text-3xl font-bold text-green-500">26</p>
                 <p className="text-sm text-muted-foreground">{t('licensing.stats.savings')}</p>
               </CardContent>
             </Card>
             <Card className="bg-card/50 backdrop-blur border-primary/20">
               <CardContent className="pt-6 text-center">
                 <Users className="w-8 h-8 mx-auto mb-2 text-blue-500" />
-                <p className="text-3xl font-bold text-blue-500">41%</p>
+                <p className="text-3xl font-bold text-blue-500">213+</p>
                 <p className="text-sm text-muted-foreground">{t('licensing.stats.salary')}</p>
               </CardContent>
             </Card>

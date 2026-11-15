@@ -297,8 +297,8 @@ function MetricsScene() {
         <div className="text-xs text-muted-foreground">Uptime</div>
       </div>
       <div className="text-center">
-        <div className="text-3xl font-bold font-mono text-primary">$12.4M</div>
-        <div className="text-xs text-muted-foreground">Saved</div>
+        <div className="text-3xl font-bold font-mono text-primary">26</div>
+        <div className="text-xs text-muted-foreground">AI Providers</div>
       </div>
     </div>
   );
