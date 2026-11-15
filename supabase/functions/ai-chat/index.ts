@@ -309,6 +309,8 @@ const PROMOTED_RELAY_TOOLS = [
   // "update the note about X" is answerable without reaching for relay-tool.
   'vault-list', 'vault-read', 'vault-write', 'vault-update', 'vault-sync-entities',
   'cuttlefishclaws_agents_list', 'cuttlefishclaws_trust_score', 'cuttlefishclaws_trust_history',
+  // OpenFilm: AI video agent — create, edit, and render videos from HTML/CSS/JS
+  'openfilm',
   'cuttlefishclaws_gate_evaluate', 'cuttlefishclaws_engine_health', 'cuttlefishclaws_proposals_list',
 ];
 
@@ -4313,6 +4315,70 @@ async function retrieveMemoryContexts(sessionKey: string): Promise<any[]> {
   return [];
 }
 
+// RSI Priority 1: retrieve recent learning sessions so the agent can learn
+// from its past mistakes. These are written by the learning-cycle cron and
+// by the preflight system. Injecting them into the prompt closes the feedback
+// loop: activity -> learning -> prompt injection -> better behavior.
+// RSI Priority 4: retrieve episodic memory — relevant past experiences
+// from knowledge_entities that match the current query.
+async function retrieveEpisodicMemory(query: string): Promise<any[]> {
+  if (!query || query.length < 5) return [];
+  try {
+    const keywords = query.toLowerCase().split(/\s+/).filter((w: string) => w.length > 3).slice(0, 5);
+    if (keywords.length === 0) return [];
+    const searchTerm = keywords[0];
+    const { data, error } = await supabase
+      .from('knowledge_entities')
+      .select('name, entity_type, description, confidence_score, created_at')
+      .or(`name.ilike.%${searchTerm}%,description.ilike.%${searchTerm}%`)
+      .order('confidence_score', { ascending: false })
+      .limit(5);
+    if (error) throw error;
+    if (data && data.length > 0) {
+      console.log(`Retrieved ${data.length} episodic memories for query`);
+      return data.map((e: any) => ({
+        type: e.entity_type || 'knowledge',
+        content: `${e.name}: ${e.description || 'No description'}`,
+        score: e.confidence_score || 0.5,
+        created_at: e.created_at,
+      }));
+    }
+  } catch (error: any) {
+    console.warn('Failed to retrieve episodic memory:', error.message);
+  }
+  return [];
+}
+
+async function retrieveLearningSessions(sessionKey: string): Promise<any[]> {
+  try {
+    const { data, error } = await supabase
+      .from('learning_sessions')
+      .select('session_type, insights, metadata, created_at, agent_id')
+      .in('agent_id', ['eliza', 'system', 'learning-cycle'])
+      .order('created_at', { ascending: false })
+      .limit(10);
+    if (error) throw error;
+    if (data && data.length > 0) {
+      console.log(`📚 Retrieved ${data.length} learning sessions for ${sessionKey}`);
+      return data;
+    }
+    // Also fetch system-wide learning sessions (from preflight)
+    const { data: systemData } = await supabase
+      .from('learning_sessions')
+      .select('session_type, insights, metadata, created_at, agent_id')
+      .like('agent_id', 'agent-%')
+      .order('created_at', { ascending: false })
+      .limit(5);
+    if (systemData && systemData.length > 0) {
+      console.log(`📚 Retrieved ${systemData.length} system learning sessions`);
+      return systemData;
+    }
+  } catch (error: any) {
+    console.warn('⚠️ Failed to retrieve learning sessions:', error.message);
+  }
+  return [];
+}
+
 async function callDeepSeekFallback(messages: any[], tools?: any[]): Promise<any> {
   if (!DEEPSEEK_API_KEY) return null;
   
@@ -5001,7 +5067,11 @@ function buildLocalFallbackMessages(messages: any[], tools: any[] = [], liveCont
       '[{"name":"fleet_pulse","parameters":{}}]',
       'Example - list tasks: [{"name":"list_tasks","parameters":{}}]',
       'Example - search knowledge: [{"name":"search_knowledge","parameters":{"search_term":"..."}}]',
+      'Example - shell command: [{"name":"relay-tool","parameters":{"tool":"shell-exec","args":{"command":"curl -s http://localhost:8080/health"}}}]',
+      'Example - SQL query: [{"name":"relay-tool","parameters":{"tool":"db-query","args":{"sql":"SELECT count(*) FROM app.tasks"}}}]',
+      'Example - Python: [{"name":"relay-tool","parameters":{"tool":"python-exec","args":{"code":"print(2+2)"}}}]',
       'For a relay tool: [{"name":"relay-tool","parameters":{"tool":"db-query","args":{"sql":"select 1"}}}]',
+      'IMPORTANT: Use Windows paths (C:\\ not /c/). Use bash syntax. Pass commands as strings, not objects.',
       'The system runs it and sends you the result. Then answer the user in plain English. If the shared context already answers the question, do not call a tool.'
     );
   } else {
@@ -5515,6 +5585,7 @@ class EnhancedProviderCascade {
     // fleet tools itself. 8s cap: the local model needs the remaining time.
     const lastUser = [...messages].reverse().find(m => m && m.role === 'user');
     const query = localMessageText(lastUser);
+
     // Only fetch a live snapshot for actual status/state questions. A broad
     // keyword match (the old LIVE_CONTEXT_REGEX) treated "What is XMRT-DAO?"
     // as a live query and returned a fleet snapshot for a definition question.
@@ -5528,6 +5599,36 @@ class EnhancedProviderCascade {
       } catch (e: any) {
         console.warn('[ai-chat] local live-context fetch failed:', e?.message || e);
       }
+    }
+
+    // RSI Priority 1: retrieve recent learning sessions and append to liveContext
+    // so the local model can learn from past mistakes.
+    try {
+      const ls = await retrieveLearningSessions('');
+      if (ls && ls.length > 0) {
+        const lessonText = ls.slice(0, 5).map((s: any, idx: number) => {
+          const lesson = s.insights?.lesson || s.insights?.description || 'No lesson';
+          return `- ${lesson}`;
+        }).join('\\n');
+        if (lessonText.length > 20) {
+          liveContext = (liveContext ? liveContext + '\\n\\n' : '') + '[LEARNING FROM PAST MISTAKES]\\n' + lessonText;
+        }
+      }
+    } catch (e: any) {
+      console.warn('[ai-chat] local learning session retrieval failed:', e?.message || e);
+    }
+
+    // RSI Priority 4: retrieve episodic memory for the local model
+    try {
+      const epMem = await retrieveEpisodicMemory(query);
+      if (epMem && epMem.length > 0) {
+        const epText = epMem.slice(0, 3).map((e: any) => `- ${e.content}`).join('\\n');
+        if (epText.length > 20) {
+          liveContext = (liveContext ? liveContext + '\\n\\n' : '') + '[EPISODIC MEMORY]\\n' + epText;
+        }
+      }
+    } catch (e: any) {
+      console.warn('[ai-chat] local episodic memory retrieval failed:', e?.message || e);
     }
 
     // A weak local model is unreliable at narrating a live snapshot, and
@@ -6275,14 +6376,35 @@ async function executeToolsWithIteration(
             browseUrl = candidate;
           }
         } catch { /* args not JSON — no browse url */ }
+        const toolSucceeded = !(result && result.success === false);
         executedToolCalls.push({
           id: `tc-${Date.now().toString(36)}-${executedToolCalls.length}`,
           function_name: toolCall.function.name,
-          status: result && result.success === false ? 'failed' : 'success',
+          status: toolSucceeded ? 'success' : 'failed',
           execution_time_ms: result?.execution_time_ms,
           args_summary: summarizeToolArgs(toolCall.function.arguments),
           ...(browseUrl ? { browse_url: browseUrl } : {}),
         });
+
+        // RSI Priority 2: positive/negative reinforcement via trust events.
+        try {
+          const agentDid = executiveName || 'eliza';
+          const delta = toolSucceeded ? 1 : -1;
+          const eventType = toolSucceeded ? 'TRUST_EARNED' : 'TRUST_LOST';
+          const toolResult = result && result.success === false
+            ? (result.error || 'unknown error').slice(0, 200)
+            : 'success';
+          supabase.from('trust_events').insert({
+            agent_did: agentDid,
+            event_type: eventType,
+            delta,
+            reference: toolCall.function.name,
+            note: toolSucceeded
+              ? `Tool ${toolCall.function.name} succeeded`
+              : `Tool ${toolCall.function.name} failed: ${toolResult}`,
+            domain: 'tool_execution',
+          }).then(() => {}).catch(() => {});
+        } catch { /* non-critical */ }
         const rawContent = JSON.stringify(result);
         return {
           tool_call_id: toolCall.id,
@@ -8320,17 +8442,48 @@ Deno.serve(async (req) => {
     if (shouldExecuteTools) {
       recentContext = await conversationManager.loadRecentContext();
     }
-    
+
+    // RSI Priority 4: retrieve episodic memory for ALL queries (moved before
+    // isStatusQuery so it runs even for status queries that return early).
+    const lastUserMsg = [...messages].reverse().find(m => m && m.role === 'user');
+    const queryText = lastUserMsg ? (typeof lastUserMsg.content === 'string' ? lastUserMsg.content : String(lastUserMsg.content || '')) : '';
+    const episodicMemories = await retrieveEpisodicMemory(queryText);
+
     const memoryContexts = await retrieveMemoryContexts(sessionId);
     let memoryContext = '';
     if (memoryContexts.length > 0) {
-      memoryContext += "## ðŸ§  STORED MEMORY CONTEXTS\n\n";
+      memoryContext += "## STORED MEMORY CONTEXTS\n\n";
       memoryContexts.forEach((ctx, idx) => {
         memoryContext += `**${idx + 1}. ${ctx.type}** (score: ${ctx.score})\n`;
         memoryContext += `${ctx.content}\n\n`;
       });
     }
-    
+
+    // RSI Priority 1: inject recent learning sessions so the agent learns
+    // from its past mistakes. This closes the feedback loop.
+    const learningSessions = await retrieveLearningSessions(sessionId);
+    if (learningSessions.length > 0) {
+      memoryContext += "## LEARNING FROM PAST MISTAKES\n\n";
+      memoryContext += "Apply these lessons to avoid repeating the same mistakes:\n\n";
+      learningSessions.forEach((ls, idx) => {
+        const lesson = ls.insights?.lesson || ls.insights?.description || 'No lesson recorded';
+        const type = ls.session_type || 'unknown';
+        memoryContext += `**${idx + 1}. [${type}]** ${lesson}\n`;
+        if (ls.insights?.title) memoryContext += `   Context: ${ls.insights.title}\n`;
+        memoryContext += '\n';
+      });
+    }
+
+    // RSI Priority 4: inject episodic memory (already retrieved above).
+    if (episodicMemories.length > 0) {
+      memoryContext += "## EPISODIC MEMORY (relevant past experiences)\n\n";
+      memoryContext += "The following are relevant facts from past interactions:\n\n";
+      episodicMemories.forEach((em, idx) => {
+        memoryContext += `**${idx + 1}. ${em.type}** (relevance: ${em.score})\n`;
+        memoryContext += `${em.content}\n\n`;
+      });
+    }
+
     const toolMemoryContext = await conversationManager.generateMemoryContext();
     memoryContext += toolMemoryContext;
     
@@ -8541,7 +8694,7 @@ ${buildRelayToolRoster(relayCatalog)}`
     const extraToolCalls: any[] = [];
 
     // Execute tools with iteration (now includes new Solution Engine tools)
-    const { content: finalContent, toolsExecuted, toolCalls: executedToolCalls } = await executeToolsWithIteration(
+    const { content: _finalContent, toolsExecuted, toolCalls: executedToolCalls } = await executeToolsWithIteration(
       initialResult,
       messagesArray,
       executive_name,
@@ -8552,6 +8705,7 @@ ${buildRelayToolRoster(relayCatalog)}`
       maxToolIterations,
       conversationManager
     );
+    let finalContent = _finalContent;
     
     // Save conversation
     if (save_memory) {
@@ -8564,6 +8718,24 @@ ${buildRelayToolRoster(relayCatalog)}`
       );
     }
     
+    // RSI Priority 3: Self-correction before send.
+    // Check the response for overconfident claims and uncited stats.
+    // If found, append a brief correction note so the user gets accurate info.
+    let correctedContent = finalContent;
+    const lower = correctedContent.toLowerCase();
+    const hasOverconfident = lower.includes('all systems') && (lower.includes('nominal') || lower.includes('operational') || lower.includes('healthy') || lower.includes('online'))
+      || lower.includes('zero issues') || lower.includes('no issues') || lower.includes('no errors') || lower.includes('no problems');
+    const hasDigit = /[0-9]/.test(correctedContent);
+    const hasUncited = (correctedContent.indexOf('%') !== -1 && hasDigit) || lower.includes('over ') || lower.includes('more than ') || lower.includes('less than ');
+    if (hasOverconfident || hasUncited) {
+      const caveat = hasOverconfident
+        ? '\n\n_Note: System status claims should be verified against live data. Check the dashboard for current metrics._'
+        : '\n\n_Note: Some figures mentioned may need verification against live data._';
+      correctedContent = correctedContent + caveat;
+      console.log(`[ai-chat] Self-correction applied: overconfident=${hasOverconfident}, uncited=${hasUncited}`);
+    }
+    finalContent = correctedContent;
+
     const executionTime = Date.now() - startTime;
     console.log(`✅ Request ${requestId} completed in ${executionTime}ms, executed ${toolsExecuted} tools`);
     

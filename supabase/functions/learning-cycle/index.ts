@@ -58,6 +58,66 @@ serve(async (req) => {
       console.warn('⚠️ memories count failed:', memErr.message);
     }
 
+    // ── Recursive learning loop: read activity outcomes, write learning sessions ──
+    // Read recent failures from eliza_activity_log (last 1h) and write a
+    // learning session for each, so agents learn from their mistakes instead
+    // of just being penalized. Also writes a behavioral trust delta (0 = learning,
+    // not punishment) so the trust system is connected to the learning system.
+    let learningSessionsWritten = 0;
+    try {
+      const sinceIso = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const { data: failures } = await supabase
+        .from('eliza_activity_log')
+        .select('id, activity_type, title, description, status, agent_id, metadata')
+        .eq('activity_type', 'http_error')
+        .gte('created_at', sinceIso)
+        .limit(20);
+
+      if (failures && failures.length > 0) {
+        for (const f of failures) {
+          // Write learning session to knowledge.learning_sessions
+          await supabase
+            .from('learning_sessions')
+            .insert({
+              agent_id: f.agent_id || 'system',
+              session_type: 'failure_analysis',
+              started_at: new Date().toISOString(),
+              ended_at: new Date().toISOString(),
+              insights: {
+                failure_type: f.activity_type,
+                title: f.title,
+                description: f.description,
+                lesson: `Learn from: ${f.title} — ${f.description || 'no details'}`,
+              },
+              metadata: {
+                source: 'learning-cycle',
+                activity_log_id: f.id,
+                learning: true,
+              },
+              status: 'completed',
+            })
+            .select('id')
+            .single();
+          learningSessionsWritten++;
+
+          // Write behavioral trust delta (0 = learning, not punishment)
+          // This connects the learning system to the trust system
+          await supabase
+            .from('trust_events')
+            .insert({
+              agent_did: f.agent_id || 'system',
+              event_type: 'LEARNING_SESSION',
+              delta: 0,
+              note: `Learning from failure: ${f.title}`,
+              domain: 'system',
+            });
+        }
+        console.log(`🧠 Wrote ${learningSessionsWritten} learning sessions from ${failures.length} failures`);
+      }
+    } catch (learnErr) {
+      console.warn('⚠️ Learning session write failed:', learnErr.message);
+    }
+
     // Log the learning_sessions row
     const { data: session, error: sessionErr } = await supabase
       .from('learning_sessions')
@@ -69,10 +129,12 @@ serve(async (req) => {
         insights: {
           window_hours: 24,
           trigger: isCronTrigger ? 'cron' : 'manual',
+          learning_sessions_written: learningSessionsWritten,
         },
         metadata: {
           source: 'local-edge-fn',
-          version: '1.0.0',
+          version: '2.0.0',
+          learning_loop: true,
         },
       })
       .select('id, started_at, ended_at')
