@@ -761,6 +761,53 @@ export default function Landing() {
         </div>
       </section>
 
+      {/* OpenFilm Showcase Section */}
+      <section className="relative py-16 px-4 bg-muted/30">
+        <div className="container mx-auto max-w-6xl">
+          <div className="text-center mb-12">
+            <h2 className="text-3xl md:text-4xl lg:text-5xl font-bold mb-4">
+              {t('landing.openfilm.showcase.title')}
+            </h2>
+            <p className="text-muted-foreground text-lg max-w-2xl mx-auto">
+              {t('landing.openfilm.showcase.subtitle')}
+            </p>
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-8">
+            <div className="group relative overflow-hidden rounded-2xl border border-border/50 bg-card/80 shadow-lg hover:shadow-xl transition-all duration-300">
+              <img
+                src={`${import.meta.env.BASE_URL}openfilm-studio.png`}
+                alt="OpenFilm Studio — visual video editor dashboard"
+                className="w-full h-auto object-cover"
+                loading="lazy"
+              />
+              <div className="p-4">
+                <h3 className="font-semibold text-lg mb-1">{t('landing.openfilm.showcase.studio.title')}</h3>
+                <p className="text-sm text-muted-foreground">{t('landing.openfilm.showcase.studio.desc')}</p>
+              </div>
+            </div>
+            <div className="group relative overflow-hidden rounded-2xl border border-border/50 bg-card/80 shadow-lg hover:shadow-xl transition-all duration-300">
+              <img
+                src={`${import.meta.env.BASE_URL}openfilm-editor.png`}
+                alt="OpenFilm Editor — timeline and canvas"
+                className="w-full h-auto object-cover"
+                loading="lazy"
+              />
+              <div className="p-4">
+                <h3 className="font-semibold text-lg mb-1">{t('landing.openfilm.showcase.editor.title')}</h3>
+                <p className="text-sm text-muted-foreground">{t('landing.openfilm.showcase.editor.desc')}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="text-center mt-8">
+            <p className="text-muted-foreground text-sm max-w-2xl mx-auto">
+              {t('landing.openfilm.showcase.note')}
+            </p>
+          </div>
+        </div>
+      </section>
+
       {/* CTA Section */}
       <section className="relative py-16 px-4">
         <div className="pointer-events-none absolute inset-0 hidden xl:block" aria-hidden="true">
