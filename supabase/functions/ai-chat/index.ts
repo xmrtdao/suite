@@ -311,6 +311,8 @@ const PROMOTED_RELAY_TOOLS = [
   'cuttlefishclaws_agents_list', 'cuttlefishclaws_trust_score', 'cuttlefishclaws_trust_history',
   // OpenFilm: AI video agent — create, edit, and render videos from HTML/CSS/JS
   'openfilm',
+  // MOSS-TTS-Nano: free text-to-speech (0.1B, CPU, 48kHz, no API key)
+  'tts-generate',
   'cuttlefishclaws_gate_evaluate', 'cuttlefishclaws_engine_health', 'cuttlefishclaws_proposals_list',
 ];
 

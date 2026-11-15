@@ -1,6 +1,8 @@
 # XMRT Suite
 
-**The AI operations console for the XMRT ecosystem — one dashboard where Eliza (the executive AI) chats, browses the web, reads your documents, and drives the fleet.**
+**The self-improving AI operations platform — one dashboard where Eliza (the executive AI) chats, browses the web, reads your documents, drives the fleet, and gets smarter with every interaction.**
+
+**New:** Recursive Self-Improvement (RSI) — agents learn from mistakes, reinforce successes, self-correct, and remember. Free video generation via OpenFilm. Free TTS via MOSS-TTS-Nano. 26-provider cascade. 213+ relay tools.
 
 **Live Site:** [https://xmrtdao.github.io/suite/](https://xmrtdao.github.io/suite/) · **Fleet Relay:** [relay.mobilemonero.com](https://relay.mobilemonero.com)
 
@@ -26,15 +28,21 @@ The centerpiece is the **Unified Chat**: Eliza, an executive AI with a cascading
 ## What it does
 
 - 💬 **Unified Chat with Eliza** — multi-executive routing, council mode, voice in/out, file attachments, and an **Automation mode** that auto-advances multi-step runs with "Proceed Intelligently".
+- 🧠 **Recursive Self-Improvement (RSI)** — the only AI platform that learns from its mistakes. Agents accumulate learning sessions, get positive reinforcement for successes, self-correct overconfident claims, and retrieve episodic memory. Every failure makes the system smarter.
+- 🎬 **Free Video Generation** — OpenFilm creates videos locally using HTML/CSS/JS. Voice-over via MOSS-TTS-Nano (free, CPU-only). Music, SFX, transitions, effects, and templates from CC0 library. No MuAPI, no paid APIs.
+- 🎙️ **Free Text-to-Speech** — MOSS-TTS-Nano (0.1B params, CPU, 48kHz). Multilingual. No API key required.
 - 🗂️ **Dynamic aside panel** — a 33% side pane that opens *only when needed* (Kimi Work / Claude Desktop style):
   - **Document** — drop a PDF/DOCX/TXT; it's parsed server-side (`/api/upload-temp`) and rendered next to the chat so you can ask questions about it.
   - **Web** — a real browser inside the dashboard. Pages are fetched through the relay (`/api/browse` → Playwright/browserless with fetch fallback), rendered in a sandboxed pane, and **link clicks re-browse in-window — you never leave Suite**. Non-URL input becomes an exa-backed search. When Eliza browses a page herself, it opens here automatically so you watch what she saw.
   - **Image / Video** — generated media surfaces here instead of clogging the chat.
   - **Ops** — live supervisor services and fleet task-pipeline status.
-- 📊 **Agent & Task Visualizer** — live kanban of the fleet's task pipeline (33+ pending, per-agent load), drag between stages, provision agents.
+- 📊 **Agent & Task Visualizer** — live kanban of the fleet's task pipeline, drag between stages, provision agents, mark complete with evidence gate.
+- 🔧 **Multi-Agent Orchestration** — harness registry for 8+ agent runtimes (OpenClaw, Pi, Hermes, DSH, OpenCode, Claude Code, Ollama, OpenFilm). Health monitoring, task routing, capability matching.
+- 🛡️ **TrustGraph** — behavioral scoring engine. 37 agents tracked. Non-punitive learning: mistakes are recorded as learning opportunities, not penalties.
 - ⛏️ **Mining & DAO tooling** — real-time MobileMonero mining stats, governance, treasury views.
-- 🧠 **Memory & learning** — knowledge entities, conversation memory, learning patterns baked into every reply.
-- 🔌 **290+ edge functions** served by the built-in Deno runtime — no cloud dependency required.
+- 🧠 **Memory & learning** — knowledge entities, conversation memory, learning patterns, episodic memory baked into every reply.
+- 🔌 **213+ relay tools** — shell, Python, SQL, web search, scraping, fleet chat, task management, service control, knowledge graph, vault, and more.
+- 🔄 **26 AI providers** — OpenRouter, Nous Research, Ollama Cloud, Ollama Local, OpenCode Zen. Never goes down.
 
 ## How to use it
 

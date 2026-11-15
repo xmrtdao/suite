@@ -68,10 +68,10 @@ const executives = [
 ];
 
 const benefits = [
-  { icon: Zap, value: '$12.4M', label: 'Average C-Suite Savings' },
-  { icon: Users, value: '41%', label: 'Employee Salary Increase' },
-  { icon: Bot, value: '120+', label: 'Autonomous Functions' },
+  { icon: Zap, value: '26', label: 'AI Providers in Cascade' },
+  { icon: Bot, value: '213+', label: 'Relay Tools Available' },
   { icon: Shield, value: '24/7', label: 'Always-On Operations' },
+  { icon: Sparkles, value: 'Free', label: 'Video & Audio Generation' },
 ];
 
 const steps = [

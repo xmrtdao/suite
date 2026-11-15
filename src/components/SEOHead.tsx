@@ -16,7 +16,7 @@ interface SEOHeadProps {
 const BASE_URL = 'https://suite-beta.vercel.app';
 
 export const SEOHead = ({ 
-  title = "Scale Your Operations With Suite AI | Suite",
+  title = "Suite — Self-Improving AI Operations Platform",
   description = "Suite combines persistent memory, AI executives, and deep Google, GitHub, and Supabase integrations to plan, execute, and publish work across your stack.",
   image = "/suite-social-card.svg",
   url = "/",

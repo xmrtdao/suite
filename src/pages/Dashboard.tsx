@@ -78,15 +78,15 @@ const Index = () => {
   return (
     <>
       <SEOHead
-        title="AI Council of Executives at Your Fingertips | Suite"
-        description="293 edge functions, 5 AI executives, real-time orchestration. Chat with CSO, CTO, CIO, CAO, COO and review live system operations instantly."
+        title="Suite — Self-Improving AI Operations Platform"
+        description="213+ relay tools, 26 AI providers, recursive self-improvement, free video generation, and multi-agent orchestration. One dashboard to chat, build, and automate."
         image="/og-image-home.svg"
         url="/"
-        keywords="AI executives, AI council, autonomous AI, real-time orchestration, multi-agent system"
-        twitterLabel1="🤖 AI Executives"
-        twitterData1="4"
-        twitterLabel2="⚡ Functions"
-        twitterData2="293"
+        keywords="self-improving AI, AI operations, recursive self-improvement, AI agent orchestration, free video generation, multi-agent system, autonomous AI, tool validation, harness management"
+        twitterLabel1="🤖 AI Providers"
+        twitterData1="26"
+        twitterLabel2="⚡ Relay Tools"
+        twitterData2="213"
       />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
         {/* Main grid: chat column is 100% when the aside is closed,
