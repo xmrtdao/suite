@@ -809,6 +809,108 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     retryDelayMs: 1000
   },
 
+
+  // ── OpenCode Zen free models — only reachable from inside the OpenCode
+  // harness on this machine. Zen's free tier rejects every external caller
+  // with `429 FreeUsageLimitError` (verified from this environment 2026-11-15
+  // — it answers exclusively to the OpenCode harness). The loopback proxy on
+  // :4130 carries the server's credential, so the fleet can reach them by
+  // proxying through the same harness the operator's dashboard uses.
+  //
+  // Tools are presented as a text manifest inside the compact prompt and the
+  // response is parsed back with the same text-based tool-call parsers the
+  // local Ollama fallback uses, so the suite tool loop sees a normal
+  // CascadeResult either way. Costs nothing.
+  opencode_inkling_2_small_free: {
+    name: 'OpenCode Zen inkling-2-small-free — FREE, text-based tools',
+    enabled: !!OPENCODE_API_KEY,
+    apiKey: OPENCODE_API_KEY,
+    endpoint: 'http://127.0.0.1:4130',
+    models: ['inkling-2-small-free'],
+    supportsTools: true,
+    contextWindow: undefined,
+    timeoutMs: 90000,
+    priority: 0.011,
+    fallbackOnly: false,
+    maxRetries: 1,
+    retryDelayMs: 1000
+  },
+
+  opencode_flint_40b_free: {
+    name: 'OpenCode Zen flint-40b-free — FREE, text-based tools',
+    enabled: !!OPENCODE_API_KEY,
+    apiKey: OPENCODE_API_KEY,
+    endpoint: 'http://127.0.0.1:4130',
+    models: ['flint-40b-free'],
+    supportsTools: true,
+    contextWindow: undefined,
+    timeoutMs: 90000,
+    priority: 0.012,
+    fallbackOnly: false,
+    maxRetries: 1,
+    retryDelayMs: 1000
+  },
+
+  opencode_beam_free: {
+    name: 'OpenCode Zen beam-free — FREE, text-based tools',
+    enabled: !!OPENCODE_API_KEY,
+    apiKey: OPENCODE_API_KEY,
+    endpoint: 'http://127.0.0.1:4130',
+    models: ['beam-free'],
+    supportsTools: true,
+    contextWindow: undefined,
+    timeoutMs: 90000,
+    priority: 0.013,
+    fallbackOnly: false,
+    maxRetries: 1,
+    retryDelayMs: 1000
+  },
+
+  opencode_glm_5_3_flash_free: {
+    name: 'OpenCode Zen glm-5.3-flash-free — FREE, text-based tools',
+    enabled: !!OPENCODE_API_KEY,
+    apiKey: OPENCODE_API_KEY,
+    endpoint: 'http://127.0.0.1:4130',
+    models: ['glm-5.3-flash-free'],
+    supportsTools: true,
+    contextWindow: undefined,
+    timeoutMs: 90000,
+    priority: 0.014,
+    fallbackOnly: false,
+    maxRetries: 1,
+    retryDelayMs: 1000
+  },
+
+  opencode_deepseek_v4_1_flash_free: {
+    name: 'OpenCode Zen deepseek-v4.1-flash-free — FREE, text-based tools',
+    enabled: !!OPENCODE_API_KEY,
+    apiKey: OPENCODE_API_KEY,
+    endpoint: 'http://127.0.0.1:4130',
+    models: ['deepseek-v4.1-flash-free'],
+    supportsTools: true,
+    contextWindow: undefined,
+    timeoutMs: 90000,
+    priority: 0.015,
+    fallbackOnly: false,
+    maxRetries: 1,
+    retryDelayMs: 1000
+  },
+
+  opencode_nemotron_3_5_super_vl_free: {
+    name: 'OpenCode Zen nemotron-3.5-super-vl-free — FREE, text-based tools',
+    enabled: !!OPENCODE_API_KEY,
+    apiKey: OPENCODE_API_KEY,
+    endpoint: 'http://127.0.0.1:4130',
+    models: ['nemotron-3.5-super-vl-free'],
+    supportsTools: true,
+    contextWindow: undefined,
+    timeoutMs: 90000,
+    priority: 0.016,
+    fallbackOnly: false,
+    maxRetries: 1,
+    retryDelayMs: 1000
+  },
+
   glm_5_3_flash: {
     name: 'Z-AI GLM 5.3 Flash (OpenRouter) — nearly-free, native tool_calls, 1M ctx',
     enabled: !!OPENROUTER_API_KEY,
@@ -5435,7 +5537,16 @@ class EnhancedProviderCascade {
         case 'deepseek_v4_1_flash_1017':
         case 'nemotron_3_5_super_vl_free':
         case 'nemotron_3_nano_omni_free':
+        case 'deepseek_v4_1_flash':
           result = await this.callOpenRouterFree(provider, config.models[0], messages, tools, controller);
+          break;
+        case 'opencode_inkling_2_small_free':
+        case 'opencode_flint_40b_free':
+        case 'opencode_beam_free':
+        case 'opencode_glm_5_3_flash_free':
+        case 'opencode_deepseek_v4_1_flash_free':
+        case 'opencode_nemotron_3_5_super_vl_free':
+          result = await this.callOpencodeHarness(provider, config.models[0], messages, tools, controller);
           break;
         case 'nous_free_router':
           result = await this.callNousFree(provider, config.models[0], messages, tools, controller);
@@ -5932,6 +6043,94 @@ class EnhancedProviderCascade {
   // every one failed instantly with "Unknown provider" and the whole Suite
   // chat collapsed to the emergency static fallback. This one method serves
   // them all from their own config (endpoint + models[0] + apiKey).
+  // OpenCode Zen models, via the local OpenCode harness on this machine.
+  //
+  // Zen's free models (inkling-2-small-free, glm-5.3-flash-free, beam-free,
+  // …) only answer through the OpenCode harness — OpenRouter and direct
+  // OpenCode.ai calls from the fleet 429 or 402. The harness API is
+  // session+prompt, not chat/completions, so this method mints a session,
+  // posts the compact prompt, and polls for the assistant message.
+  //
+  // The harness runs its own tool loop, but asked to emit text tool-calls it
+  // will; tools are injected into the prompt as a text manifest and the
+  // response is parsed back by the same parsers the local-model path uses.
+  private async callOpencodeHarness(providerName: string, model: string, messages: any[], tools: any[], controller: AbortController): Promise<CascadeResult> {
+    const lastUser = [...messages].reverse().find(m => m && m.role === 'user');
+    const query = localMessageText(lastUser);
+
+    const localMessages = compactLocalMessages(messages, tools, '');
+    const title = (query || 'fleet').slice(0, 60);
+
+    let sessionId: string | null = null;
+    try {
+      const created = await fetch('http://127.0.0.1:4130/api/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, model: { providerID: 'opencode', id: model } }),
+        signal: AbortSignal.timeout(20000),
+      });
+      if (!created.ok) {
+        return { success: false, provider: providerName, error: `harness POST /api/session HTTP ${created.status}` };
+      }
+      const createdJson: any = await created.json().catch(() => null);
+      sessionId = createdJson?.data?.id ?? null;
+      if (!sessionId) {
+        return { success: false, provider: providerName, error: 'harness POST /api/session: no session id in response' };
+      }
+
+      const flatPrompt = localMessages
+        .map((m: any) => {
+          const role = String(m?.role ?? 'user').toUpperCase();
+          const content = typeof m?.content === 'string' ? m.content : ((m?.content != null ? JSON.stringify(m.content) : ''));
+          return `=== ${role} ===\n${content}`;
+        })
+        .join('\n\n')
+        + '\n\nIMPORTANT: Reply in plain text only. When you want a tool, reply with ONLY a JSON array and nothing else.';
+
+      const sent = await fetch(`http://127.0.0.1:4130/api/session/${sessionId}/prompt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: flatPrompt }),
+        signal: AbortSignal.timeout(20000),
+      });
+      if (!sent.ok) {
+        return { success: false, provider: providerName, error: `harness POST /api/session/${sessionId}/prompt HTTP ${sent.status}` };
+      }
+
+      const deadline = Date.now() + 60_000;
+      let text = '';
+      while (Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 1800));
+        const res = await fetch(`http://127.0.0.1:4130/api/session/${sessionId}/message`, { signal: AbortSignal.timeout(4000) });
+        if (!res.ok) continue;
+        const json: any = await res.json().catch(() => null);
+        const msgs: any[] = json?.data ?? [];
+        const assistant = msgs.find(m => m?.type === 'assistant' && Array.isArray(m?.content));
+        if (assistant) {
+          text = (assistant?.content ?? [])
+            .map((p: any) => (p?.type === 'text' || typeof p?.text === 'string') ? String(p.text ?? '') : '')
+            .filter((s: string) => s.trim().length > 0)
+            .join('')
+            .trim();
+          if (text) break;
+        }
+      }
+      if (!text) return { success: false, provider: providerName, error: 'harness: assistant did not answer within 60s' };
+
+      let tool_calls: any[] = [];
+      const parsed = parseDeepSeekToolCalls(text) ||
+                     parseToolCodeBlocks(text) ||
+                     parseJsonArrayToolCalls(text) ||
+                     parseXmlToolCalls(text) ||
+                     parseConversationalToolIntent(text);
+      if (parsed && parsed.length > 0) tool_calls = parsed;
+
+      return { success: true, content: text, tool_calls, provider: providerName, model };
+    } catch (e: any) {
+      return { success: false, provider: providerName, error: `harness error: ${e?.message ?? String(e)}` };
+    }
+  }
+
   private async callOpenRouterFree(providerName: string, model: string, messages: any[], tools: any[], controller: AbortController): Promise<CascadeResult> {
     const forceTools = needsDataRetrieval(messages);
 
