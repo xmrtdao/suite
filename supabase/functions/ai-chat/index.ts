@@ -789,6 +789,100 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     retryDelayMs: 1000
   },
 
+  ollama_inkling_2_small_cloud: {
+    name: 'Inkling 2 Small (Ollama Cloud) — long-context reasoning, FREE/PAID',
+    enabled: !!OLLAMA_XMRT_API_KEY,
+    apiKey: OLLAMA_XMRT_API_KEY,
+    endpoint: 'https://ollama.com/v1/chat/completions',
+    models: ['inkling-2-small'],
+    supportsTools: true,
+    // 594B MoE, 1M context. Added 2026-11-13 after Ollama emailed that
+    // inkling-2-small:cloud is now live for Pro subscribers. Account-level
+    // 402/403 across all three Ollama Cloud keys on 2026-11-15 — the model
+    // is present in the catalog regardless; whether it answers depends on
+    // the account's usage credits, not on the model entry.
+    contextWindow: 1048576,
+    timeoutMs: 45000,
+    priority: 0.02,  // tried right after the paid minimax slot
+    fallbackOnly: false,
+    maxRetries: 2,
+    retryDelayMs: 1000
+  },
+
+  glm_5_3_flash: {
+    name: 'Z-AI GLM 5.3 Flash (OpenRouter) — nearly-free, native tool_calls, 1M ctx',
+    enabled: !!OPENROUTER_API_KEY,
+    apiKey: OPENROUTER_API_KEY,
+    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    models: ['z-ai/glm-5.3-flash'],
+    supportsTools: true,
+    // Added 2026-11-15. Verified live from this machine: 200 with native
+    // tool_calls. Not an agentic-harness-gated slug, so it does not answer
+    // 403 from a shell, but the account holds almost no OpenRouter credits
+    // and heavy calls will 402 — it falls through to the free variants
+    // below. glm-5.3 (the main slug, ~2x price) is 402 right now anyway.
+    contextWindow: 1048576,
+    timeoutMs: 45000,
+    priority: 0.017,  // leads the OpenRouter tier — verified 200 + tool_calls 2026-11-15
+    fallbackOnly: false,
+    maxRetries: 2,
+    retryDelayMs: 1000
+  },
+
+  deepseek_v4_1_flash_1017: {
+    name: 'DeepSeek V4.1 Flash 1017 (OpenRouter) — nearly-free, native tool_calls, 1M ctx',
+    enabled: !!OPENROUTER_API_KEY,
+    apiKey: OPENROUTER_API_KEY,
+    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    models: ['deepseek/deepseek-v4.1-flash-1017'],
+    supportsTools: true,
+    // Added 2026-11-15. Verified live from this machine: 200 with native
+    // tool_calls. The plain v4.1-flash slug was 402 that day (not enough
+    // credits); the 1017 revision answered. deepseek-v4.1-flash-1017:batch
+    // answers 404 from chat/completions.
+    contextWindow: 1048576,
+    timeoutMs: 45000,
+    priority: 0.024,
+    fallbackOnly: false,
+    maxRetries: 2,
+    retryDelayMs: 1000
+  },
+
+  nemotron_3_5_super_vl_free: {
+    name: 'Nemotron 3.5 Super VL (OpenRouter) — FREE, native tool_calls, vision, 1M ctx',
+    enabled: !!OPENROUTER_API_KEY,
+    apiKey: OPENROUTER_API_KEY,
+    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    models: ['nvidia/nemotron-3.5-super-vl:free'],
+    supportsTools: true,
+    // Added 2026-11-15. Verified live from this machine: 200 with native
+    // tool_calls AND a vision prompt (og-image.png described correctly).
+    // Free tier rotates; this one was present on 2026-11-15.
+    contextWindow: 1048576,
+    timeoutMs: 45000,
+    priority: 0.026,  // genuinely free — band between the paid-cheap slots and the free
+    fallbackOnly: false,
+    maxRetries: 2,
+    retryDelayMs: 1000
+  },
+
+  nemotron_3_nano_omni_free: {
+    name: 'Nemotron 3 Nano Omni 30B (OpenRouter) — FREE, reasoning, vision',
+    enabled: !!OPENROUTER_API_KEY,
+    apiKey: OPENROUTER_API_KEY,
+    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    models: ['nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free'],
+    // 2026-11-15 probe returned 200 with empty tool_calls array — it does
+    // not emit native tool_calls, so it is text-only for tool-needing calls.
+    supportsTools: false,
+    contextWindow: 262144,
+    timeoutMs: 45000,
+    priority: 0.028,
+    fallbackOnly: false,
+    maxRetries: 2,
+    retryDelayMs: 1000
+  },
+
   cohere_north_mini_code: {
     name: 'Cohere North Mini Code (OpenRouter) — FREE, supports tools',
     enabled: !!OPENROUTER_API_KEY,
@@ -1206,6 +1300,31 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     contextWindow: undefined,
     timeoutMs: 45000,
     priority: 0.53,
+    fallbackOnly: false,
+    maxRetries: 2,
+    retryDelayMs: 1000
+  },
+
+  // DeepSeek V4.1 Flash 1017 — the dated revision of the plain slug. The plain
+  // deepseek/deepseek-v4.1-flash was 402 on 2026-11-15 ("can only afford 10
+  // tokens"), but 1017 answered 200 WITH native tool_calls at the same moment.
+  // Same family, same price class (the 1017 slug cost $0.000036/k prompt vs
+  // $0.00014 for the base slug). The user asked for DeepSeek 4.1 guaranteed
+  // in the cascade even at this depth — here it is, the working one, tucked
+  // in just before local gemma3-xmrt.
+  deepseek_v4_1_flash: {
+    name: 'DeepSeek V4.1 Flash 1017 (OpenRouter) — LAST OpenRouter slot before local',
+    enabled: !!OPENROUTER_API_KEY,
+    apiKey: OPENROUTER_API_KEY,
+    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
+    models: ['deepseek/deepseek-v4.1-flash-1017'],
+    supportsTools: true,
+    // Verified live 2026-11-15: HTTP 200 with tool_calls: ["get_time"]. The
+    // plain deepseek-v4.1-flash slug is 402 on this account; this slug is the
+    // same model family at 4x lower cost, and it answers.
+    contextWindow: 1048576,
+    timeoutMs: 60000,
+    priority: 98,  // just above ollama_local (99)
     fallbackOnly: false,
     maxRetries: 2,
     retryDelayMs: 1000
@@ -5337,6 +5456,11 @@ class EnhancedProviderCascade {
         case 'nemotron_3_5_free':
         case 'nemotron_3_5_super_vl':
         case 'openrouter_free_router':
+        case 'glm_5_3_flash':
+        case 'deepseek_v4_1_flash_1017':
+        case 'nemotron_3_5_super_vl_free':
+        case 'nemotron_3_nano_omni_free':
+        case 'deepseek_v4_1_flash':
           result = await this.callOpenRouterFree(provider, config.models[0], messages, tools, controller);
           break;
         case 'nous_free_router':
@@ -5351,6 +5475,7 @@ class EnhancedProviderCascade {
           result = await this.callOllama(messages, tools, controller, 'ollama');
           break;
         case 'ollama_minimax_m3_1_flash':
+        case 'ollama_inkling_2_small_cloud':
           // The same free model OpenRouter serves, out of Ollama's pool. It
           // cycles the configured Ollama keys and uses this entry's own slug,
           // so the provider list cannot drift from the model that answers.
@@ -5406,7 +5531,7 @@ class EnhancedProviderCascade {
     }
   }
   
-  private async callOllama(messages: any[], tools: any[], controller: AbortController, providerName: 'ollama' | 'ollama_hermes' | 'ollama_minimax_m3_1_flash' | 'ollama_ttcr_gemma4' | 'ollama_ttcr_gpt_oss_120b' | 'ollama_ttcr_gpt_oss_20b' | 'ollama_ttcr_nemotron_nano' | 'ollama_ttcr_nemotron_super' | 'ollama_ttcr_nemotron_ultra' | 'ollama_ttcr_beam' = 'ollama', modelOverride?: string): Promise<CascadeResult> {
+  private async callOllama(messages: any[], tools: any[], controller: AbortController, providerName: 'ollama' | 'ollama_hermes' | 'ollama_minimax_m3_1_flash' | 'ollama_inkling_2_small_cloud' | 'ollama_ttcr_gemma4' | 'ollama_ttcr_gpt_oss_120b' | 'ollama_ttcr_gpt_oss_20b' | 'ollama_ttcr_nemotron_nano' | 'ollama_ttcr_nemotron_super' | 'ollama_ttcr_nemotron_ultra' | 'ollama_ttcr_beam' = 'ollama', modelOverride?: string): Promise<CascadeResult> {
     // Cascade through all configured Ollama keys (primary, xmrt, hermes, 3rd,
     // ttcr) — mirrors the relay's tryOllamaCloud() in
     // relay/tools/ollama-chat.mjs so the suite chat uses the SAME Ollama
