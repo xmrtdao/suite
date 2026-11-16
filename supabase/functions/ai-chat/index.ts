@@ -1305,31 +1305,6 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     retryDelayMs: 1000
   },
 
-  // DeepSeek V4.1 Flash 1017 — the dated revision of the plain slug. The plain
-  // deepseek/deepseek-v4.1-flash was 402 on 2026-11-15 ("can only afford 10
-  // tokens"), but 1017 answered 200 WITH native tool_calls at the same moment.
-  // Same family, same price class (the 1017 slug cost $0.000036/k prompt vs
-  // $0.00014 for the base slug). The user asked for DeepSeek 4.1 guaranteed
-  // in the cascade even at this depth — here it is, the working one, tucked
-  // in just before local gemma3-xmrt.
-  deepseek_v4_1_flash: {
-    name: 'DeepSeek V4.1 Flash 1017 (OpenRouter) — LAST OpenRouter slot before local',
-    enabled: !!OPENROUTER_API_KEY,
-    apiKey: OPENROUTER_API_KEY,
-    endpoint: 'https://openrouter.ai/api/v1/chat/completions',
-    models: ['deepseek/deepseek-v4.1-flash-1017'],
-    supportsTools: true,
-    // Verified live 2026-11-15: HTTP 200 with tool_calls: ["get_time"]. The
-    // plain deepseek-v4.1-flash slug is 402 on this account; this slug is the
-    // same model family at 4x lower cost, and it answers.
-    contextWindow: 1048576,
-    timeoutMs: 60000,
-    priority: 98,  // just above ollama_local (99)
-    fallbackOnly: false,
-    maxRetries: 2,
-    retryDelayMs: 1000
-  },
-
   // LOCAL Ollama — the only provider that does not depend on somebody else's
   // quota. Measured 2026-10-22: gemma3:1b answers text in ~36s on this CPU
   // and rejects native tools; callOllamaLocal injects a text tool manifest,
@@ -5460,7 +5435,6 @@ class EnhancedProviderCascade {
         case 'deepseek_v4_1_flash_1017':
         case 'nemotron_3_5_super_vl_free':
         case 'nemotron_3_nano_omni_free':
-        case 'deepseek_v4_1_flash':
           result = await this.callOpenRouterFree(provider, config.models[0], messages, tools, controller);
           break;
         case 'nous_free_router':
