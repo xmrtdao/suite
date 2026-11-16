@@ -35,7 +35,13 @@ export class KnowledgeEntityService {
         .select('*')
         .eq('entity_name', entityName)
         .eq('entity_type', entityType)
-        .single();
+        .limit(1)
+        .maybeSingle();
+
+      if (fetchError) {
+        console.error('Failed to fetch existing knowledge entity:', fetchError);
+        return;
+      }
 
       if (existing) {
         // Update existing entity
