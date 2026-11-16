@@ -498,12 +498,17 @@ Format your response EXACTLY as:
 
 
     try {
-      // Use ai-chat for synthesis — WITHOUT systemPrompt override (that replaces Eliza)
-      // Council context is embedded in the synthesisPrompt message itself
+      // Use ai-chat for synthesis. We OVERRIDE the system prompt so the model
+      // acts as a structured synthesizer instead of Eliza — otherwise Eliza's
+      // identity takes over and the "Format your response EXACTLY as: ..." block
+      // in synthesisPrompt is ignored, so the front-end's extractNextCouncilStep
+      // (which keys on "**Lead Executive:**" and bullet lines) finds nothing
+      // and auto-advance stops.
       const { data: initData, error: initError } = await supabase.functions.invoke('ai-chat', {
         body: {
           messages: [{ role: 'user', content: synthesisPrompt }],
           use_tools: true,   // ← CRITICAL: enables Eliza to actually EXECUTE tool calls during synthesis
+          system_prompt_override: "You are the Executive Council Synthesizer for XMRT-DAO. You are NOT Eliza and you are NOT a chat assistant. Your ONLY job is to read the five executive perspectives in the user message and produce a structured synthesis. Output EXACTLY these four labeled sections and nothing else:\n\n**Consensus Areas:**\n[bullet points of agreement]\n\n**Key Debates:**\n[any disagreements, naming the executives]\n\n**Unified Recommendation:**\n[synthesized view plus actual results if an action was taken, plus clear next steps]\n\n**Lead Executive:** [which executive's perspective is most relevant]\n\nDo not roleplay. Do not add preamble, apologies, or meta-commentary. Do not invent financial figures, treasury balances, XMR amounts, organizational divisions, or technical problems not present in the perspectives. If data is missing, say so inside the recommendation. Preserve the exact heading text including the double asterisks.",
           miningStats: context.miningStats,
           userContext: context.userContext
         }
@@ -523,7 +528,7 @@ Format your response EXACTLY as:
           ? window.location.origin
           : (import.meta.env?.VITE_SUPABASE_URL || 'http://127.0.0.1:8080');
         const pollStart = Date.now();
-        const POLL_TIMEOUT_MS = 180000;
+        const POLL_TIMEOUT_MS = 30000;  // council synthesis must not block on a dead cascade
         const POLL_INTERVAL_MS = 2000;
         while (Date.now() - pollStart < POLL_TIMEOUT_MS) {
           await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
@@ -547,7 +552,7 @@ Format your response EXACTLY as:
       }
 
       // ai-chat returns content in various fields — extract whichever is present
-      const synthesis =
+      let synthesis =
         data?.response ||
         data?.content ||
         data?.choices?.[0]?.message?.content ||
@@ -558,23 +563,35 @@ Format your response EXACTLY as:
         throw new Error('ai-chat synthesis returned no content');
       }
 
+      // The front-end (ExecutiveCouncilChat + extractNextCouncilStep) keys off
+      // the structured markers below. The cloud providers usually emit them,
+      // but the local fallback ignores system_prompt_override and answers as
+      // Eliza, so the markers never appear and Council Mode can't print a
+      // valid consensus / auto-advance. Guarantee them here by rebuilding a
+      // structured synthesis from the exec perspectives when the LLM didn't.
+      const leadExecutive = this.selectLeadExecutive(responses, originalQuestion);
+      if (!/\*\*Consensus Areas:\*\*/i.test(synthesis) || !/\*\*Lead Executive:\*\*/i.test(synthesis)) {
+        synthesis = this.simpleSynthesis(responses, leadExecutive);
+      }
+
       return {
         responses,
         synthesis,
         consensus: this.detectConsensus(responses),
-        leadExecutive: this.selectLeadExecutive(responses, originalQuestion),
+        leadExecutive,
         dissentingOpinions: this.extractDissent(responses)
       };
     } catch (error) {
       console.error('❌ Failed to synthesize with Lovable AI Gateway:', error);
 
-      // Fallback: simple concatenation
-
+      // Fallback: simple concatenation with the structured markers so the
+      // front-end can still parse a valid consensus.
+      const fallbackLead = this.selectLeadExecutive(responses, originalQuestion);
       return {
         responses,
-        synthesis: this.simpleSynthesis(responses),
+        synthesis: this.simpleSynthesis(responses, fallbackLead),
         consensus: true,
-        leadExecutive: responses[0].executive
+        leadExecutive: fallbackLead
       };
     }
   }
@@ -582,10 +599,10 @@ Format your response EXACTLY as:
   /**
    * Simple synthesis fallback if Lovable AI Gateway fails
    */
-  private simpleSynthesis(responses: ExecutiveResponse[]): string {
-    return `**Executive Council Summary**\n\n${responses.map(r =>
-      `**${r.executiveIcon} ${r.executiveTitle}:**\n${r.perspective}\n`
-    ).join('\n---\n')}`;
+  private simpleSynthesis(responses: ExecutiveResponse[], leadExecutive?: string): string {
+    const dissent = this.extractDissent(responses);
+    const lead = leadExecutive || this.selectLeadExecutive(responses, '');
+    return `**Consensus Areas:**\n${responses.map(r => `- ${r.executiveTitle} (${r.confidence}% confidence)`).join('\n')}\n\n**Key Debates:**\n${dissent && dissent.length ? dissent.map(d => `- ${d}`).join('\n') : '- None identified'}\n\n**Unified Recommendation:**\n${responses.map(r => `**${r.executiveIcon} ${r.executiveTitle}:**\n${r.perspective}`).join('\n---\n')}\n\n**Lead Executive:** ${lead}`;
   }
 
   /**

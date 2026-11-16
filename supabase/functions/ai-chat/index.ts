@@ -6067,7 +6067,7 @@ class EnhancedProviderCascade {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title, model: { providerID: 'opencode', id: model } }),
-        signal: AbortSignal.timeout(20000),
+        signal: AbortSignal.timeout(45000),
       });
       if (!created.ok) {
         return { success: false, provider: providerName, error: `harness POST /api/session HTTP ${created.status}` };
@@ -6091,17 +6091,17 @@ class EnhancedProviderCascade {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: flatPrompt }),
-        signal: AbortSignal.timeout(20000),
+        signal: AbortSignal.timeout(45000),
       });
       if (!sent.ok) {
         return { success: false, provider: providerName, error: `harness POST /api/session/${sessionId}/prompt HTTP ${sent.status}` };
       }
 
-      const deadline = Date.now() + 60_000;
+      const deadline = Date.now() + 90_000;
       let text = '';
       while (Date.now() < deadline) {
         await new Promise(r => setTimeout(r, 1800));
-        const res = await fetch(`http://127.0.0.1:4130/api/session/${sessionId}/message`, { signal: AbortSignal.timeout(4000) });
+        const res = await fetch(`http://127.0.0.1:4130/api/session/${sessionId}/message`, { signal: AbortSignal.timeout(8000) });
         if (!res.ok) continue;
         const json: any = await res.json().catch(() => null);
         const msgs: any[] = json?.data ?? [];
