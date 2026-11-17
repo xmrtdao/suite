@@ -1465,32 +1465,70 @@ function isOpenRouterOnly(model: string): boolean {
 // outside OpenCode today, but the moment it answers it wins the top slot again).
 
 const HARD_FAIL_RE = /\b(401|402|403|404|410)\b/;
-const HARD_FAIL_COOLDOWN_MS = 10 * 60 * 1000;  // 10 min — key/quota/slug class
+// A quota is not a flaky 429. Zen's free tier answers 429 with
+// `retry-after: 11187` (~3h) and the same limit applies to every free slug, so
+// re-probing it every few minutes spends the request's whole budget on a
+// refusal that cannot change. Keep quota-class failures out of the cascade for
+// a long window and let the local fallback answer instead.
+const QUOTA_FAIL_RE = /(FreeUsageLimitError|usage limit|quota|insufficient balance)/i;
+const HARD_FAIL_COOLDOWN_MS = 10 * 60 * 1000;  // 10 min — key/slug class
+const QUOTA_COOLDOWN_MS = 30 * 60 * 1000;      // 30 min — exhausted billing window
 const SOFT_FAIL_COOLDOWN_MS = 60 * 1000;       // 1 min  — rate limit / flaky
 // Never let the breaker starve the cascade: if fewer than this many providers
 // are available, ignore cooldown and try the full list rather than give up.
+// That is only safe for SOFT cooldowns; see applyCircuitBreaker().
 const CIRCUIT_MIN_PROVIDERS = 2;
 
 type ProviderHealth = {
   failures: number;
   lastError: string;
   cooldownUntil: number;
+  hard: boolean;
 };
 
 const providerHealth = new Map<string, ProviderHealth>();
 
+function isHardFailure(error: string): boolean {
+  const e = error || '';
+  return HARD_FAIL_RE.test(e) || QUOTA_FAIL_RE.test(e);
+}
+
 function cooldownForError(error: string): number {
-  return HARD_FAIL_RE.test(error || '') ? HARD_FAIL_COOLDOWN_MS : SOFT_FAIL_COOLDOWN_MS;
+  const e = error || '';
+  if (QUOTA_FAIL_RE.test(e)) return QUOTA_COOLDOWN_MS;
+  if (HARD_FAIL_RE.test(e)) return HARD_FAIL_COOLDOWN_MS;
+  return SOFT_FAIL_COOLDOWN_MS;
 }
 
 /** Record a failed attempt and put the provider in cooldown. */
 function recordProviderFailure(provider: string, error: string): void {
   const prev = providerHealth.get(provider);
   const failures = (prev?.failures ?? 0) + 1;
+  const hard = isHardFailure(error);
   const base = cooldownForError(error);
   // Repeated failures back off further, capped at 4x the base window.
-  const cooldown = Math.min(base * Math.min(failures, 4), HARD_FAIL_COOLDOWN_MS * 4);
-  providerHealth.set(provider, { failures, lastError: (error || '').slice(0, 160), cooldownUntil: Date.now() + cooldown });
+  const cap = (hard ? QUOTA_COOLDOWN_MS : HARD_FAIL_COOLDOWN_MS) * 4;
+  const cooldown = Math.min(base * Math.min(failures, 4), cap);
+  const until = Date.now() + cooldown;
+  providerHealth.set(provider, { failures, lastError: (error || '').slice(0, 160), cooldownUntil: until, hard });
+
+  // The six `opencode_*_free` entries are one quota, not six. Zen answered
+  // `retry-after: 11187` for the API key and the OAuth token alike, so once one
+  // free slug is exhausted the other five are guaranteed refusals. Benching the
+  // family on the first quota error turns a ~30s sweep of identical 429s into a
+  // single failed probe before the local fallback answers.
+  if (QUOTA_FAIL_RE.test(error || '') && provider.startsWith('opencode_')) {
+    for (const sibling of Object.keys(AI_PROVIDERS_CONFIG)) {
+      if (sibling === provider || !sibling.startsWith('opencode_')) continue;
+      const prevSibling = providerHealth.get(sibling);
+      providerHealth.set(sibling, {
+        failures: (prevSibling?.failures ?? 0) + 1,
+        lastError: `sibling ${provider}: ${(error || '').slice(0, 120)}`,
+        cooldownUntil: until,
+        hard: true,
+      });
+    }
+  }
 }
 
 /** Record a success — clears the breaker so a recovered provider is retried at once. */
@@ -1513,8 +1551,17 @@ function isProviderCoolingDown(provider: string): boolean {
 function applyCircuitBreaker(ordered: string[]): string[] {
   const live = ordered.filter((p) => !isProviderCoolingDown(p));
   if (live.length >= CIRCUIT_MIN_PROVIDERS) return live;
-  // Everything is cooling down. Rather than fail, try them all — a stale
-  // cooldown must never be the reason a user gets no answer.
+  // Everything is cooling down. A stale SOFT cooldown must never be the reason
+  // a user gets no answer, so in that case try the full list anyway.
+  //
+  // A HARD/quota cooldown is different: the provider is not flaky, it is
+  // refusing. Re-probing it does not produce an answer — it burns the budget
+  // before the local fallback can respond, and for an exhausted quota it adds
+  // another request to the very limit that is refusing us. If every cooling
+  // provider is hard, return only the live ones (possibly none).
+  const cooling = ordered.filter((p) => providerHealth.has(p));
+  const anySoft = cooling.some((p) => providerHealth.get(p)?.hard === false);
+  if (cooling.length > 0 && !anySoft) return live;
   return ordered;
 }
 
@@ -5106,6 +5153,42 @@ interface CascadeResult {
 const LOCAL_FALLBACK_PROMPT_CAP = 9000;
 const LOCAL_FALLBACK_RECENT_TURNS = 8;
 
+// A tool menu is only useful on a turn that asks for live fleet state or an
+// action. General questions (“what is 2 plus 2?”, “what is XMRT-DAO?”) must
+// reach the model without one — otherwise a small model answers with a tool
+// call and no prose, which the front-end renders as an empty message.
+const LOCAL_TOOL_INTENT_RE = /\b(status|fleet|agents?|tasks?|mining|hashrate|health|logs?|cron|functions?|proposals?|governance|balance|wallet|dashboard|stats|metrics|report|send|email|scan|run|execute|fetch|search|list|show|find|check)\b/i;
+
+/** True when the text is only tool-call syntax/markup, i.e. not a real answer. */
+function isEffectivelyEmptyAnswer(text: string): boolean {
+  const stripped = (text || '')
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/\[[\s\S]*?\]/g, '')
+    .trim();
+  return stripped.length < 16;
+}
+
+/**
+ * Status/state questions get a live fleet snapshot and the full Eliza dossier.
+ * Everything else does not — a definition or an arithmetic question must not
+ * be answered with a fleet dump, and the extra context is most of the local
+ * model's prompt-processing time.
+ */
+function isLocalStatusQuery(query: string): boolean {
+  return !/\b(what is|what's|explain|define|describe|who is|tell me about|meaning of)\b/i.test(query)
+    && /\b(status|fleet|agents?|tasks?|mining|health|system|how (is|are)|how many)\b/i.test(query);
+}
+
+function leanLocalMessages(messages: any[]): any[] {
+  return [
+    {
+      role: 'system',
+      content: `You are ${EXECUTIVE_NAME}, ${EXECUTIVE_ROLE}. Answer the user's question directly in plain text, in at most 120 words. Do not call tools. Do not output JSON or code fences. If you do not know, say so plainly.`,
+    },
+    ...messages.filter((m: any) => m && m.role !== 'system').slice(-4),
+  ];
+}
+
 function localMessageText(m: any): string {
   if (!m) return '';
   if (typeof m.content === 'string') return m.content;
@@ -5222,7 +5305,16 @@ function buildLocalFallbackMessages(messages: any[], tools: any[] = [], liveCont
   // not also hand the small model a tool menu. gemma3 tends to call
   // fleet_pulse anyway, and the second model pass after the tool result is
   // what turned a ~30s answer into a ~200s request.
-  const manifest = liveContext ? '' : buildLocalToolManifest(tools, query);
+  //
+  // The manifest is also withheld from ordinary conversation. Measured
+  // 2026-11-16: a 1B local model handed a tool menu answered "What is 2 plus
+  // 2?" with a fenced `[{"name":"fleet_pulse"}]` call instead of the number.
+  // The call is not an answer, and the front-end strips it, so the user got an
+  // empty bubble. A tool menu belongs only on turns that actually ask for
+  // fleet state or an action.
+  const manifest = (liveContext || !LOCAL_TOOL_INTENT_RE.test(query))
+    ? ''
+    : buildLocalToolManifest(tools, query);
   const now = new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
 
   const systemParts: string[] = [
@@ -5402,7 +5494,32 @@ class EnhancedProviderCascade {
     }
     console.log(`ðŸ§­ Cascade candidates (${candidates.length}): ${candidates.join(' â†’ ')}`);
 
+    // Hard wall-clock budget for the candidate sweep. Every provider must
+    // finish (or be skipped) in time for the local fallback below to run
+    // inside the caller's poll window; a single wedged provider used to
+    // consume the whole budget on its own. `ollama_local` is exempt: it is the
+    // one provider that does not depend on somebody else's quota, and it is
+    // the whole point of having a last resort.
+    const CASCADE_BUDGET_MS = parseInt(Deno.env.get('CASCADE_BUDGET_MS') || '45000', 10);
+    const cascadeDeadline = Date.now() + CASCADE_BUDGET_MS;
+    let budgetLogged = false;
+
     for (const provider of candidates) {
+      // A sibling may have benched this one since `candidates` was built — the
+      // six opencode_*_free entries share one quota, so the first 429 must stop
+      // the other five in this same loop, not only on the next request.
+      if (provider !== 'ollama_local' && isProviderCoolingDown(provider)) {
+        console.log(`   ⏭️ ${provider} benched by a sibling failure this turn`);
+        continue;
+      }
+      if (provider !== 'ollama_local' && Date.now() >= cascadeDeadline) {
+        if (!budgetLogged) {
+          console.log(`Cascade budget (${CASCADE_BUDGET_MS}ms) reached - going straight to the local fallback`);
+          budgetLogged = true;
+        }
+        await debugLog('cascade.budget_exhausted', { attempts: this.attempts.length });
+        continue;
+      }
       const attemptStart = Date.now();
       const result = await this.callProvider(provider, messages, tools, images);
       const elapsed = Date.now() - attemptStart;
@@ -5801,8 +5918,7 @@ class EnhancedProviderCascade {
     // Only fetch a live snapshot for actual status/state questions. A broad
     // keyword match (the old LIVE_CONTEXT_REGEX) treated "What is XMRT-DAO?"
     // as a live query and returned a fleet snapshot for a definition question.
-    const isStatusQuery = !/\b(what is|what's|explain|define|describe|who is|tell me about|meaning of)\b/i.test(query)
-      && /\b(status|fleet|agents?|tasks?|mining|health|system|how (is|are)|how many)\b/i.test(query);
+    const isStatusQuery = isLocalStatusQuery(query);
 
     let liveContext = '';
     if (isStatusQuery) {
@@ -5815,39 +5931,52 @@ class EnhancedProviderCascade {
 
     // RSI Priority 1: retrieve recent learning sessions and append to liveContext
     // so the local model can learn from past mistakes.
-    try {
-      const ls = await retrieveLearningSessions('');
-      if (ls && ls.length > 0) {
-        const lessonText = ls.slice(0, 5).map((s: any, idx: number) => {
-          const lesson = s.insights?.lesson || s.insights?.description || 'No lesson';
-          return `- ${lesson}`;
-        }).join('\\n');
-        if (lessonText.length > 20) {
-          liveContext = (liveContext ? liveContext + '\\n\\n' : '') + '[LEARNING FROM PAST MISTAKES]\\n' + lessonText;
+    //
+    // Only for status/fleet turns. These blocks used to be fetched for every
+    // question, so "What is 2 plus 2?" was sent to a 1B CPU model with ~2k
+    // characters of fleet lessons and episodic memory in front of it — prompt
+    // processing is most of the 50-70s local latency, and the extra context is
+    // an invitation to answer a question the user did not ask.
+    if (isStatusQuery) {
+      try {
+        const ls = await retrieveLearningSessions('');
+        if (ls && ls.length > 0) {
+          const lessonText = ls.slice(0, 5).map((s: any) => {
+            const lesson = s.insights?.lesson || s.insights?.description || 'No lesson';
+            return `- ${lesson}`;
+          }).join('\\n');
+          if (lessonText.length > 20) {
+            liveContext = (liveContext ? liveContext + '\\n\\n' : '') + '[LEARNING FROM PAST MISTAKES]\\n' + lessonText;
+          }
         }
+      } catch (e: any) {
+        console.warn('[ai-chat] local learning session retrieval failed:', e?.message || e);
       }
-    } catch (e: any) {
-      console.warn('[ai-chat] local learning session retrieval failed:', e?.message || e);
-    }
 
-    // RSI Priority 4: retrieve episodic memory for the local model
-    try {
-      const epMem = await retrieveEpisodicMemory(query);
-      if (epMem && epMem.length > 0) {
-        const epText = epMem.slice(0, 3).map((e: any) => `- ${e.content}`).join('\\n');
-        if (epText.length > 20) {
-          liveContext = (liveContext ? liveContext + '\\n\\n' : '') + '[EPISODIC MEMORY]\\n' + epText;
+      // RSI Priority 4: retrieve episodic memory for the local model
+      try {
+        const epMem = await retrieveEpisodicMemory(query);
+        if (epMem && epMem.length > 0) {
+          const epText = epMem.slice(0, 3).map((e: any) => `- ${e.content}`).join('\\n');
+          if (epText.length > 20) {
+            liveContext = (liveContext ? liveContext + '\\n\\n' : '') + '[EPISODIC MEMORY]\\n' + epText;
+          }
         }
+      } catch (e: any) {
+        console.warn('[ai-chat] local episodic memory retrieval failed:', e?.message || e);
       }
-    } catch (e: any) {
-      console.warn('[ai-chat] local episodic memory retrieval failed:', e?.message || e);
     }
 
     // A weak local model is unreliable at narrating a live snapshot, and
     // trying to make it do so cost ~30-90s per request on this CPU. For
     // straightforward status questions we answer deterministically from the
     // snapshot we just fetched — fast, accurate, and in Eliza's voice.
-    const isPureStatus = !!liveContext;
+    // liveContext is also where the RSI learning/episodic blocks are appended,
+    // and those are added for EVERY question. Gating the deterministic status
+    // answer on `!!liveContext` therefore answered every question — "What is
+    // 2 plus 2?" included — with a fleet-status dump. Only a real status query
+    // may take the deterministic path; everything else must reach the model.
+    const isPureStatus = isStatusQuery && !!liveContext;
     if (isPureStatus) {
       const body = liveContext
         .replace(/^## LIVE FLEET SNAPSHOT[^\n]*\n*/m, '')
@@ -5863,34 +5992,74 @@ class EnhancedProviderCascade {
       };
     }
     const localMessages = compactLocalMessages(messages, tools, liveContext);
+
+    // For ordinary conversation the elaborate Eliza dossier buys nothing and
+    // costs prompt-processing time on a CPU-only 1B model — and, measured on
+    // 2026-11-16, the full prompt made gemma3-xmrt answer a plain arithmetic
+    // question with a bare newline / tool-call syntax (content_len=1), which
+    // the front-end strips into an empty bubble. Keep the dossier for
+    // fleet/status turns (where identity and grounding matter) and send a
+    // lean identity plus the last few turns for everything else.
+    const wantsTools = LOCAL_TOOL_INTENT_RE.test(query);
+    const useLeanPrompt = !isStatusQuery && !wantsTools;
+    const modelMessages = useLeanPrompt ? leanLocalMessages(localMessages) : localMessages;
+
     const localSystem = localMessages.find((m: any) => m.role === 'system')?.content || '';
     console.log(
       `[ai-chat] local prompt: chars=${localSystem.length} liveContext=${liveContext.length} ` +
-      `hasTools=${localSystem.includes('TOOLS YOU CAN ASK FOR')} hasLiveSnapshot=${localSystem.includes('LIVE FLEET SNAPSHOT')}`,
+      `lean=${useLeanPrompt} hasTools=${localSystem.includes('TOOLS YOU CAN ASK FOR')} ` +
+      `hasLiveSnapshot=${localSystem.includes('LIVE FLEET SNAPSHOT')}`,
     );
 
     try {
-      const response = await fetch(localUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model,
-          messages: localMessages,
-          max_tokens: 384,
-          temperature: 0.5,
-          stream: false
-        }),
-        signal: controller.signal
-      });
+      const runLocal = async (msgs: any[], maxTokens: number): Promise<string> => {
+        const response = await fetch(localUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model,
+            messages: msgs,
+            max_tokens: maxTokens,
+            temperature: 0.5,
+            stream: false
+          }),
+          signal: controller.signal
+        });
 
-      if (!response.ok) {
-        const errText = await response.text();
-        return { success: false, provider: 'ollama_local', error: `HTTP ${response.status}: ${errText.slice(0, 200)}` };
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`HTTP ${response.status}: ${errText.slice(0, 200)}`);
+        }
+
+        const data = await response.json();
+        const choice = data?.choices?.[0];
+        const text = choice?.message?.content || '';
+        if (!text.trim()) {
+          console.log(
+            `[ai-chat] callOllamaLocal raw empty: finish=${choice?.finish_reason} ` +
+            `msgs=${msgs.length} max_tokens=${maxTokens} usage=${JSON.stringify(data?.usage || {})} ` +
+            `message_keys=${Object.keys(choice?.message || {}).join(',')} tool_calls=${choice?.message?.tool_calls?.length ?? 0}`,
+          );
+        }
+        return text;
+      };
+
+      let content = await runLocal(modelMessages, 384);
+
+      // A last-resort answer must be text. If the model produced nothing but
+      // tool-call syntax — or nothing at all — the front-end strips it and the
+      // user sees an empty bubble, which is what makes the UI fall through to
+      // the browser WASM clerk. Retry once with a minimal plain-text prompt.
+      // Only for turns that did not ask for a tool: on a genuine tool turn the
+      // call is the intended output, not a mistake.
+      if (isEffectivelyEmptyAnswer(content) && !wantsTools) {
+        console.log('[ai-chat] callOllamaLocal: empty/tool-only answer — retrying in plain-text mode');
+        const plainMessages = leanLocalMessages(localMessages);
+        const retryContent = await runLocal(plainMessages, 256);
+        if (retryContent.trim()) content = retryContent;
       }
 
-      const data = await response.json();
-      const content = data.choices?.[0]?.message?.content || '';
-      if (!content) {
+      if (!content.trim()) {
         return { success: false, provider: 'ollama_local', error: 'Empty response from local Ollama' };
       }
 
@@ -6067,7 +6236,7 @@ class EnhancedProviderCascade {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title, model: { providerID: 'opencode', id: model } }),
-        signal: AbortSignal.timeout(45000),
+        signal: AbortSignal.timeout(20000),
       });
       if (!created.ok) {
         return { success: false, provider: providerName, error: `harness POST /api/session HTTP ${created.status}` };
@@ -6091,22 +6260,39 @@ class EnhancedProviderCascade {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: flatPrompt }),
-        signal: AbortSignal.timeout(45000),
+        signal: AbortSignal.timeout(20000),
       });
       if (!sent.ok) {
         return { success: false, provider: providerName, error: `harness POST /api/session/${sessionId}/prompt HTTP ${sent.status}` };
       }
 
-      const deadline = Date.now() + 90_000;
+      // A harness that answers at all answers in seconds, and a failed turn is
+      // a terminal answer. 90s let six dead providers burn the front-end's
+      // whole poll budget (6 x 90s) before the local fallback was reached —
+      // which is exactly what dropped UnifiedChat to its browser fallback.
+      // The /message payload carries the OUTCOME, including the provider
+      // error, so an error is returned at once (a Zen 429 arrives in ~2s)
+      // instead of being polled until the deadline.
+      const deadline = Date.now() + 30_000;
       let text = '';
       while (Date.now() < deadline) {
-        await new Promise(r => setTimeout(r, 1800));
+        await new Promise(r => setTimeout(r, 1200));
         const res = await fetch(`http://127.0.0.1:4130/api/session/${sessionId}/message`, { signal: AbortSignal.timeout(8000) });
         if (!res.ok) continue;
         const json: any = await res.json().catch(() => null);
         const msgs: any[] = json?.data ?? [];
-        const assistant = msgs.find(m => m?.type === 'assistant' && Array.isArray(m?.content));
+        const assistant = msgs.find(m => m?.type === 'assistant');
         if (assistant) {
+          if (assistant.finish === 'error' || assistant.error) {
+            const err = assistant.error ?? {};
+            const detail = err.message || err.type || assistant.finish || 'provider error';
+            const status = err.status ? ` ${err.status}` : '';
+            return {
+              success: false,
+              provider: providerName,
+              error: `harness${status} ${detail}`.slice(0, 400),
+            };
+          }
           text = (assistant?.content ?? [])
             .map((p: any) => (p?.type === 'text' || typeof p?.text === 'string') ? String(p.text ?? '') : '')
             .filter((s: string) => s.trim().length > 0)
@@ -6115,7 +6301,7 @@ class EnhancedProviderCascade {
           if (text) break;
         }
       }
-      if (!text) return { success: false, provider: providerName, error: 'harness: assistant did not answer within 60s' };
+      if (!text) return { success: false, provider: providerName, error: 'harness: assistant did not answer within 30s' };
 
       let tool_calls: any[] = [];
       const parsed = parseDeepSeekToolCalls(text) ||
@@ -7177,20 +7363,30 @@ async function callOllamaFallback(messages: any[], tools?: any[]): Promise<any> 
     // Same compact Eliza prompt as callOllamaLocal. This is a second
     // last-resort path; sending the full agent prompt here had the same
     // timeout failure.
+    //
+    // The live snapshot is only fetched for status questions. Pulling it for
+    // every query (the old behaviour) meant "what is 2 plus 2?" was answered
+    // from a fleet dump, and it made this path slower than the first local
+    // attempt it is supposed to back up.
     const lastUser = [...messages].reverse().find(m => m && m.role === 'user');
     const query = localMessageText(lastUser);
+    const statusQuery = isLocalStatusQuery(query);
     let liveContext = '';
-    try {
-      liveContext = await fetchLocalFleetContext(query, 6000);
-    } catch { /* best-effort */ }
+    if (statusQuery) {
+      try {
+        liveContext = await fetchLocalFleetContext(query, 6000);
+      } catch { /* best-effort */ }
+    }
     const localMessages = compactLocalMessages(messages, tools || [], liveContext);
+    const useLean = !statusQuery && !LOCAL_TOOL_INTENT_RE.test(query);
+    const modelMessages = useLean ? leanLocalMessages(localMessages) : localMessages;
 
     const response = await fetch(localUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model,
-        messages: localMessages,
+        messages: modelMessages,
         max_tokens: 384,
         temperature: 0.5,
         stream: false
@@ -7201,7 +7397,7 @@ async function callOllamaFallback(messages: any[], tools?: any[]): Promise<any> 
     if (response.ok) {
       const data = await response.json();
       const content = data.choices?.[0]?.message?.content || '';
-      if (content) {
+      if (content.trim()) {
         // Parse text-based tool calls
         let tool_calls: any[] = [];
         const parsed = parseDeepSeekToolCalls(content) ||
