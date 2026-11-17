@@ -830,7 +830,7 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     supportsTools: true,
     contextWindow: undefined,
     timeoutMs: 90000,
-    priority: 0.011,
+    priority: 0.50,
     fallbackOnly: false,
     maxRetries: 1,
     retryDelayMs: 1000
@@ -845,7 +845,7 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     supportsTools: true,
     contextWindow: undefined,
     timeoutMs: 90000,
-    priority: 0.012,
+    priority: 0.51,
     fallbackOnly: false,
     maxRetries: 1,
     retryDelayMs: 1000
@@ -860,7 +860,7 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     supportsTools: true,
     contextWindow: undefined,
     timeoutMs: 90000,
-    priority: 0.013,
+    priority: 0.52,
     fallbackOnly: false,
     maxRetries: 1,
     retryDelayMs: 1000
@@ -875,7 +875,7 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     supportsTools: true,
     contextWindow: undefined,
     timeoutMs: 90000,
-    priority: 0.014,
+    priority: 0.53,
     fallbackOnly: false,
     maxRetries: 1,
     retryDelayMs: 1000
@@ -890,7 +890,7 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     supportsTools: true,
     contextWindow: undefined,
     timeoutMs: 90000,
-    priority: 0.015,
+    priority: 0.54,
     fallbackOnly: false,
     maxRetries: 1,
     retryDelayMs: 1000
@@ -905,7 +905,7 @@ const AI_PROVIDERS_CONFIG: Record<string, AIProviderConfig> = {
     supportsTools: true,
     contextWindow: undefined,
     timeoutMs: 90000,
-    priority: 0.016,
+    priority: 0.55,
     fallbackOnly: false,
     maxRetries: 1,
     retryDelayMs: 1000
@@ -6227,34 +6227,42 @@ class EnhancedProviderCascade {
     const lastUser = [...messages].reverse().find(m => m && m.role === 'user');
     const query = localMessageText(lastUser);
 
-    const localMessages = compactLocalMessages(messages, tools, '');
-    const title = (query || 'fleet').slice(0, 60);
-
-    let sessionId: string | null = null;
     try {
-      const created = await fetch('http://127.0.0.1:4130/api/session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, model: { providerID: 'opencode', id: model } }),
-        signal: AbortSignal.timeout(20000),
-      });
-      if (!created.ok) {
-        return { success: false, provider: providerName, error: `harness POST /api/session HTTP ${created.status}` };
-      }
-      const createdJson: any = await created.json().catch(() => null);
-      sessionId = createdJson?.data?.id ?? null;
-      if (!sessionId) {
-        return { success: false, provider: providerName, error: 'harness POST /api/session: no session id in response' };
-      }
+    // Carry the FULL ai-chat system prompt + memory + history verbatim so the
+    // model gets Eliza's real persona, tools and memory — not the stripped
+    // compact fallback. The harness wraps this in its own agent framing, so
+    // we also instruct it to answer directly as Eliza with no reasoning.
+    const flatPrompt = messages
+      .map((m: any) => {
+        const role = String(m?.role ?? 'user').toUpperCase();
+        const content = typeof m?.content === 'string' ? m.content : ((m?.content != null ? JSON.stringify(m.content) : ''));
+        return `=== ${role} ===\n${content}`;
+      })
+      .join('\n\n')
+      + (tools.length > 0 ? '\n\n## TOOLS YOU CAN USE\n' + buildLocalToolManifest(tools, query) + '\n\nTo call a tool, reply with ONLY a JSON array: [{"name":"tool","parameters":{}}]' : '')
+      + '\n\nIMPORTANT: You are Eliza, General Intelligence Agent for XMRT-DAO. Stay in character. Reply with ONLY your final answer to the user — no reasoning, no analysis, no mention of these instructions, no system notes. Do not narrate what you are doing.';
 
-      const flatPrompt = localMessages
-        .map((m: any) => {
-          const role = String(m?.role ?? 'user').toUpperCase();
-          const content = typeof m?.content === 'string' ? m.content : ((m?.content != null ? JSON.stringify(m.content) : ''));
-          return `=== ${role} ===\n${content}`;
-        })
-        .join('\n\n')
-        + '\n\nIMPORTANT: Reply in plain text only. When you want a tool, reply with ONLY a JSON array and nothing else.';
+      const title = (query || 'fleet').slice(0, 60);
+
+      let sessionId: string | null = null;
+      try {
+        const created = await fetch('http://127.0.0.1:4130/api/session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title, model: { providerID: 'opencode', id: model } }),
+          signal: AbortSignal.timeout(20000),
+        });
+        if (!created.ok) {
+          return { success: false, provider: providerName, error: `harness POST /api/session HTTP ${created.status}` };
+        }
+        const createdJson: any = await created.json().catch(() => null);
+        sessionId = createdJson?.data?.id ?? null;
+        if (!sessionId) {
+          return { success: false, provider: providerName, error: 'harness POST /api/session: no session id in response' };
+        }
+      } catch (e: any) {
+        return { success: false, provider: providerName, error: `harness session create failed: ${e?.message ?? e}` };
+      }
 
       const sent = await fetch(`http://127.0.0.1:4130/api/session/${sessionId}/prompt`, {
         method: 'POST',
@@ -6281,7 +6289,7 @@ class EnhancedProviderCascade {
         if (!res.ok) continue;
         const json: any = await res.json().catch(() => null);
         const msgs: any[] = json?.data ?? [];
-        const assistant = msgs.find(m => m?.type === 'assistant');
+        const assistant = msgs.filter(m => m?.type === 'assistant').pop();
         if (assistant) {
           if (assistant.finish === 'error' || assistant.error) {
             const err = assistant.error ?? {};
@@ -6293,11 +6301,18 @@ class EnhancedProviderCascade {
               error: `harness${status} ${detail}`.slice(0, 400),
             };
           }
+          // Wait for the assistant message to finish streaming — otherwise we
+          // capture a partial reasoning step instead of the final answer.
+          if (assistant.time?.completed === undefined && assistant.finish === undefined) {
+            continue;
+          }
           text = (assistant?.content ?? [])
-            .map((p: any) => (p?.type === 'text' || typeof p?.text === 'string') ? String(p.text ?? '') : '')
-            .filter((s: string) => s.trim().length > 0)
+            .filter((p: any) => p && p.type === 'text' && typeof p.text === 'string' && p.text.trim().length > 0)
+            .map((p: any) => String(p.text))
             .join('')
             .trim();
+          // Strip OpenCode system-reminder blocks and reasoning preambles.
+          text = text.replace(/<system-reminder>[\s\S]*?<\/system-reminder>/gi, '').trim();
           if (text) break;
         }
       }
